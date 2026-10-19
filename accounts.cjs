@@ -49,9 +49,9 @@ function createAccounts({codexHome,bridgeHome,codexExe,spawnProcess=spawn}){
   fs.mkdirSync(home,{recursive:true});fs.writeFileSync(path.join(home,'config.toml'),'cli_auth_credentials_store = "file"\n[features]\nplugins = false\nremote_plugin = false\n[analytics]\nenabled = false\n');
   const env={...process.env,CODEX_HOME:home};for(const k of Object.keys(env))if(k.startsWith('CODEX_')&&k!=='CODEX_HOME')delete env[k];
   const child=spawnProcess(codexExe||findCodex(),['app-server'],{cwd:home,env,windowsHide:true,stdio:['pipe','pipe','pipe']});
-  const pending=new Map();let seq=0,buffer='',closed=false;
+  const pending=new Map(),exited=new Promise(resolve=>child.once('close',resolve));let seq=0,buffer='',closed=false;
   const fail=()=>{for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('官方登录进程已结束'))}pending.clear()};
-  const close=()=>{if(closed)return;closed=true;fail();child.stdin.end();child.kill()};
+  const close=()=>{if(!closed){closed=true;fail();child.stdin.end();child.kill()}return exited};
   const rpc=(method,params)=>new Promise((resolve,reject)=>{const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(Error('官方登录服务响应超时，请重试'))},45000);pending.set(id,{resolve,reject,timer});child.stdin.write(JSON.stringify({id,method,params})+'\n')});
   child.stderr.resume();child.stdout.setEncoding('utf8');
   child.stdout.on('data',chunk=>{buffer+=chunk;let at;while((at=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,at);buffer=buffer.slice(at+1);let msg;try{msg=JSON.parse(line)}catch{continue}
@@ -75,7 +75,7 @@ function createAccounts({codexHome,bridgeHome,codexExe,spawnProcess=spawn}){
   }catch(e){
    const value={...previous,status:'error',attemptedAt:new Date().toISOString(),error:e.code===-32601?'当前 Codex 版本不支持额度查询，请更新后重试。':'额度读取失败，请检查网络或重新登录后重试。'};
    writeJson(file,value);return {id,...value};
-  }finally{check?.close()}
+  }finally{await check?.close()}
  }
  async function prepare(id){
   captureCurrent();const row=load().find(a=>a.id===id);if(!row)throw Error('账号不存在，请重新选择');
@@ -93,15 +93,15 @@ function createAccounts({codexHome,bridgeHome,codexExe,spawnProcess=spawn}){
    const refreshed=readJson(authFile(id));if(identity(refreshed)?.id!==id)throw Error('返回的账号与所选账号不一致');
    return remember(refreshed,{pendingLogin:row.pendingLogin});
   }catch{throw Error('无法准备 '+row.label+' 的官方登录，请重试或点“重新登录”；本次未关闭桌面端。')}
-  finally{check.close()}
+  finally{await check.close()}
  }
- function finishLogin(message){login={...login,...message};session?.close();session=null}
+ async function finishLogin(message){const active=session;session=null;await active?.close();login={...login,...message}}
  async function startLogin({id}={}){
   if(['starting','waiting'].includes(login?.status))throw Error('请先完成或取消当前登录');
   const target=id?load().find(a=>a.id===id):null;if(id&&!target)throw Error('账号不存在');
   const home=path.join(root,'login');fs.mkdirSync(home,{recursive:true});fs.rmSync(path.join(home,'auth.json'),{force:true});
   login={status:'starting',targetId:id||null};
-  const active=session=openSession(home,msg=>{
+  const active=session=openSession(home,async msg=>{
    if(session!==active)return;
    if(msg.method==='process/exit'){finishLogin({status:'error',message:'登录已结束，请重新登录'});return}
    if(msg.method!=='account/login/completed')return;
@@ -111,13 +111,13 @@ function createAccounts({codexHome,bridgeHome,codexExe,spawnProcess=spawn}){
     if(id&&info.id!==id)throw Error('登录的是其他账号或工作区，原账号未替换，请重新选择正确账号');
     const pendingLogin=identity(readJson(liveFile))?.id===info.id;
     const row=remember(auth,{pendingLogin});fs.rmSync(path.join(home,'auth.json'),{force:true});
-    finishLogin({status:'done',accountId:row.id,message:(id?'已更新 ':'已添加 ')+row.label+'；在上方选择此账号并重启后使用。'});
+    await finishLogin({status:'done',accountId:row.id,message:(id?'已更新 ':'已添加 ')+row.label+'；在上方选择此账号并重启后使用。'});
    }catch(e){fs.rmSync(path.join(home,'auth.json'),{force:true});finishLogin({status:'error',message:e.message})}
   });
   try{await active.ready();const result=await active.rpc('account/login/start',{type:'chatgpt',appBrand:'chatgpt'});login={...login,status:'waiting',loginId:result.loginId,authUrl:result.authUrl,message:id?'请在官方页面重新登录 '+target.label+'，完成后会更新原账号。':'请在官方页面登录要添加的账号，完成后会自动加入列表。'};return {...login}}
-  catch(e){finishLogin({status:'error',message:e.message});throw e}
+  catch(e){await finishLogin({status:'error',message:e.message});throw e}
  }
- async function cancelLogin(){const active=session;session=null;try{if(active&&login?.loginId)await active.rpc('account/login/cancel',{loginId:login.loginId})}finally{active?.close();login={...login,status:'cancelled',message:'已取消登录'}}}
+ async function cancelLogin(){const active=session;session=null;try{if(active&&login?.loginId)await active.rpc('account/login/cancel',{loginId:login.loginId})}finally{await active?.close();login={...login,status:'cancelled',message:'已取消登录'}}}
  return {status,captureCurrent,apply,prepare,rename,remove,startLogin,cancelLogin,quota};
 }
 module.exports={createAccounts,identity,readJson,writeJson,quotaBuckets};
