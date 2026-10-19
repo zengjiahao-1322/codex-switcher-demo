@@ -50,4 +50,5 @@ jobs:
             verification/test-results.tap
             verification/macos-validation.json
             verification/macos-launcher.json
+            verification/macos-package.json
           retention-days: 7
