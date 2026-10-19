@@ -15,7 +15,7 @@ const freePort=()=>new Promise(resolve=>{const server=net.createServer();server.
  assert.equal(fs.readFileSync(path.join(home,'config.toml'),'utf8'),'model="package-smoke"\n');
  if(target==='darwin'){
   cp.execFileSync('/usr/bin/plutil',['-lint',path.resolve(app,'..','Info.plist')]);
-  cp.execFileSync('/usr/bin/lipo',['-verify_arch','arm64','x86_64',path.join(app,'bin','mac-process-context')]);
+  cp.execFileSync('/usr/bin/lipo',[path.join(app,'bin','mac-process-context'),'-verify_arch','arm64','x86_64']);
   for(const arch of ['arm64','x64'])assert.ok(fs.statSync(path.join(app,'runtime',arch,'node')).mode&0o111);
  }
  console.log('PASS extracted '+target+' package: service, UI, clients, empty account store, VSIX download, config preserved');
