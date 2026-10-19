@@ -1,12 +1,27 @@
-## Downloads
+# Codex Switcher 0.1 Demo
 
-- **Windows x64**: extract `codex-switcher-windows-x64.zip`, then double-click `Codex Switcher/Start.cmd`. Optional installer: `install.cmd`.
-- **macOS universal (Apple Silicon + Intel)**: extract `codex-switcher-macos-universal.zip`, move `Codex Switcher.app` to your Applications folder and open it. Optional installer: `Install.command`.
+管理 Codex 官方多账号和自定义 API，支持桌面版、VS Code / Cursor 插件，以及只安装插件的环境。官方账号额度独立刷新，切换时重新启动桌面版，并向共用配置目录的已连接插件窗口发送重载请求。
 
-Node.js and dependencies are included. Install Codex first. Add your own accounts or API configuration; no personal credentials or conversations are included.
+## 下载与启动
 
-### Demo verification
+- **Windows x64**：下载并完整解压 `codex-switcher-windows-x64.zip`，双击 `Codex Switcher/Start.cmd`。需要安装和快捷方式时运行 `install.cmd`。
+- **Mac 通用版（Apple Silicon + Intel）**：下载并解压 `codex-switcher-macos-universal.zip`，运行 `Install.command`，或打开其中的 `Codex Switcher.app`。
 
-Windows and macOS automated checks and extracted-package startup checks run before these downloads are published. Real two-account/API backend switching and short conversation continuation were verified on Windows. macOS Finder launch, Gatekeeper approval, and real signed-in desktop switching still need user-machine validation. The macOS app is not Developer ID signed or notarized; first launch may need manual approval in System Settings. Automatic security bypasses are not included.
+两个包均内置 Node.js 和依赖。请先安装 Codex 桌面版或 OpenAI 官方 Codex 编辑器扩展，首次使用添加自己的账号或 API；包内不含发布者的账号、密钥或聊天记录。随包提供 SHA-256 校验文件。
 
-See README for the configuration directory, editor companion, quota display, and known limits. Switching can interrupt running client tasks. SHA-256 files accompany both archives.
+## 本版修复
+
+- 单账号额度刷新不再卡住顶部操作，多个账号分别显示结果。
+- 修复 Mac 的进程归属、配置 profile 和对应钥匙串登录读取，保存实际配置目录。
+- 只有编辑器插件也能发现官方运行程序、发起登录和应用账号；登录启动失败后可以重试。
+- 切换时保留客户端退出前刚刷新的登录；只重载确认共用配置的插件窗口。
+- 修复 Mac 原生助手错误要求 macOS 26 的问题，编译目标固定为 macOS 12。
+- 源码统一排版，关键流程补充中文注释。
+
+## 验证范围
+
+发布前在 Windows 和 macOS 运行回归检查，并对新构建的安装包解压启动。此前 macOS 15 的 Apple Silicon / Intel 均通过 78 项回归，以及官方扩展程序发现、合成账号钥匙串、额度 RPC 并发、真实浏览器额度界面和应用入口检查。
+
+Mac 个人账号完整网页登录、真实官方额度、桌面版实际重启和实际 VS Code 窗口交互仍需用户真机验收；macOS 12 尚无实机结果。Mac 应用未签名或公证，首次打开可能需要在“系统设置 → 隐私与安全性”手动允许。
+
+本次按 0.1 作为当前 Demo 发布，标签为 `v0.1`，应用内部版本为 `0.1.0`；历史试发的 `v0.2.0` 保留。切换会中断目标客户端正在运行的任务，请先保存工作。
