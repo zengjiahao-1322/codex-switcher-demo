@@ -59,7 +59,7 @@ async function validate() {
     env: {},
     appPaths: [],
   });
-  assert.ok(executable.startsWith(extension + path.sep));
+  assert.ok(executable.startsWith(fs.realpathSync(extension) + path.sep));
   fs.chmodSync(executable, 0o755);
   const nativeVersion = cp.execFileSync(executable, ['--version'], { encoding: 'utf8' }).trim();
   record('official-extension-discovery-without-desktop-or-CODEX_EXE', {

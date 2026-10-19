@@ -39,6 +39,8 @@ jobs:
         run: node scripts/build-release.cjs darwin
       - name: Verify the extracted test package
         run: node scripts/smoke-package.cjs darwin
+      - name: Verify the packaged app entry in a minimal environment
+        run: node scripts/verify-mac-launcher.cjs
       - name: Save verification reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -47,4 +49,5 @@ jobs:
           path: |
             verification/test-results.tap
             verification/macos-validation.json
+            verification/macos-launcher.json
           retention-days: 7
