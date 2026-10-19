@@ -31,6 +31,7 @@ async function validate() {
     [
       '--fail',
       '--location',
+      '--compressed',
       '--silent',
       '--show-error',
       '--retry',
@@ -44,7 +45,9 @@ async function validate() {
     { timeout: 260000 },
   );
   const unpacked = path.join(root, 'unpacked');
-  cp.execFileSync('/usr/bin/ditto', ['-xk', archive, unpacked]);
+  // 官方 VSIX 的 ZIP 布局与应用分发包不同，使用 libarchive 兼容解包。
+  fs.mkdirSync(unpacked);
+  cp.execFileSync('/usr/bin/tar', ['-xf', archive, '-C', unpacked]);
   const extensions = path.join(root, '.vscode', 'extensions');
   fs.mkdirSync(extensions, { recursive: true });
   const extension = path.join(extensions, `openai.chatgpt-${version}`);
@@ -138,6 +141,60 @@ async function validate() {
     alternateHome,
   );
   record('configuration-home-and-profile-read');
+
+  // 钥匙串也使用独立测试文件与合成登录，完成后恢复原搜索列表。
+  // 此处验证的是系统钥匙串读取链路，不接触个人账号，也不访问官方额度。
+  const keychainHome = path.join(root, 'keychain-home');
+  const keychainBridge = path.join(root, 'keychain-bridge');
+  const keychain = path.join(root, 'fixture.keychain-db');
+  fs.mkdirSync(keychainHome);
+  fs.mkdirSync(keychainBridge);
+  fs.writeFileSync(
+    path.join(keychainHome, 'config.toml'),
+    'cli_auth_credentials_store="keyring"\n',
+  );
+  const security = (...args) => cp.execFileSync('/usr/bin/security', args, { encoding: 'utf8' });
+  const originalSearch = security('list-keychains', '-d', 'user')
+    .split('\n')
+    .map((line) => line.trim().replace(/^"|"$/g, ''))
+    .filter(Boolean);
+  const storeKey =
+    'cli|' +
+    crypto.createHash('sha256').update(fs.realpathSync(keychainHome)).digest('hex').slice(0, 16);
+  const token =
+    'fixture.' +
+    Buffer.from(JSON.stringify({ email: 'keychain@example.test' })).toString('base64url') +
+    '.fixture';
+  const syntheticAuth = {
+    auth_mode: 'chatgpt',
+    tokens: { account_id: 'fixture-keychain', access_token: token, id_token: token },
+  };
+  try {
+    security('create-keychain', '-p', 'fixture-only', keychain);
+    security('unlock-keychain', '-p', 'fixture-only', keychain);
+    security(
+      'add-generic-password',
+      '-s',
+      'Codex Auth',
+      '-a',
+      storeKey,
+      '-w',
+      JSON.stringify(syntheticAuth),
+      '-T',
+      '/usr/bin/security',
+      keychain,
+    );
+    security('list-keychains', '-d', 'user', '-s', keychain, ...originalSearch);
+    const manager = createAccounts({ codexHome: keychainHome, bridgeHome: keychainBridge });
+    await manager.syncCurrent();
+    const account = manager.status().items.find((row) => row.current);
+    assert.equal(account?.email, 'keychain@example.test');
+    assert.equal(fs.existsSync(path.join(keychainHome, 'auth.json')), false);
+    record('macOS-keychain-account-read-with-synthetic-login');
+  } finally {
+    security('list-keychains', '-d', 'user', '-s', ...originalSearch);
+    if (fs.existsSync(keychain)) security('delete-keychain', keychain);
+  }
 
   // 同一份真实额度 RPC 并发场景在两种 Mac 架构分别运行。
   // 测试网络只连接本机合成服务，不使用真实账号或官方额度。
