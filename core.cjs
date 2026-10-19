@@ -24,8 +24,9 @@ function editSelection(text,selection,bridge){
  if(section[0]==='model_providers'&&section[1]==='hermes_bridge')continue;
  // 本工具管理的顶层键：model、model_provider、model_catalog_json（Codex 模型下拉列表来源）。
  if(!section.length&&/^\s*(?:model|model_provider|model_catalog_json|"model"|"model_provider"|"model_catalog_json"|'model'|'model_provider'|'model_catalog_json')\s*=/.test(s))continue;
+ if(!section.length&&selection.cli_auth_credentials_store!==undefined&&/^\s*(?:cli_auth_credentials_store|"cli_auth_credentials_store"|'cli_auth_credentials_store')\s*=/.test(s))continue;
  body+=s;}
- let prefix='';for(const key of ['model','model_provider','model_catalog_json'])if(selection[key]!==undefined)prefix+=toml.stringify({[key]:selection[key]}).trimEnd()+nl;
+ let prefix='';for(const key of ['model','model_provider','model_catalog_json','cli_auth_credentials_store'])if(selection[key]!==undefined)prefix+=toml.stringify({[key]:selection[key]}).trimEnd()+nl;
  let result=prefix+body;if(bridge){if(result&&!result.endsWith('\n'))result+=nl;result+=toml.stringify({model_providers:{hermes_bridge:bridge}}).replace(/\r?\n/g,nl);}
  toml.parse(result);return result;
 }
@@ -56,10 +57,10 @@ function applySwitch(codexHome,provider,model,bridgeHome,catalogPath){
 }
 // 切换到 Codex 官方登录（内置 openai provider，使用 auth.json 中的登录），可指定官方模型；保留 hermes_bridge 定义以便旧对话继续。
 // catalog：切回官方后 model_catalog_json 的值（用户原有设置；通常为空，即使用官方模型列表）。
-function applyOfficial(codexHome,model,catalog){
+function applyOfficial(codexHome,model,catalog,credentialsStore){
  if(typeof model!=='string'||!model.trim()||model.length>200||/[\r\n"]/.test(model))throw new Error('官方模型名称无效');
  const configPath=path.join(codexHome,'config.toml');const current=readOptional(configPath);const parsed=parseToml(current||'');
- const next=editSelection(current||'',{model:model.trim(),model_catalog_json:catalog||undefined},parsed.model_providers?.hermes_bridge);fs.mkdirSync(codexHome,{recursive:true});atomicWrite(configPath,next,current===null?undefined:current);
+ const next=editSelection(current||'',{model:model.trim(),model_catalog_json:catalog||undefined,cli_auth_credentials_store:credentialsStore},parsed.model_providers?.hermes_bridge);fs.mkdirSync(codexHome,{recursive:true});atomicWrite(configPath,next,current===null?undefined:current);
  return {ok:true,model:model.trim(),modelProvider:'openai',configPath};
 }
 // 卸载清理：Codex 未在使用本工具的配置时，移除 [model_providers.hermes_bridge]（含密钥）以及指向本工具模型目录的 model_catalog_json。
@@ -81,4 +82,4 @@ function restoreOfficial(codexHome,bridgeHome){
  return {ok:true,model:original.model,modelProvider:original.model_provider||'openai',configPath,backupPath};
 }
 function withLock(home,fn){const file=path.join(home,'.hermes-bridge.lock');let fd;try{fd=fs.openSync(file,'wx',0o600);}catch(e){if(e.code==='EEXIST')throw new Error('Bridge config is locked; review stale lock before retrying');throw e;}try{return fn();}finally{fs.closeSync(fd);fs.unlinkSync(file);}}
-module.exports={discoverProviders,publicProviders,prepareConfig,privateAcl,applySwitch:(home,p,m,b,cat)=>withLock(home,()=>applySwitch(home,p,m,b,cat)),restoreOfficial:(home,b)=>withLock(home,()=>restoreOfficial(home,b)),applyOfficial:(home,m,cat)=>withLock(home,()=>applyOfficial(home,m,cat)),cleanupBridge:(home,cat)=>withLock(home,()=>cleanupBridge(home,cat))};
+module.exports={discoverProviders,publicProviders,prepareConfig,privateAcl,applySwitch:(home,p,m,b,cat)=>withLock(home,()=>applySwitch(home,p,m,b,cat)),restoreOfficial:(home,b)=>withLock(home,()=>restoreOfficial(home,b)),applyOfficial:(home,m,cat,credentialsStore)=>withLock(home,()=>applyOfficial(home,m,cat,credentialsStore)),cleanupBridge:(home,cat)=>withLock(home,()=>cleanupBridge(home,cat))};

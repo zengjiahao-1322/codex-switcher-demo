@@ -40,7 +40,7 @@ function createAccounts({codexHome,bridgeHome,codexExe,spawnProcess=spawn}){
  function apply(id,model,catalog){
   const selected=load().find(a=>a.id===id);if(!selected)throw Error('请选择一个已保存的官方账号');
   captureCurrent();const auth=readJson(authFile(id));
-  require('./core.cjs').applyOfficial(codexHome,model,catalog);writeJson(liveFile,auth);
+  require('./core.cjs').applyOfficial(codexHome,model,catalog,'file');writeJson(liveFile,auth);
   remember(auth);fs.rmSync(path.join(bridgeHome,'current.json'),{force:true});return {id,email:selected.email,label:selected.label};
  }
  function rename(id,label){const rows=load(),row=rows.find(a=>a.id===id);if(!row)throw Error('账号不存在');row.label=String(label).trim()||row.email||'ChatGPT 账号';writeJson(indexFile,rows)}

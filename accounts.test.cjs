@@ -44,6 +44,13 @@ test('older live auth does not replace the refreshed saved login',t=>{
  older.last_refresh='2026-01-03T00:00:00Z';writeJson(path.join(f.codexHome,'auth.json'),older);a.status();assert.equal(JSON.parse(fs.readFileSync(path.join(f.bridgeHome,'accounts',row.id,'auth.json'))).tokens.refresh_token,'old-refresh');
 });
 
+test('applying a saved account selects file credentials instead of a different keyring identity',t=>{
+ const f=configured(t),a=createAccounts(f),id=a.status().items[0].id;
+ fs.writeFileSync(path.join(f.codexHome,'config.toml'),'model="official"\ncli_auth_credentials_store="keyring"\n[mcp_servers.keep]\ncommand="keep"\n');
+ a.apply(id,'official');const config=toml.parse(fs.readFileSync(path.join(f.codexHome,'config.toml'),'utf8'));
+ assert.equal(config.cli_auth_credentials_store,'file');assert.equal(config.mcp_servers.keep.command,'keep');assert.equal(identity(JSON.parse(fs.readFileSync(path.join(f.codexHome,'auth.json')))).id,id);
+});
+
 async function waitLogin(a){const end=Date.now()+5000;while(a.status().login?.status==='waiting'&&Date.now()<end)await new Promise(r=>setTimeout(r,20));return a.status()}
 test('reauthentication updates the same account without old live auth overwriting it',async t=>{
  const f=configured(t),a=loginFixture(f,{loginUser:'alice'}),row=a.status().items[0];a.rename(row.id,'主账号');

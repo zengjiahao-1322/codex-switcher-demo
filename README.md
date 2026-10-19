@@ -40,6 +40,7 @@ macOS Demo 尚无 Apple Developer 签名和公证。首次打开可能需要用�
 - macOS 数据存放在 `~/Library/Application Support/CodexApiSwitcher/`，更新 `.app` 不会清空账号。
 - `BRIDGE_HOME` 可指定独立数据目录；每个 Codex home 应使用自己的数据目录。
 - 官方授权信息由官方 Codex 写入，工具保存登录副本供切换使用，不要求提供邮箱密码。
+- 应用保存的官方账号时使用 Codex 的 `file` 凭据存储，避免系统钥匙串中的另一账号覆盖选择；不删除原钥匙串条目。
 - 首次修改前保留配置快照，不修改 Codex 的程序文件。
 - 仅监听 `127.0.0.1`。这是基础 Demo，未进行正式安全审计。
 
