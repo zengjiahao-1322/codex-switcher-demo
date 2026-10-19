@@ -36,7 +36,7 @@ try {
     $src = (Get-ChildItem (Join-Path $tmp 'src') -Directory | Select-Object -First 1).FullName
   }
 
-  $AppFiles = @(Get-Content -LiteralPath (Join-Path $src 'release-files.json') -Raw | ConvertFrom-Json)
+  $AppFiles = (Get-Content -LiteralPath (Join-Path $src 'release-files.json') -Raw | ConvertFrom-Json)
   $AppFiles += 'release-files.json'
 
   # 2. Stop a running instance before overwriting its files.
