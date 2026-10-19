@@ -62,6 +62,8 @@ GitHub Actions 会在 Windows 与 macOS 上安装固定版本的官方 Codex，�
 
 [macOS 验证记录](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39261196550)。两种架构另通过真实浏览器的额度独立刷新检查、切换时钥匙串最新登录保存，以及真实后端进程树的配置隔离/定向重载命令检查；实际 VS Code 窗口的重载交互仍需用户 Mac 复核。原生助手已固定最低编译目标 macOS 12，二进制两个架构的版本标记均已检查；本次执行系统为 macOS 15，没有实际运行 macOS 12。
 
+[0.1.1 安装与启动验证](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39266793668)：两个 Mac 架构均实际复现旧脚本在已有运行记录时的 Bash 错误，新包通过首次安装、重复安装、数据保留、安装后完整签名以及 LaunchServices 打开。系统信任评估仍拒绝未公证的 ad-hoc 应用；这些检查不代表已通过浏览器下载后的 Gatekeeper 首次授权。
+
 ## 开发与发布
 
 需要 Node.js 22.22+。安装依赖后运行：

@@ -60,7 +60,7 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-      - name: Publish both downloads
+      - name: Publish the platform downloads
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" artifacts/* --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file RELEASE.md --latest
