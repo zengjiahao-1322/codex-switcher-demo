@@ -5,13 +5,16 @@
 # Keep this file ASCII-only (Windows PowerShell 5.1 reads scripts with the ANSI code page).
 param([switch]$KeepData, [switch]$KeepCodexConfig)
 $ErrorActionPreference = 'Stop'
-$InstallDir = $PSScriptRoot
+$InstallDir = [IO.Path]::GetFullPath($PSScriptRoot)
+if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'main.cjs')) -or -not (Test-Path -LiteralPath (Join-Path $InstallDir 'package.json'))) { throw 'Run uninstall.ps1 from the complete installed app folder.' }
+$packageInfo = Get-Content -LiteralPath (Join-Path $InstallDir 'package.json') -Raw | ConvertFrom-Json
+if ($packageInfo.name -ne 'codex-api-switcher') { throw 'Unexpected uninstall folder.' }
 $node = Join-Path $InstallDir 'runtime\node.exe'
 $cli = Join-Path $InstallDir 'cli.cjs'
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
 $running = Join-Path $InstallDir 'private\running.json'
-if (Test-Path $running) { try { $r = Get-Content $running -Raw | ConvertFrom-Json; Stop-Process -Id $r.pid -Force -ErrorAction Stop; Step 'Stopped the running service' } catch {} }
+if (Test-Path $running) { try { $r = Get-Content $running -Raw | ConvertFrom-Json; $serviceProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($r.pid)"; if ($serviceProcess.ExecutablePath -ne $node -or -not $serviceProcess.CommandLine.Contains((Join-Path $InstallDir 'main.cjs'))) { throw 'Unexpected process' }; Stop-Process -Id $r.pid -Force -ErrorAction Stop; Step 'Stopped the running service' } catch {} }
 
 if ((Test-Path $node) -and (Test-Path $cli)) {
   if (-not $KeepCodexConfig) {
@@ -33,7 +36,7 @@ $startup = [Environment]::GetFolderPath('Startup'); $shell = New-Object -ComObje
 Get-ChildItem $startup -Filter '*.lnk' -ErrorAction SilentlyContinue | ForEach-Object { if ($shell.CreateShortcut($_.FullName).Arguments -like "*$InstallDir*launch-hidden.vbs*") { Remove-Item $_.FullName -Force } }
 
 Step "Removing $InstallDir"
-Get-ChildItem $InstallDir -Force | Where-Object { -not ($KeepData -and $_.Name -eq 'private') } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-if (-not $KeepData) { Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue }
+Get-ChildItem -LiteralPath $InstallDir -Force | Where-Object { -not ($KeepData -and $_.Name -eq 'private') } | ForEach-Object { $targetPath = [IO.Path]::GetFullPath($_.FullName); if ([IO.Path]::GetDirectoryName($targetPath) -ne $InstallDir) { throw 'Uninstall target outside app folder' }; Remove-Item -LiteralPath $targetPath -Recurse -Force -ErrorAction SilentlyContinue }
+if (-not $KeepData) { Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction SilentlyContinue }
 Write-Host 'Codex API Switcher has been uninstalled.' -ForegroundColor Green
 if ($KeepData) { Write-Host "Saved configs were kept in $(Join-Path $InstallDir 'private')." }

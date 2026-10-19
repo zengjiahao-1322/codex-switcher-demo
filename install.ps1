@@ -42,7 +42,7 @@ try {
   # 2. Stop a running instance before overwriting its files.
   $running = Join-Path $InstallDir 'private\running.json'
   if (Test-Path $running) {
-    try { $old = Get-Content $running -Raw | ConvertFrom-Json; Stop-Process -Id $old.pid -Force -ErrorAction Stop; Start-Sleep -Milliseconds 800; Step 'Stopped the running instance' } catch {}
+    try { $old = Get-Content $running -Raw | ConvertFrom-Json; $oldProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($old.pid)"; if ($oldProcess.ExecutablePath -ne (Join-Path $InstallDir 'runtime\node.exe') -or -not $oldProcess.CommandLine.Contains((Join-Path $InstallDir 'main.cjs'))) { throw 'Unexpected running process' }; Stop-Process -Id $old.pid -Force -ErrorAction Stop; Start-Sleep -Milliseconds 800; Step 'Stopped the running instance' } catch {}
   }
 
   # 3. Copy application files.
@@ -105,4 +105,4 @@ try {
   Write-Host "Installed Codex API Switcher to $InstallDir" -ForegroundColor Green
   if (-not $NoLaunch) { Start-Process -WindowStyle Hidden -FilePath (Join-Path $env:SystemRoot 'System32\wscript.exe') -ArgumentList ('"' + (Join-Path $InstallDir 'launch-hidden.vbs') + '"'), 'open' }
 }
-finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+finally { if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($tmp)).TrimEnd('\') -ne [IO.Path]::GetTempPath().TrimEnd('\')) { throw 'Unexpected temporary directory' }; Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }

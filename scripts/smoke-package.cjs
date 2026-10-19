@@ -13,6 +13,12 @@ const freePort=()=>new Promise(resolve=>{const server=net.createServer();server.
  assert.equal((await fetch(u.origin+'/')).status,200);assert.equal((await api('accounts')).items.length,0);await api('clients');
  const vsix=await api('companionPackage');const response=await fetch(u.origin+vsix.url);assert.equal(response.status,200);assert.ok((await response.arrayBuffer()).byteLength>1000);
  assert.equal(fs.readFileSync(path.join(home,'config.toml'),'utf8'),'model="package-smoke"\n');
+ if(target==='win32'){
+  const installed=path.join(root,'installed');
+  cp.execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(app,'install.ps1'),'-InstallDir',installed,'-NoLaunch','-NoShortcuts'],{env,stdio:'pipe',windowsHide:true,timeout:60000});
+  for(const file of ['platform.cjs','process-context.ps1','diagnostics.cjs','editor-integration.cjs','vscode-companion/extension.cjs','node_modules/smol-toml/package.json'])assert.ok(fs.existsSync(path.join(installed,file)),file+' missing after offline install');
+  assert.match(cp.execFileSync(path.join(installed,'runtime','node.exe'),['--version'],{encoding:'utf8'}),/^v22\./);
+ }
  if(target==='darwin'){
   cp.execFileSync('/usr/bin/plutil',['-lint',path.resolve(app,'..','Info.plist')]);
   cp.execFileSync('/usr/bin/lipo',[path.join(app,'bin','mac-process-context'),'-verify_arch','arm64','x86_64']);
