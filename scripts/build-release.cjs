@@ -5,7 +5,11 @@ const fs = require('node:fs'),
   crypto = require('node:crypto');
 const project = path.resolve(__dirname, '..'),
   target = process.argv[2] || process.platform,
-  out = path.resolve(process.argv[3] || path.join(project, 'dist'));
+  options = process.argv.slice(3),
+  out = path.resolve(
+    options.find((value) => !value.startsWith('--')) || path.join(project, 'dist'),
+  ),
+  macArch = options.find((value) => value.startsWith('--arch='))?.slice(7) || 'universal';
 const files = require('../release-files.json'),
   version = require('../package.json').version,
   nodeVersion = 'v22.22.0';
@@ -77,6 +81,8 @@ async function runtime(platform, arch) {
   } else if (target === 'darwin') {
     if (process.platform !== 'darwin')
       throw Error('Build the macOS native helper on a macOS host.');
+    if (!['arm64', 'x64', 'universal'].includes(macArch))
+      throw Error('Unsupported Mac architecture');
     const native = path.join(cache, 'mac-process-context');
     // 固定最低系统版本，避免助手继承构建机的 macOS 26 要求，导致旧系统无法启动。
     cp.execFileSync('clang', [
@@ -119,7 +125,8 @@ async function runtime(platform, arch) {
       { name: resources + 'mac-launcher.sh', file: path.join(project, 'mac-launcher.sh') },
       { name: 'Install.command', file: path.join(project, 'install-mac.command'), mode: 0o100755 },
     );
-    for (const arch of ['arm64', 'x64']) {
+    // 按芯片发行时只带一套 Node，避免每个用户下载另一种芯片的运行时。
+    for (const arch of macArch === 'universal' ? ['arm64', 'x64'] : [macArch]) {
       const r = await runtime('darwin', arch);
       entries.push(
         { name: resources + `runtime/${arch}/node`, file: r.exe, mode: 0o100755 },
@@ -130,7 +137,7 @@ async function runtime(platform, arch) {
       name: bundle + 'Info.plist',
       data: `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleName</key><string>Codex Switcher</string><key>CFBundleIdentifier</key><string>com.codex-switcher.demo</string><key>CFBundleExecutable</key><string>CodexSwitcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${version}</string><key>LSMinimumSystemVersion</key><string>12.0</string><key>LSUIElement</key><true/></dict></plist>`,
     });
-    filename = 'codex-switcher-macos-universal.zip';
+    filename = `codex-switcher-macos-${macArch}.zip`;
   } else throw Error('Unsupported release target: ' + target);
   const artifact = path.join(out, filename);
   if (target === 'darwin') {

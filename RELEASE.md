@@ -7,9 +7,10 @@
 ## 下载与启动
 
 - **Windows x64**：下载并完整解压 `codex-switcher-windows-x64.zip`，双击 `Codex Switcher/Start.cmd`。需要安装和快捷方式时运行 `install.cmd`。
-- **Mac 通用版（Apple Silicon + Intel）**：下载并解压 `codex-switcher-macos-universal.zip`，运行 `Install.command`，或打开其中的 `Codex Switcher.app`。
+- **Mac M 系列**：下载并解压 `codex-switcher-macos-arm64.zip`，运行 `Install.command`，或打开其中的 `Codex Switcher.app`。
+- **Mac Intel**：下载并解压 `codex-switcher-macos-x64.zip`，启动方式相同。
 
-两个包均内置 Node.js 和依赖。请先安装 Codex 桌面版或 OpenAI 官方 Codex 编辑器扩展，首次使用添加自己的账号或 API；包内不含发布者的账号、密钥或聊天记录。随包提供 SHA-256 校验文件。
+每个包均内置当前系统所需的 Node.js 和依赖，Mac 不再同时携带两套运行时。请先安装 Codex 桌面版或 OpenAI 官方 Codex 编辑器扩展，首次使用添加自己的账号或 API；包内不含发布者的账号、密钥或聊天记录。随包提供 SHA-256 校验文件。
 
 ## 本版修复
 

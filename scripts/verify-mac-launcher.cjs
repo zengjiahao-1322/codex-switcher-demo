@@ -23,7 +23,13 @@ const pause = () => new Promise((resolve) => setTimeout(resolve, 100));
     assert.equal(process.platform, 'darwin');
     cp.execFileSync('/usr/bin/ditto', [
       '-xk',
-      path.join(project, 'dist', 'codex-switcher-macos-universal.zip'),
+      path.join(
+        project,
+        'dist',
+        fs.existsSync(path.join(project, 'dist', `codex-switcher-macos-${process.arch}.zip`))
+          ? `codex-switcher-macos-${process.arch}.zip`
+          : 'codex-switcher-macos-universal.zip',
+      ),
       root,
     ]);
     const home = path.join(root, 'isolated-home');

@@ -8,7 +8,11 @@ const fs = require('node:fs'),
 const target = process.argv[2] || process.platform,
   archive = path.resolve(
     'dist',
-    target === 'darwin' ? 'codex-switcher-macos-universal.zip' : 'codex-switcher-windows-x64.zip',
+    target === 'darwin'
+      ? fs.existsSync(path.resolve('dist', `codex-switcher-macos-${process.arch}.zip`))
+        ? `codex-switcher-macos-${process.arch}.zip`
+        : 'codex-switcher-macos-universal.zip'
+      : 'codex-switcher-windows-x64.zip',
   );
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-package-'));
 let child, closed;
@@ -163,7 +167,9 @@ const freePort = () =>
         minimumVersions.every((version) => /^12\.0(?:\.0)?$/.test(version)),
         '原生助手最低版本必须为 macOS 12.0',
       );
-      for (const arch of ['arm64', 'x64'])
+      const architectures = fs.readdirSync(path.join(app, 'runtime'));
+      assert.ok(architectures.includes(process.arch), '安装包必须包含本机运行时');
+      for (const arch of architectures)
         assert.ok(fs.statSync(path.join(app, 'runtime', arch, 'node')).mode & 0o111);
       fs.mkdirSync(path.resolve('verification'), { recursive: true });
       fs.writeFileSync(

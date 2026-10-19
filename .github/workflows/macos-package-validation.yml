@@ -1,0 +1,48 @@
+name: macOS installer and app packaging
+
+# 安装与封装修改只验证受影响的发布路径，避免重复下载无关的官方扩展。
+on:
+  push:
+    branches: ['verify/macos-installer-*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+      - run: npm install --ignore-scripts
+      - run: npm install --global @openai/codex@0.163.0
+      - name: Locate the official runtime
+        shell: bash
+        run: CODEX_NPM_ROOT="$(npm root -g)" node scripts/ci-setup.cjs
+      - run: node scripts/build-release.cjs darwin --arch=${{ matrix.arch }}
+      - run: node scripts/smoke-package.cjs darwin
+      - run: node scripts/verify-mac-launcher.cjs
+      - run: node scripts/verify-mac-installer.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-package-${{ matrix.arch }}
+          path: |
+            dist/*
+            verification/macos-launcher.json
+            verification/macos-installer.json
+            verification/macos-package.json
+          retention-days: 7

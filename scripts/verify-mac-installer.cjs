@@ -30,7 +30,12 @@ const inspect = (exe, args) => {
     report.previousInstaller = { status: oldResult.status, error: oldResult.stderr };
     run('/usr/bin/ditto', [
       '-xk',
-      path.resolve('dist', 'codex-switcher-macos-universal.zip'),
+      path.resolve(
+        'dist',
+        fs.existsSync(path.resolve('dist', `codex-switcher-macos-${process.arch}.zip`))
+          ? `codex-switcher-macos-${process.arch}.zip`
+          : 'codex-switcher-macos-universal.zip',
+      ),
       root,
     ]);
     const installer = path.join(root, 'Install.command');

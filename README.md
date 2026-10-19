@@ -4,7 +4,7 @@
 
 [下载 Windows / macOS 版本](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest)
 
-[Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.1/codex-switcher-windows-x64.zip) · [Mac 通用安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.1/codex-switcher-macos-universal.zip)
+[Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.1/codex-switcher-windows-x64.zip) · [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.1/codex-switcher-macos-arm64.zip) · [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.1/codex-switcher-macos-x64.zip)
 
 ## 下载即用
 
@@ -13,13 +13,16 @@
 | 系统 | 下载文件 | 启动方式 |
 | --- | --- | --- |
 | Windows 10/11 x64 | `codex-switcher-windows-x64.zip` | 完整解压，双击 `Codex Switcher/Start.cmd` |
-| macOS 12+，Apple Silicon / Intel | `codex-switcher-macos-universal.zip` | 解压，将 `Codex Switcher.app` 放入用户的 Applications 文件夹，双击打开；也可运行同包 `Install.command` |
+| macOS 12+，Apple Silicon（M 系列） | `codex-switcher-macos-arm64.zip` | 解压并运行 `Install.command`，或打开同包 `.app` |
+| macOS 12+，Intel | `codex-switcher-macos-x64.zip` | 解压并运行 `Install.command`，或打开同包 `.app` |
 
 Windows 可选双击 `install.cmd`，安装到当前用户目录并创建桌面及开始菜单快捷方式，不需要管理员权限。直接运行解压版时，不要只取出启动脚本，整个文件夹需要保留。
 
 macOS Demo 使用 ad-hoc 签名校验应用完整性，尚无 Apple Developer ID 签名和公证。首次打开可能需要在“系统设置 → 隐私与安全性”中手动允许；本项目不自动关闭 Gatekeeper。应用默认没有 Dock 图标，启动后会打开浏览器中的本机界面。
 
-两个安装包均不携带发布者的账号、API 密钥、聊天记录或测试数据。首次使用需要添加自己的官方登录或 API 配置。
+安装包不携带发布者的账号、API 密钥、聊天记录或测试数据。首次使用需要添加自己的官方登录或 API 配置。
+
+Mac 包按芯片拆分，只携带一套 Node.js，避免原通用包同时下载两套运行时。运行时占主要体积；应用代码和依赖压缩后约 0.3 MiB。
 
 ## 能做什么
 
@@ -74,11 +77,12 @@ npm test
 
 ```sh
 node scripts/build-release.cjs win32
-# 在 macOS 上构建 Apple Silicon + Intel 通用包
-node scripts/build-release.cjs darwin
+# 在 macOS 上按芯片构建（不传 --arch 时仍可生成开发用通用包）
+node scripts/build-release.cjs darwin --arch=arm64
+node scripts/build-release.cjs darwin --arch=x64
 ```
 
-打包文件由 `release-files.json` 明确列出；`private/`、本机运行时、验证目录和研究记录不会提交。发布 `v*` 标签后，CI 仅在两平台检查和发行包启动检查均通过时创建 GitHub Release，附带两个压缩包及 SHA-256。
+打包文件由 `release-files.json` 明确列出；`private/`、本机运行时、验证目录和研究记录不会提交。发布 `v*` 标签后，CI 仅在 Windows 与两种 Mac 芯片的检查通过时创建 GitHub Release，附带各平台压缩包及 SHA-256。Mac 还会实际执行系统 Bash 安装脚本、验证安装后签名，并通过 LaunchServices 启动应用。
 
 ## 卸载
 

@@ -14,8 +14,13 @@ jobs:
         include:
           - os: windows-latest
             target: win32
+            arch: x64
           - os: macos-15
             target: darwin
+            arch: arm64
+          - os: macos-15-intel
+            target: darwin
+            arch: x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -30,15 +35,18 @@ jobs:
         shell: bash
         run: CODEX_NPM_ROOT="$(npm root -g)" node scripts/ci-setup.cjs
       - run: node test-all.cjs
-      - run: node scripts/build-release.cjs ${{ matrix.target }}
+      - run: node scripts/build-release.cjs ${{ matrix.target }} --arch=${{ matrix.arch }}
       - name: Verify extracted release
         run: node scripts/smoke-package.cjs ${{ matrix.target }}
       - name: Verify the macOS installer with the system Bash
         if: matrix.target == 'darwin'
         run: node scripts/verify-mac-installer.cjs
+      - name: Verify the macOS app through LaunchServices
+        if: matrix.target == 'darwin'
+        run: node scripts/verify-mac-launcher.cjs
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}
+          name: ${{ matrix.target }}-${{ matrix.arch }}
           path: dist/*
   publish:
     if: startsWith(github.ref, 'refs/tags/')
