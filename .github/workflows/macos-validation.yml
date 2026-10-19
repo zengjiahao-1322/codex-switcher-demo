@@ -47,6 +47,8 @@ jobs:
         run: node scripts/smoke-package.cjs darwin
       - name: Verify the packaged app entry in a minimal environment
         run: node scripts/verify-mac-launcher.cjs
+      - name: Verify installation with the macOS system Bash
+        run: node scripts/verify-mac-installer.cjs
       # 仅保存通过检查的通用测试包，不触发正式发布，也不替换已有下载。
       - name: Save the universal macOS test download
         if: matrix.arch == 'arm64'
@@ -67,6 +69,7 @@ jobs:
             verification/test-results.tap
             verification/macos-validation.json
             verification/macos-launcher.json
+            verification/macos-installer.json
             verification/macos-package.json
             verification/quota-ui.json
             verification/quota-ui-waiting.png
