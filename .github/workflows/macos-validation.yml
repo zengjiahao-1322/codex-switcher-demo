@@ -47,6 +47,17 @@ jobs:
         run: node scripts/smoke-package.cjs darwin
       - name: Verify the packaged app entry in a minimal environment
         run: node scripts/verify-mac-launcher.cjs
+      # 仅保存通过检查的通用测试包，不触发正式发布，也不替换已有下载。
+      - name: Save the universal macOS test download
+        if: matrix.arch == 'arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-switcher-macos-test-universal
+          path: |
+            dist/codex-switcher-macos-universal.zip
+            dist/codex-switcher-macos-universal.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
       - name: Save verification reports
         if: always()
         uses: actions/upload-artifact@v4
