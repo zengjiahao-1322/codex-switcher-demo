@@ -1,15 +1,141 @@
-const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
-// Locates the Codex CLI binary bundled with the Codex desktop app (newest build under %LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\codex.exe),
-// without pinning a version hash. CODEX_EXE overrides the lookup (e.g. a standalone codex.exe).
-function findCodex(root=path.join(process.env.LOCALAPPDATA||path.join(os.homedir(),'AppData','Local'),'OpenAI','Codex','bin')){
- if(process.env.CODEX_EXE&&arguments.length===0){if(fs.existsSync(process.env.CODEX_EXE))return process.env.CODEX_EXE;throw Error('CODEX_EXE 指向的文件不存在：'+process.env.CODEX_EXE)}
- if(process.platform==='darwin'&&arguments.length===0){
-  for(const app of require('./platform.cjs').macApps())for(const name of ['codex','bin/codex','resources/codex']){const file=path.join(app,'Contents','Resources',name);if(fs.existsSync(file))return file}
-  const extensions=path.join(os.homedir(),'.vscode','extensions');
-  if(fs.existsSync(extensions))for(const dir of fs.readdirSync(extensions).filter(n=>n.startsWith('openai.chatgpt-')).reverse())for(const arch of process.arch==='arm64'?['macos-aarch64','darwin-arm64']:['macos-x86_64','darwin-x64']){const file=path.join(extensions,dir,'bin',arch,'codex');if(fs.existsSync(file))return file}
-  try{const file=require('node:child_process').execFileSync('/usr/bin/which',['codex'],{encoding:'utf8'}).trim();if(file)return fs.realpathSync(file)}catch{}
-  throw Error('未找到 Codex。请安装并打开 Codex.app，或设置 CODEX_EXE。');
- }
- let files=[];try{files=fs.readdirSync(root,{withFileTypes:true}).filter(x=>x.isDirectory()).map(x=>path.join(root,x.name,'codex.exe')).filter(x=>fs.existsSync(x))}catch{}
- files.sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs);if(!files.length)throw Error('找不到 Codex 桌面内置 CLI，请安装或打开 Codex 后重试（或设置环境变量 CODEX_EXE）。');return files[0]}
-module.exports={findCodex};
+'use strict';
+const fs = require('node:fs'),
+  path = require('node:path'),
+  os = require('node:os'),
+  cp = require('node:child_process');
+const exists = (file) => {
+  try {
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
+};
+function newest(files) {
+  return files.filter(exists).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+}
+function extensionBinary(dir, platform = process.platform, arch = process.arch) {
+  // 官方 VSIX 的目录使用 macos-aarch64 / macos-x86_64，不能直接拼 Node 的 arm64。
+  const cpu = arch === 'arm64' ? 'aarch64' : 'x86_64',
+    target =
+      (platform === 'darwin' ? 'macos-' : platform === 'win32' ? 'windows-' : 'linux-') + cpu;
+  const aliases =
+    platform === 'darwin'
+      ? [target, 'darwin-' + arch, cpu + '-apple-darwin']
+      : platform === 'win32'
+        ? [target, 'win32-' + arch]
+        : [target];
+  return (
+    aliases
+      .map((a) => path.join(dir, 'bin', a, platform === 'win32' ? 'codex.exe' : 'codex'))
+      .find(exists) || null
+  );
+}
+function findCodex(options = {}) {
+  // 查找顺序：显式环境变量、用户选择、伴随扩展上报、桌面版、官方扩展、CLI。
+  // IDE 独立安装也包含完整的官方 app-server，不需要另装 Codex.app。
+  if (typeof options === 'string') {
+    const files = fs
+      .readdirSync(options, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => path.join(options, e.name, 'codex.exe'));
+    const file = newest(files)[0];
+    if (file) return file;
+    throw Error('未找到 Codex 运行程序');
+  }
+  const {
+    platform = process.platform,
+    arch = process.arch,
+    home = os.homedir(),
+    env = process.env,
+    hints = [],
+    appPaths,
+    extensionRoots,
+  } = options;
+  if (env.CODEX_EXE) {
+    if (exists(env.CODEX_EXE)) return env.CODEX_EXE;
+    throw Object.assign(Error('CODEX_EXE 指向的文件不存在，请修正该设置。'), {
+      code: 'CODEX_NOT_FOUND',
+    });
+  }
+  const name = platform === 'win32' ? 'codex.exe' : 'codex',
+    candidates = [...hints];
+  if (options.platform === undefined) {
+    const data = options.dataHome || require('./platform.cjs').dataHome();
+    try {
+      const settings = JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8'));
+      if (settings.codexExe) candidates.push(settings.codexExe);
+    } catch {}
+    const clients = path.join(data, 'clients');
+    if (fs.existsSync(clients))
+      for (const name of fs.readdirSync(clients).filter((n) => n.endsWith('.json'))) {
+        try {
+          const c = JSON.parse(fs.readFileSync(path.join(clients, name), 'utf8'));
+          // 编辑器关闭后仍可复用已确认存在的安装路径，方便独立打开切换器登录。
+          if (!c.remote && !c.wsl) {
+            if (c.codexExe) candidates.push(c.codexExe);
+            if (c.extensionPath) candidates.push(extensionBinary(c.extensionPath, platform, arch));
+          }
+        } catch {}
+      }
+  }
+  if (platform === 'darwin')
+    for (const app of appPaths || require('./platform.cjs').macApps())
+      for (const n of ['codex', 'bin/codex', 'resources/codex'])
+        candidates.push(path.join(app, 'Contents', 'Resources', n));
+  if (platform === 'win32') {
+    const root =
+      options.windowsRoot ||
+      path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'OpenAI', 'Codex', 'bin');
+    if (fs.existsSync(root))
+      candidates.push(
+        ...newest(
+          fs
+            .readdirSync(root, { withFileTypes: true })
+            .filter((e) => e.isDirectory())
+            .map((e) => path.join(root, e.name, name)),
+        ),
+      );
+  }
+  for (const root of extensionRoots ||
+    ['.vscode', '.vscode-insiders', '.cursor', '.windsurf'].map((d) =>
+      path.join(home, d, 'extensions'),
+    )) {
+    if (!fs.existsSync(root)) continue;
+    const dirs = fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name.startsWith('openai.chatgpt-'))
+      .map((e) => path.join(root, e.name));
+    dirs.sort((a, b) =>
+      path.basename(b).localeCompare(path.basename(a), undefined, { numeric: true }),
+    );
+    for (const dir of dirs) candidates.push(extensionBinary(dir, platform, arch));
+  }
+  if (platform === 'darwin')
+    candidates.push(
+      '/opt/homebrew/bin/codex',
+      '/usr/local/bin/codex',
+      path.join(home, '.local', 'bin', 'codex'),
+      path.join(home, '.npm-global', 'bin', 'codex'),
+    );
+  const found = candidates.filter(Boolean).find(exists);
+  if (found) return fs.realpathSync(found);
+  if (options.platform === undefined)
+    try {
+      const file = cp
+        .execFileSync(platform === 'win32' ? 'where.exe' : '/usr/bin/which', [name], {
+          encoding: 'utf8',
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        })
+        .trim()
+        .split(/\r?\n/)[0];
+      if (exists(file)) return fs.realpathSync(file);
+    } catch {}
+  throw Object.assign(
+    Error(
+      '未找到 Codex 运行程序。请安装 Codex 官方扩展或桌面版；已有安装可在“影响范围与其他客户端”填写程序路径。',
+    ),
+    { code: 'CODEX_NOT_FOUND' },
+  );
+}
+module.exports = { findCodex, extensionBinary };

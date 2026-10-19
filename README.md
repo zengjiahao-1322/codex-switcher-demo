@@ -6,7 +6,7 @@
 
 ## 下载即用
 
-先安装并打开一次 [Codex](https://developers.openai.com/codex/app/)。本工具随包携带 Node.js 和依赖，不需要另外安装 Node、npm 或 Python。
+先安装 [Codex 桌面版](https://developers.openai.com/codex/app/)或 OpenAI 官方 Codex 编辑器扩展，任选一种。本工具随包携带 Node.js 和依赖，不需要另外安装 Node、npm 或 Python。
 
 | 系统 | 下载文件 | 启动方式 |
 | --- | --- | --- |
@@ -21,8 +21,8 @@ macOS Demo 尚无 Apple Developer 签名和公证。首次打开可能需要用�
 
 ## 能做什么
 
-- **统一切换**：官方账号和 API 都使用“切换并重启”。准备失败时保留正在运行的桌面端；成功后应用账号和模型配置并请求重开。
-- **官方多账号**：通过 OpenAI 官方授权页添加账号，在列表中切换；添加账号不会自动启用。可显示官方接口返回的额度窗口、剩余比例、重置时间与更新时间。
+- **统一应用**：官方账号和 API 使用同一入口。桌面版重启，已连接且共用此目录的插件窗口重载；只安装插件也可添加账号、读取额度和应用配置。
+- **官方多账号**：通过 OpenAI 官方授权页添加账号，在列表中切换；添加账号不会自动启用。额度按账号独立查询，批量刷新逐个返回结果，不锁定顶部来源选择器。查询失败时保留并标注上次成功数据。
 - **API 配置**：Responses、Chat Completions、Anthropic Messages；支持直连检测和受限的本机协议转换。检测和实际使用会产生供应商费用。
 - **编辑器窗口**：安装随包提供的伴随扩展后，识别本机配置归属，仅向已确认共用配置的窗口发送重载请求。独立目录、WSL、SSH、容器环境不自动切换。
 - **旧会话诊断**：搜索本机会话、查看模型/供应商/账号差异和关联错误，导出可见对话给新会话继续。
@@ -35,12 +35,13 @@ macOS Demo 尚无 Apple Developer 签名和公证。首次打开可能需要用�
 
 ## 数据与配置
 
-- 默认 Codex 配置目录为 `~/.codex`，尊重 `CODEX_HOME`；可用 `BRIDGE_CODEX_HOME` 显式指定本工具管理的目录。
+- 默认 Codex 配置目录为 `~/.codex`，尊重 `CODEX_HOME`；“影响范围与其他客户端”可选择实际配置目录、填写自定义程序路径，选择会保存。`BRIDGE_CODEX_HOME` 仍可强制指定管理目录。
 - Windows 数据存放在工具目录的 `private/`；安装版在 `%LOCALAPPDATA%/CodexApiSwitcher/private/`。
 - macOS 数据存放在 `~/Library/Application Support/CodexApiSwitcher/`，更新 `.app` 不会清空账号。
 - `BRIDGE_HOME` 可指定独立数据目录；每个 Codex home 应使用自己的数据目录。
 - 官方授权信息由官方 Codex 写入，工具保存登录副本供切换使用，不要求提供邮箱密码。
 - 应用保存的官方账号时使用 Codex 的 `file` 凭据存储，避免系统钥匙串中的另一账号覆盖选择；不删除原钥匙串条目。
+- macOS 的 `keyring` / `auto` 配置会尝试读取对应 Codex home 的 `Codex Auth` 钥匙串条目；读取失败会提示。官方登录与额度子进程继承显式代理，未设置时采用系统手动 HTTP / SOCKS 代理；PAC 脚本不自动解析。
 - 首次修改前保留配置快照，不修改 Codex 的程序文件。
 - 仅监听 `127.0.0.1`。这是基础 Demo，未进行正式安全审计。
 
@@ -52,6 +53,8 @@ Windows 已在开发机实测真实官方扩展启动、指定窗口重载及独
 
 GitHub Actions 会在 Windows 与 macOS 上安装固定版本的官方 Codex，运行回归检查、构建发行包，再从发行包解压启动服务，验证客户端列表和伴随扩展下载。macOS 原生进程助手也在 macOS 上编译并读取真实进程验证。CI 不使用任何个人账号；macOS 的 Finder 首次授权、真实账号切换和日常桌面交互仍需真实 Mac 用户验收。
 
+本地待发布修复增加了两平台共用的“只装插件”场景：取消 `CODEX_EXE` 发现捷径、按官方扩展目录查找真实运行程序，并启动/取消真实登录 RPC。macOS 下还要求原生助手识别该 Codex 进程与实际配置目录。这批改动尚未推送，不能视为已通过 macOS CI 或真实 Mac 验收。
+
 ## 开发与发布
 
 需要 Node.js 22.22+。安装依赖后运行：
@@ -60,6 +63,8 @@ GitHub Actions 会在 Windows 与 macOS 上安装固定版本的官方 Codex，�
 npm install --ignore-scripts
 npm test
 ```
+
+本次涉及的源码按 `.prettierrc.json` 统一缩进、换行，并在账号并发、程序发现、配置归属等关键流程添加中文注释。后续修改可运行 `npx prettier --write <文件>`；格式化工具不打入运行包。
 
 需要安装官方 Codex CLI 或桌面应用；非标准安装可设置 `CODEX_EXE`。macOS 测试原生进程助手前执行 `clang -O2 mac-process-context.c -o bin/mac-process-context`（先创建 `bin/`）。
 

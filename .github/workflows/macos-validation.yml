@@ -1,0 +1,50 @@
+name: macOS validation only
+
+# 仅临时验证分支触发，不更新主分支，不创建 Release。
+on:
+  push:
+    branches: ['verify/macos-*']
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+      - run: npm install --ignore-scripts
+      - run: npm install --global @openai/codex@0.163.0
+      - name: Prepare official runtime and native process reader
+        shell: bash
+        run: CODEX_NPM_ROOT="$(npm root -g)" node scripts/ci-setup.cjs
+      - name: Run shared regression and native quota scenarios
+        run: node test-all.cjs
+      - name: Verify the actual macOS official extension
+        run: node scripts/macos-validation.cjs
+      - name: Build a local universal test package
+        run: node scripts/build-release.cjs darwin
+      - name: Verify the extracted test package
+        run: node scripts/smoke-package.cjs darwin
+      - name: Save verification reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-validation-${{ matrix.arch }}
+          path: |
+            verification/test-results.tap
+            verification/macos-validation.json
+          retention-days: 7

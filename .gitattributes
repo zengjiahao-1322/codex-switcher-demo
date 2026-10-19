@@ -6,3 +6,7 @@
 *.sh text eol=lf
 *.command text eol=lf
 *.c text eol=lf
+*.cjs text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.html text eol=lf

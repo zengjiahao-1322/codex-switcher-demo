@@ -36,6 +36,7 @@
 !/CHANGELOG.md
 !/.gitignore
 !/.gitattributes
+!/.prettierrc.json
 !/release-files.json
 !/mac-process-context.c
 !/mac-launcher.sh
@@ -49,6 +50,7 @@
 !/core.test.cjs
 !/diagnostics.test.cjs
 !/main.test.cjs
+!/native-quota.test.cjs
 !/mcp-server.test.cjs
 !/platform.test.cjs
 !/probe-errors.test.cjs

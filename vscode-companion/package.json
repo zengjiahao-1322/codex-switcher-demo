@@ -1,13 +1,36 @@
 {
- "name":"codex-switcher-companion",
- "publisher":"codex-switcher-demo",
- "displayName":"Codex Switcher Companion",
- "description":"Connect this editor window to the local Codex switcher and reload it after a source switch.",
- "version":"0.1.0",
- "engines":{"vscode":"^1.85.0"},
- "main":"./extension.cjs",
- "activationEvents":["onStartupFinished"],
- "extensionKind":["ui"],
- "contributes":{"commands":[{"command":"codexSwitcher.connect","title":"Codex Switcher: Connect this window"}],"configuration":{"title":"Codex Switcher","properties":{"codexSwitcher.connectionFile":{"type":"string","default":"","description":"Optional local switcher connection.json path."}}}},
- "license":"MIT"
+  "name": "codex-switcher-companion",
+  "publisher": "codex-switcher-demo",
+  "displayName": "Codex Switcher Companion",
+  "description": "Connect this editor window to the local Codex switcher and reload it after a source switch.",
+  "version": "0.1.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./extension.cjs",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codexSwitcher.connect",
+        "title": "Codex Switcher: Connect this window"
+      }
+    ],
+    "configuration": {
+      "title": "Codex Switcher",
+      "properties": {
+        "codexSwitcher.connectionFile": {
+          "type": "string",
+          "default": "",
+          "description": "Optional local switcher connection.json path."
+        }
+      }
+    }
+  },
+  "license": "MIT"
 }

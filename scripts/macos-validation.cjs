@@ -1,0 +1,175 @@
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const cp = require('node:child_process');
+const crypto = require('node:crypto');
+const assert = require('node:assert/strict');
+const { findCodex } = require('../runtime.cjs');
+const { createAccounts } = require('../accounts.cjs');
+const { sameHome, configLayers } = require('../client-status.cjs');
+
+const project = path.resolve(__dirname, '..');
+const reportFile = path.join(project, 'verification', 'macos-validation.json');
+const report = { platform: process.platform, arch: process.arch, checks: [] };
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-macos-validation-'));
+const record = (name, details = {}) => {
+  report.checks.push({ name, passed: true, ...details });
+};
+
+async function validate() {
+  assert.equal(process.platform, 'darwin', '此验证必须在真实 macOS 执行');
+  const target = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+  const version = '26.1007.21434';
+  const archive = path.join(root, 'official-codex.vsix');
+  const url = `https://marketplace.visualstudio.com/_apis/public/gallery/publishers/openai/vsextensions/chatgpt/${version}/vspackage?targetPlatform=${target}`;
+
+  // 从官方 Marketplace 取得对应架构的真实 VSIX，不以桌面版二进制冒充插件版。
+  cp.execFileSync(
+    '/usr/bin/curl',
+    [
+      '--fail',
+      '--location',
+      '--silent',
+      '--show-error',
+      '--retry',
+      '2',
+      '--max-time',
+      '240',
+      url,
+      '-o',
+      archive,
+    ],
+    { timeout: 260000 },
+  );
+  const unpacked = path.join(root, 'unpacked');
+  cp.execFileSync('/usr/bin/ditto', ['-xk', archive, unpacked]);
+  const extensions = path.join(root, '.vscode', 'extensions');
+  fs.mkdirSync(extensions, { recursive: true });
+  const extension = path.join(extensions, `openai.chatgpt-${version}`);
+  fs.renameSync(path.join(unpacked, 'extension'), extension);
+  const executable = findCodex({
+    platform: 'darwin',
+    arch: process.arch,
+    home: root,
+    env: {},
+    appPaths: [],
+  });
+  assert.ok(executable.startsWith(extension + path.sep));
+  fs.chmodSync(executable, 0o755);
+  const nativeVersion = cp.execFileSync(executable, ['--version'], { encoding: 'utf8' }).trim();
+  record('official-extension-discovery-without-desktop-or-CODEX_EXE', {
+    extensionVersion: version,
+    nativeVersion,
+    archiveSha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex'),
+  });
+
+  // 显式 CODEX_HOME 与继承 HOME 的默认目录分别验证；两种启动方式都使用真实插件程序。
+  for (const mode of ['explicit-home', 'default-home']) {
+    const home = path.join(root, mode);
+    const bridge = path.join(home, 'bridge');
+    fs.mkdirSync(bridge, { recursive: true });
+    const defaultHome = path.join(home, '.codex');
+    fs.mkdirSync(defaultHome);
+    fs.writeFileSync(
+      path.join(defaultHome, 'config.toml'),
+      '[features]\nplugins=false\nremote_plugin=false\n',
+    );
+    let child;
+    const manager = createAccounts({
+      codexHome: defaultHome,
+      bridgeHome: bridge,
+      codexExe: executable,
+      spawnProcess: (exe, args, options) => {
+        const env = { ...options.env, HOME: home };
+        if (mode === 'default-home') delete env.CODEX_HOME;
+        child = cp.spawn(exe, ['--model', 'mac-fixture', ...args], { ...options, env });
+        return child;
+      },
+    });
+    try {
+      const login = await manager.startLogin();
+      assert.equal(login.status, 'waiting');
+      assert.equal(new URL(login.authUrl).protocol, 'https:');
+      const raw = cp.execFileSync(
+        path.join(project, 'bin', 'mac-process-context'),
+        [String(child.pid)],
+        { encoding: 'utf8' },
+      );
+      const context = JSON.parse(raw);
+      const expected =
+        mode === 'default-home' ? defaultHome : path.join(bridge, 'accounts', 'login');
+      assert.equal(context.ok, true, context.error);
+      assert.ok(sameHome(context.home, expected));
+      assert.equal(context.overrides.model, 'mac-fixture');
+      const discovered = require('../mac-processes.cjs')
+        .scan()
+        .processes.find((row) => row.pid === child.pid);
+      assert.ok(discovered?.context.ok, '真实 Codex 进程必须被 ps 与原生助手共同识别');
+      assert.ok(sameHome(discovered.context.home, expected));
+      record(`native-process-and-login-${mode}`);
+    } finally {
+      await manager.cancelLogin();
+    }
+    assert.equal(manager.status().items.length, 0);
+  }
+
+  const selectedHome = path.join(root, 'selected-home');
+  const alternateHome = path.join(root, 'alternate-home');
+  const bridgeHome = path.join(root, 'service');
+  for (const dir of [selectedHome, alternateHome, bridgeHome]) fs.mkdirSync(dir);
+  fs.writeFileSync(
+    path.join(selectedHome, 'config.toml'),
+    'model="first-model"\n[profiles.review]\nmodel="profile-model"\n',
+  );
+  fs.writeFileSync(path.join(alternateHome, 'config.toml'), 'model="second-model"\n');
+  const service = require('../service.cjs').createService({ codexHome: selectedHome, bridgeHome });
+  assert.equal((await service.state()).current.model, 'first-model');
+  assert.equal(
+    configLayers(selectedHome, null, 'review').find((row) => row.source === '启动配置档').values
+      .model,
+    'profile-model',
+  );
+  await service.actions.setEnvironment({ home: alternateHome, codexExe: executable });
+  assert.equal((await service.state()).current.model, 'second-model');
+  assert.equal(
+    JSON.parse(fs.readFileSync(path.join(bridgeHome, 'settings.json'))).codexHome,
+    alternateHome,
+  );
+  record('configuration-home-and-profile-read');
+
+  // 同一份真实额度 RPC 并发场景在两种 Mac 架构分别运行。
+  // 测试网络只连接本机合成服务，不使用真实账号或官方额度。
+  const result = cp.spawnSync(
+    process.execPath,
+    ['--test', '--test-timeout=120000', 'native-quota.test.cjs'],
+    {
+      cwd: project,
+      env: { ...process.env, CODEX_EXE: executable },
+      encoding: 'utf8',
+      timeout: 130000,
+    },
+  );
+  process.stdout.write(result.stdout || '');
+  process.stderr.write(result.stderr || '');
+  assert.equal(result.status, 0, '官方插件内置程序的额度并发验证失败');
+  record('official-extension-native-quota-concurrency-with-local-fixtures');
+}
+
+(async () => {
+  try {
+    await validate();
+    report.passed = true;
+  } catch (error) {
+    report.passed = false;
+    report.error = error.message;
+    process.exitCode = 1;
+  } finally {
+    report.checkedAt = new Date().toISOString();
+    fs.mkdirSync(path.dirname(reportFile), { recursive: true });
+    fs.writeFileSync(reportFile, JSON.stringify(report, null, 2));
+    await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+  console.log(JSON.stringify(report));
+})();
