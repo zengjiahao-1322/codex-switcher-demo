@@ -1,0 +1,8 @@
+# Windows scripts are stored with CRLF and never converted, so downloads and archives work as-is.
+*.cmd -text
+*.ps1 -text
+*.vbs -text
+* text=auto
+*.sh text eol=lf
+*.command text eol=lf
+*.c text eol=lf

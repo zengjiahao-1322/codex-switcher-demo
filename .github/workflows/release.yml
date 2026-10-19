@@ -1,0 +1,53 @@
+name: Verify and package
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win32
+          - os: macos-latest
+            target: darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+      - run: npm install --ignore-scripts
+      - run: npm install --global @openai/codex@0.163.0
+      - name: Locate native test runtime
+        shell: bash
+        run: CODEX_NPM_ROOT="$(npm root -g)" node scripts/ci-setup.cjs
+      - run: node test-all.cjs
+      - run: node scripts/build-release.cjs ${{ matrix.target }}
+      - name: Verify extracted release
+        run: node scripts/smoke-package.cjs ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish both downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" artifacts/* --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file RELEASE.md

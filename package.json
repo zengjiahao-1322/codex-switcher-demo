@@ -1,0 +1,18 @@
+{
+  "name": "codex-api-switcher",
+  "version": "0.2.0",
+  "description": "Codex accounts and API switcher for Windows and macOS, with per-window reload and quota display.",
+  "license": "MIT",
+  "private": true,
+  "os": ["win32", "darwin"],
+  "engines": { "node": ">=22" },
+  "main": "main.cjs",
+  "scripts": {
+    "start": "node main.cjs",
+    "test": "node test-all.cjs"
+  },
+  "dependencies": {
+    "smol-toml": "1.9.1",
+    "yaml": "2.9.1"
+  }
+}
