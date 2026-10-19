@@ -55,7 +55,7 @@ GitHub Actions 会在 Windows 与 macOS 上安装固定版本的官方 Codex，�
 
 待发布修复已在临时分支的 macOS 15 Apple Silicon / Intel 环境验证，每种架构 78 项回归检查全部通过、无跳过。实际下载官方 VSIX，验证不依赖桌面版或 `CODEX_EXE` 的程序发现、真实 Codex 进程归属、默认/自定义配置目录、钥匙串读取、登录启动/取消，以及官方运行程序的额度 RPC 并发。打包后的 `.app` 入口也在最小环境中启动通过。额度测试使用合成账号与本机响应，未上传个人凭据，个人账号完整登录和真实额度仍需在用户 Mac 上复核。
 
-[macOS 验证记录](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39257985423)。原生助手已固定最低编译目标 macOS 12，二进制两个架构的版本标记均已检查；本次执行系统为 macOS 15，没有实际运行 macOS 12。修改仅位于 `verify/macos-20261019`，未合入主分支或替换 Release。
+[macOS 验证记录](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39259605756)。两种架构另通过真实浏览器的额度独立刷新检查、切换时钥匙串最新登录保存，以及真实后端进程树的配置隔离/定向重载命令检查；实际 VS Code 窗口的重载交互仍需用户 Mac 复核。原生助手已固定最低编译目标 macOS 12，二进制两个架构的版本标记均已检查；本次执行系统为 macOS 15，没有实际运行 macOS 12。修改仅位于 `verify/macos-20261019`，未合入主分支或替换 Release。
 
 ## 开发与发布
 
