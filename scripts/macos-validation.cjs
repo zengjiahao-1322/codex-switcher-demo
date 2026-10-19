@@ -142,6 +142,90 @@ async function validate() {
   );
   record('configuration-home-and-profile-read');
 
+  // 启动两棵独立进程树，分别承载共享目录与独立目录的真实官方后端。
+  // 验证 Mac 的父子进程关联不会把所有编辑器窗口一起重载。
+  const wrapperFile = path.join(root, 'editor-process-fixture.cjs');
+  fs.writeFileSync(
+    wrapperFile,
+    `
+    const {spawn}=require('node:child_process');
+    const backend=spawn(process.argv[2],['app-server'],{stdio:['pipe','pipe','inherit']});
+    process.stdin.pipe(backend.stdin);backend.stdout.pipe(process.stdout);
+    process.on('SIGTERM',()=>{backend.kill();backend.once('close',()=>process.exit(0))});
+    backend.on('exit',()=>process.exit(0));
+  `,
+  );
+  const editorProcesses = [];
+  try {
+    for (const [label, home] of [
+      ['shared', selectedHome],
+      ['separate', alternateHome],
+    ]) {
+      const child = cp.spawn(process.execPath, [wrapperFile, executable], {
+        cwd: root,
+        env: { ...process.env, CODEX_HOME: home },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const closed = new Promise((resolve) => child.once('close', resolve));
+      editorProcesses.push({ child, closed });
+      child.stderr.resume();
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(Error('编辑器后端初始化超时')), 10000);
+        let buffer = '';
+        child.stdout.on('data', (chunk) => {
+          buffer += chunk;
+          const line = buffer.split('\n').find((value) => value.includes('"id":1'));
+          if (!line) return;
+          try {
+            const message = JSON.parse(line);
+            if (message.result) {
+              clearTimeout(timer);
+              resolve();
+            }
+          } catch {}
+        });
+        child.stdin.write(
+          JSON.stringify({
+            id: 1,
+            method: 'initialize',
+            params: { clientInfo: { name: 'editor-fixture', version: '1' } },
+          }) + '\n',
+        );
+      });
+      require('../client-status.cjs').heartbeat(bridgeHome, {
+        id: `mac-editor-${label}`,
+        pid: child.pid,
+        name: 'VS Code fixture',
+        home,
+      });
+    }
+    const clientStatus = require('../client-status.cjs');
+    const rows = clientStatus.clientStatus(selectedHome, bridgeHome).clients;
+    assert.equal(rows.find((row) => row.id === 'editor-mac-editor-shared')?.canReload, true);
+    assert.equal(rows.find((row) => row.id === 'editor-mac-editor-separate')?.canReload, false);
+    assert.equal(clientStatus.requestReload(selectedHome, bridgeHome).count, 1);
+    const sharedFile = path.join(bridgeHome, 'clients', 'mac-editor-shared.json');
+    const command = JSON.parse(fs.readFileSync(sharedFile)).command;
+    assert.equal(command.type, 'reload');
+    assert.equal(
+      JSON.parse(fs.readFileSync(path.join(bridgeHome, 'clients', 'mac-editor-separate.json')))
+        .command,
+      null,
+    );
+    clientStatus.heartbeat(bridgeHome, {
+      id: 'mac-editor-shared',
+      pid: editorProcesses[0].child.pid,
+      home: selectedHome,
+      ack: command.id,
+      ackStatus: 'reload_requested',
+    });
+    assert.equal(JSON.parse(fs.readFileSync(sharedFile)).lastAck.status, 'reload_requested');
+    record('native-editor-backend-home-isolation-and-reload-command');
+  } finally {
+    for (const { child } of editorProcesses) child.kill();
+    await Promise.all(editorProcesses.map(({ closed }) => closed));
+  }
+
   // 钥匙串也使用独立测试文件与合成登录，完成后恢复原搜索列表。
   // 此处验证的是系统钥匙串读取链路，不接触个人账号，也不访问官方额度。
   const keychainHome = path.join(root, 'keychain-home');
