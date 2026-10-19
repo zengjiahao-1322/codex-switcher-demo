@@ -5,7 +5,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'switcher-package-'));let child,
 const freePort=()=>new Promise(resolve=>{const server=net.createServer();server.listen(0,'127.0.0.1',()=>{const port=server.address().port;server.close(()=>resolve(port))})});
 (async()=>{try{
  if(target==='darwin')cp.execFileSync('/usr/bin/ditto',['-xk',archive,root]);
- else cp.execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command','Expand-Archive -LiteralPath $env:SWITCHER_SMOKE_ZIP -DestinationPath $env:SWITCHER_SMOKE_ROOT'],{env:{...process.env,SWITCHER_SMOKE_ZIP:archive,SWITCHER_SMOKE_ROOT:root},windowsHide:true});
+ else{const env={...process.env,SWITCHER_SMOKE_ZIP:archive,SWITCHER_SMOKE_ROOT:root};delete env.PSModulePath;cp.execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command','Expand-Archive -LiteralPath $env:SWITCHER_SMOKE_ZIP -DestinationPath $env:SWITCHER_SMOKE_ROOT'],{env,windowsHide:true})}
  const app=target==='darwin'?path.join(root,'Codex Switcher.app','Contents','Resources'):path.join(root,'Codex Switcher'),node=target==='darwin'?path.join(app,'runtime',process.arch,'node'):path.join(app,'runtime','node.exe'),home=path.join(root,'home'),bridge=path.join(root,'private');fs.mkdirSync(home);fs.mkdirSync(bridge);
  fs.writeFileSync(path.join(home,'config.toml'),'model="package-smoke"\n');const env={...process.env,BRIDGE_HOME:bridge,BRIDGE_CODEX_HOME:home,BRIDGE_HERMES_HOME:path.join(root,'no-hermes'),BRIDGE_DISCOVERY_DIR:path.join(root,'discovery'),BRIDGE_PORT:String(await freePort())};
  child=cp.spawn(node,[path.join(app,'main.cjs'),'--no-open'],{env,windowsHide:true,stdio:['ignore','pipe','pipe']});closed=new Promise(r=>child.once('close',r));
