@@ -53,7 +53,9 @@ Windows 已在开发机实测真实官方扩展启动、指定窗口重载及独
 
 GitHub Actions 会在 Windows 与 macOS 上安装固定版本的官方 Codex，运行回归检查、构建发行包，再从发行包解压启动服务，验证客户端列表和伴随扩展下载。macOS 原生进程助手也在 macOS 上编译并读取真实进程验证。CI 不使用任何个人账号；macOS 的 Finder 首次授权、真实账号切换和日常桌面交互仍需真实 Mac 用户验收。
 
-本地待发布修复增加了两平台共用的“只装插件”场景：取消 `CODEX_EXE` 发现捷径、按官方扩展目录查找真实运行程序，并启动/取消真实登录 RPC。macOS 下还要求原生助手识别该 Codex 进程与实际配置目录。这批改动尚未推送，不能视为已通过 macOS CI 或真实 Mac 验收。
+待发布修复已在临时分支的 macOS 15 Apple Silicon / Intel 环境验证，每种架构 78 项回归检查全部通过、无跳过。实际下载官方 VSIX，验证不依赖桌面版或 `CODEX_EXE` 的程序发现、真实 Codex 进程归属、默认/自定义配置目录、钥匙串读取、登录启动/取消，以及官方运行程序的额度 RPC 并发。打包后的 `.app` 入口也在最小环境中启动通过。额度测试使用合成账号与本机响应，未上传个人凭据，个人账号完整登录和真实额度仍需在用户 Mac 上复核。
+
+[macOS 验证记录](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39257985423)。原生助手已固定最低编译目标 macOS 12，二进制两个架构的版本标记均已检查；本次执行系统为 macOS 15，没有实际运行 macOS 12。修改仅位于 `verify/macos-20261019`，未合入主分支或替换 Release。
 
 ## 开发与发布
 
@@ -66,7 +68,7 @@ npm test
 
 本次涉及的源码按 `.prettierrc.json` 统一缩进、换行，并在账号并发、程序发现、配置归属等关键流程添加中文注释。后续修改可运行 `npx prettier --write <文件>`；格式化工具不打入运行包。
 
-需要安装官方 Codex CLI 或桌面应用；非标准安装可设置 `CODEX_EXE`。macOS 测试原生进程助手前执行 `clang -O2 mac-process-context.c -o bin/mac-process-context`（先创建 `bin/`）。
+需要安装官方 Codex CLI、桌面应用或官方编辑器扩展；非标准安装可设置 `CODEX_EXE`。macOS 测试原生进程助手前执行 `clang -O2 -mmacosx-version-min=12.0 mac-process-context.c -o bin/mac-process-context`（先创建 `bin/`）。
 
 ```sh
 node scripts/build-release.cjs win32
