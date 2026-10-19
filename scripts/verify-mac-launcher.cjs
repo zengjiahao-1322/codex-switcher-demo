@@ -8,8 +8,8 @@ const net = require('node:net');
 const assert = require('node:assert/strict');
 const { findCodex } = require('../runtime.cjs');
 
-// 从打包后的 .app 入口启动，使用类似 Finder 的最小环境，
-// 验证没有终端 PATH / CODEX_HOME / CODEX_EXE 时仍能发现官方插件。
+// 通过 LaunchServices 打开打包后的 .app，覆盖 Finder 双击所用的系统启动入口。
+// 用 --env 指定独立 HOME，避免测试写入运行机的默认账号和配置。
 const project = path.resolve(__dirname, '..');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-mac-launcher-'));
 const reportFile = path.join(project, 'verification', 'macos-launcher.json');
@@ -51,17 +51,34 @@ const pause = () => new Promise((resolve) => setTimeout(resolve, 100));
         server.close(() => resolve(value));
       });
     });
-    const launcher = path.join(root, 'Codex Switcher.app', 'Contents', 'MacOS', 'CodexSwitcher');
-    cp.execFileSync(launcher, ['--no-open'], {
-      env: {
-        HOME: home,
-        PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
-        LANG: 'en_US.UTF-8',
-        TMPDIR: os.tmpdir(),
-        BRIDGE_PORT: String(port),
+    const app = path.join(root, 'Codex Switcher.app');
+    cp.execFileSync(
+      '/usr/bin/open',
+      [
+        '-n',
+        '-g',
+        '--env',
+        'HOME=' + home,
+        '--env',
+        'PATH=/usr/bin:/bin:/usr/sbin:/sbin',
+        '--env',
+        'BRIDGE_PORT=' + port,
+        '-a',
+        app,
+        '--args',
+        '--no-open',
+      ],
+      {
+        env: {
+          HOME: home,
+          PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+          LANG: 'en_US.UTF-8',
+          TMPDIR: os.tmpdir(),
+          BRIDGE_PORT: String(port),
+        },
+        timeout: 10000,
       },
-      timeout: 10000,
-    });
+    );
     runningFile = path.join(
       home,
       'Library',
@@ -95,6 +112,7 @@ const pause = () => new Promise((resolve) => setTimeout(resolve, 100));
     report.passed = true;
     report.checks = [
       'packaged-app-entry',
+      'LaunchServices-open',
       'minimal-Finder-like-environment',
       'IDE-only-runtime-discovery',
       'default-configuration-read',
