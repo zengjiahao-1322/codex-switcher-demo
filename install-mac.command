@@ -14,9 +14,22 @@ mkdir -p "$HOME/Applications"
 if [ ! -d "$SOURCE" ]; then echo 'Missing Codex Switcher.app beside installer'; exit 1; fi
 DATA="$HOME/Library/Application Support/CodexApiSwitcher"
 if [ -f "$DATA/running.json" ]; then
- NODE="$SOURCE/Contents/Resources/runtime/$ARCH/node"
- "$NODE" - "$DATA/running.json" <<'JS'
-const fs=require('fs'),cp=require('child_process');try{const r=JSON.parse(fs.readFileSync(process.argv[2]));const command=cp.execFileSync('/bin/ps',['-p',String(r.pid),'-o','command='],{encoding:'utf8'});if(command.includes('/Codex Switcher.app/Contents/Resources/main.cjs'))process.kill(r.pid,'SIGTERM')}catch{}
+  NODE="$SOURCE/Contents/Resources/runtime/$ARCH/node"
+  "$NODE" - "$DATA/running.json" <<'JS'
+const fs = require('fs');
+const cp = require('child_process');
+try {
+  const running = JSON.parse(fs.readFileSync(process.argv[2]));
+  const command = cp.execFileSync('/bin/ps', ['-p', String(running.pid), '-o', 'command='], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  if (command.includes('/Codex Switcher.app/Contents/Resources/main.cjs')) {
+    process.kill(running.pid, 'SIGTERM');
+  }
+} catch {
+  // 旧服务已退出或运行记录失效时，继续安装。
+}
 JS
 fi
 /usr/bin/ditto "$SOURCE" "$TARGET"

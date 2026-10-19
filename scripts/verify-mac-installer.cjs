@@ -10,9 +10,12 @@ const assert = require('node:assert/strict');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-installer-'));
 const report = { platform: process.platform, arch: process.arch };
 const reportFile = path.resolve('verification', 'macos-installer.json');
-const run = (exe, args, options = {}) => cp.execFileSync(exe, args, {
-  encoding: 'utf8', timeout: 30000, ...options,
-});
+const run = (exe, args, options = {}) =>
+  cp.execFileSync(exe, args, {
+    encoding: 'utf8',
+    timeout: 30000,
+    ...options,
+  });
 const inspect = (exe, args) => {
   const result = cp.spawnSync(exe, args, { encoding: 'utf8', timeout: 30000 });
   return { status: result.status, output: (result.stdout || '') + (result.stderr || '') };
@@ -22,7 +25,14 @@ const inspect = (exe, args) => {
   try {
     assert.equal(process.platform, 'darwin');
     report.bash = run('/bin/bash', ['--version']).split('\n')[0];
-    run('/usr/bin/ditto', ['-xk', path.resolve('dist', 'codex-switcher-macos-universal.zip'), root]);
+    const oldInstaller = run('git', ['show', 'v0.1:install-mac.command']);
+    const oldResult = cp.spawnSync('/bin/bash', ['-n'], { input: oldInstaller, encoding: 'utf8' });
+    report.previousInstaller = { status: oldResult.status, error: oldResult.stderr };
+    run('/usr/bin/ditto', [
+      '-xk',
+      path.resolve('dist', 'codex-switcher-macos-universal.zip'),
+      root,
+    ]);
     const installer = path.join(root, 'Install.command');
     run('/bin/bash', ['-n', installer]);
     const home = path.join(root, 'home with spaces');
@@ -37,10 +47,29 @@ const inspect = (exe, args) => {
     const app = path.join(home, 'Applications', 'Codex Switcher.app');
     assert.ok(fs.existsSync(path.join(app, 'Contents', 'MacOS', 'CodexSwitcher')));
     assert.equal(fs.readFileSync(path.join(data, 'keep.txt'), 'utf8'), 'account-data-marker');
-    report.signature = inspect('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=4', app]);
+    report.signature = inspect('/usr/bin/codesign', [
+      '--verify',
+      '--deep',
+      '--strict',
+      '--verbose=4',
+      app,
+    ]);
+    assert.equal(report.signature.status, 0, '安装后应用的完整签名必须有效');
+    const mainExecutable = run('/usr/bin/file', [
+      path.join(app, 'Contents', 'MacOS', 'CodexSwitcher'),
+    ]);
+    assert.match(mainExecutable, /Mach-O universal binary/);
     report.assessment = inspect('/usr/sbin/spctl', ['--assess', '--type', 'execute', '-vv', app]);
     report.passed = true;
-    report.checks = ['system-bash-syntax', 'first-install', 'repeat-install', 'existing-running-record', 'data-preserved'];
+    report.checks = [
+      'system-bash-syntax',
+      'first-install',
+      'repeat-install',
+      'existing-running-record',
+      'data-preserved',
+      'valid-bundle-signature',
+      'native-universal-launcher',
+    ];
   } catch (error) {
     report.passed = false;
     report.error = error.message;

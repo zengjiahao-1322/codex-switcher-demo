@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-RESOURCES="$(cd "$(dirname "$0")/../Resources" && pwd)"
+RESOURCES="$(cd "$(dirname "$0")" && pwd)"
 # Finder 不继承终端环境，根据当前架构选用随包运行时。
 case "$(uname -m)" in
   arm64) ARCH=arm64 ;;

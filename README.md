@@ -1,10 +1,10 @@
 # Codex Switcher Demo
 
-为 Codex 管理官方账号和自定义 API 的本机工具，支持 Windows 和 macOS。当前版本：**0.1 Demo**。
+为 Codex 管理官方账号和自定义 API 的本机工具，支持 Windows 和 macOS。当前版本：**0.1.1 Demo**。
 
 [下载 Windows / macOS 版本](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest)
 
-[Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1/codex-switcher-windows-x64.zip) · [Mac 通用安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1/codex-switcher-macos-universal.zip)
+[Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.1/codex-switcher-windows-x64.zip) · [Mac 通用安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.1/codex-switcher-macos-universal.zip)
 
 ## 下载即用
 
@@ -17,7 +17,7 @@
 
 Windows 可选双击 `install.cmd`，安装到当前用户目录并创建桌面及开始菜单快捷方式，不需要管理员权限。直接运行解压版时，不要只取出启动脚本，整个文件夹需要保留。
 
-macOS Demo 尚无 Apple Developer 签名和公证。首次打开可能需要用户在 Finder 或“系统设置 → 隐私与安全性”中手动允许；本项目不自动关闭 Gatekeeper。应用默认没有 Dock 图标，启动后会打开浏览器中的本机界面。
+macOS Demo 使用 ad-hoc 签名校验应用完整性，尚无 Apple Developer ID 签名和公证。首次打开可能需要在“系统设置 → 隐私与安全性”中手动允许；本项目不自动关闭 Gatekeeper。应用默认没有 Dock 图标，启动后会打开浏览器中的本机界面。
 
 两个安装包均不携带发布者的账号、API 密钥、聊天记录或测试数据。首次使用需要添加自己的官方登录或 API 配置。
 

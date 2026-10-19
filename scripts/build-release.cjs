@@ -92,6 +92,20 @@ async function runtime(platform, arch) {
       '-o',
       native,
     ]);
+    const launcher = path.join(cache, 'mac-launcher');
+    cp.execFileSync('clang', [
+      '-O2',
+      '-Wall',
+      '-Wextra',
+      '-mmacosx-version-min=12.0',
+      '-arch',
+      'arm64',
+      '-arch',
+      'x86_64',
+      path.join(project, 'mac-launcher.c'),
+      '-o',
+      launcher,
+    ]);
     const bundle = 'Codex Switcher.app/Contents/',
       resources = bundle + 'Resources/';
     entries = sourceEntries(resources);
@@ -99,9 +113,10 @@ async function runtime(platform, arch) {
       { name: resources + 'bin/mac-process-context', file: native, mode: 0o100755 },
       {
         name: bundle + 'MacOS/CodexSwitcher',
-        file: path.join(project, 'mac-launcher.sh'),
+        file: launcher,
         mode: 0o100755,
       },
+      { name: resources + 'mac-launcher.sh', file: path.join(project, 'mac-launcher.sh') },
       { name: 'Install.command', file: path.join(project, 'install-mac.command'), mode: 0o100755 },
     );
     for (const arch of ['arm64', 'x64']) {
@@ -118,7 +133,34 @@ async function runtime(platform, arch) {
     filename = 'codex-switcher-macos-universal.zip';
   } else throw Error('Unsupported release target: ' + target);
   const artifact = path.join(out, filename);
-  require('../zip.cjs').zip(entries, artifact);
+  if (target === 'darwin') {
+    // 先生成规范的应用目录并签名，再用 macOS 自带 ditto 归档签名和权限。
+    // ad-hoc 签名只保证包的完整性，不代表 Apple Developer ID 或公证。
+    const stage = fs.mkdtempSync(path.join(cache, 'macos-package-'));
+    try {
+      for (const entry of entries) {
+        const file = path.join(stage, entry.name);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        if (entry.data === undefined) fs.copyFileSync(entry.file, file);
+        else fs.writeFileSync(file, entry.data);
+        fs.chmodSync(file, (entry.mode || 0o100644) & 0o777);
+      }
+      const app = path.join(stage, 'Codex Switcher.app');
+      cp.execFileSync('/usr/bin/codesign', [
+        '--force',
+        '--sign',
+        '-',
+        path.join(app, 'Contents', 'Resources', 'bin', 'mac-process-context'),
+      ]);
+      cp.execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', app]);
+      cp.execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
+      cp.execFileSync('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', stage, artifact]);
+    } finally {
+      fs.rmSync(stage, { recursive: true, force: true });
+    }
+  } else {
+    require('../zip.cjs').zip(entries, artifact);
+  }
   const digest = crypto.createHash('sha256').update(fs.readFileSync(artifact)).digest('hex');
   fs.writeFileSync(artifact + '.sha256', digest + '  ' + filename + '\n');
   console.log(
