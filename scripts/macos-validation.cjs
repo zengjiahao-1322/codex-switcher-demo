@@ -167,7 +167,13 @@ async function validate() {
     '.fixture';
   const syntheticAuth = {
     auth_mode: 'chatgpt',
-    tokens: { account_id: 'fixture-keychain', access_token: token, id_token: token },
+    tokens: {
+      account_id: 'fixture-keychain',
+      access_token: token,
+      id_token: token,
+      refresh_token: 'fixture-old',
+    },
+    last_refresh: '2026-01-01T00:00:00Z',
   };
   try {
     security('create-keychain', '-p', 'fixture-only', keychain);
@@ -191,6 +197,50 @@ async function validate() {
     assert.equal(account?.email, 'keychain@example.test');
     assert.equal(fs.existsSync(path.join(keychainHome, 'auth.json')), false);
     record('macOS-keychain-account-read-with-synthetic-login');
+
+    // 覆盖 Windows 曾出现的“退出时刷新了登录，但保存副本仍是旧令牌”。
+    // 通过真实钥匙串写入模拟客户端退出瞬间的刷新，调用生产切换流程核对。
+    const refreshedAuth = {
+      ...syntheticAuth,
+      tokens: { ...syntheticAuth.tokens, refresh_token: 'fixture-new' },
+      last_refresh: '2026-01-02T00:00:00Z',
+    };
+    await require('../desktop-account.cjs').runSwitch(
+      {
+        codexHome: keychainHome,
+        bridgeHome: keychainBridge,
+        id: account.id,
+        desktopExe: 'fixture-desktop',
+        reloadEditors: false,
+      },
+      {
+        accounts: manager,
+        stop: async () => {
+          security(
+            'add-generic-password',
+            '-U',
+            '-s',
+            'Codex Auth',
+            '-a',
+            storeKey,
+            '-w',
+            JSON.stringify(refreshedAuth),
+            keychain,
+          );
+        },
+        open: async () => {},
+      },
+    );
+    assert.equal(
+      JSON.parse(fs.readFileSync(path.join(keychainHome, 'auth.json'))).tokens.refresh_token,
+      'fixture-new',
+    );
+    assert.equal(
+      JSON.parse(fs.readFileSync(path.join(keychainBridge, 'accounts', account.id, 'auth.json')))
+        .tokens.refresh_token,
+      'fixture-new',
+    );
+    record('keychain-latest-login-preserved-during-account-switch');
   } finally {
     security('list-keychains', '-d', 'user', '-s', ...originalSearch);
     if (fs.existsSync(keychain)) security('delete-keychain', keychain);

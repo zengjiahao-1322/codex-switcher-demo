@@ -122,6 +122,8 @@ async function runSwitch(
       : '正在准备目标账号登录，桌面端仍在运行…',
   });
   try {
+    // 后台切换进程是新实例，先读取实际凭据存储，避免漏存 Mac 钥匙串账号。
+    await accounts.syncCurrent({ force: true });
     if (api) prepared = await require('./service.cjs').createService(job).prepareApi(job);
     else await accounts.prepare(job.id);
     writeJson(file, {
@@ -131,6 +133,8 @@ async function runSwitch(
       message: desktop ? '准备完成，正在关闭桌面端并应用配置…' : '准备完成，正在应用配置…',
     });
     if (desktop) await stop(job.desktopExe, job.codexHome);
+    // 退出前官方客户端可能刚刷新令牌；应用目标配置前再保存一次最新登录。
+    await accounts.syncCurrent({ force: true });
     const result = api
       ? (accounts.captureCurrent(), prepared.apply())
       : accounts.apply(job.id, job.model, job.catalog);

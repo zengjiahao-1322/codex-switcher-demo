@@ -95,7 +95,7 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess = spawn 
       : readJson(liveFile);
   // macOS 可能将官方登录保存在钥匙串。仅在配置要求时读取，并缓存结果，
   // 避免页面轮询反复调用系统工具；显式 keyring 模式不能误用旧 auth.json。
-  async function syncCurrent() {
+  async function syncCurrent({ force = false } = {}) {
     if (process.platform !== 'darwin') return;
     let mode;
     try {
@@ -110,7 +110,7 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess = spawn 
       return;
     }
     if (keychainTask) return keychainTask;
-    if (Date.now() - lastKeychainCheck < 30000) return;
+    if (!force && Date.now() - lastKeychainCheck < 30000) return;
     let home = codexHome;
     try {
       home = fs.realpathSync(home);
@@ -224,7 +224,8 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess = spawn 
     const env = require('./platform.cjs').codexEnv(home);
     for (const k of Object.keys(env))
       if (k.startsWith('CODEX_') && k !== 'CODEX_HOME') delete env[k];
-    const executable = typeof codexExe === 'function' ? codexExe() : codexExe || findCodex();
+    const executable =
+      typeof codexExe === 'function' ? codexExe() : codexExe || findCodex({ dataHome: bridgeHome });
     const child = spawnProcess(executable, ['app-server'], {
       cwd: home,
       env,
