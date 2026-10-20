@@ -1,5 +1,6 @@
 name: Real editor window reload
 on:
+  workflow_call:
   push:
     branches: ['verify/editor-reload-*']
 permissions:

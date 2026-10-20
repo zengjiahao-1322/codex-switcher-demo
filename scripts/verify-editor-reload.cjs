@@ -47,6 +47,7 @@ function activations(folder) {
       version: 'stable',
       cachePath: path.join(project, '.build-cache', 'vscode-test'),
     });
+    let editorEntry;
     if (process.platform === 'darwin') {
       // 测试下载器可能仍返回旧版 Electron 名称，以下载包的真实元数据为准。
       const versionRoot = path.resolve(editor, '../../../..');
@@ -64,15 +65,37 @@ function activations(folder) {
       report.editorExecutableName = name;
       editor = path.join(bundle, 'MacOS', name);
       const shim = path.join(bundle, 'Resources', 'app', 'bin', 'code');
-      const entry = require('../editor-integration.cjs').cliFor(shim);
-      assert.equal(entry.exe, editor);
+      editorEntry = require('../editor-integration.cjs').cliFor(shim);
+      assert.equal(editorEntry.exe, editor);
       report.checks.push('actual-Mac-editor-CLI-from-bundle-metadata');
+    } else {
+      editorEntry = require('../editor-integration.cjs').cliFor(
+        path.join(path.dirname(editor), 'bin', 'code.cmd'),
+      );
     }
     assert.ok(fs.existsSync(editor), '编辑器入口必须存在：' + editor);
     const executable = require('../runtime.cjs').findCodex();
     const selected = path.join(root, 'shared-home');
     const separate = path.join(root, 'separate-home');
     const bridge = path.join(root, 'bridge');
+    process.env.BRIDGE_HOME = bridge;
+    const extensions = path.join(root, 'installed-extensions');
+    const vsix = require('../editor-integration.cjs').build(project);
+    report.extensionInstall = cp.execFileSync(
+      editorEntry.exe,
+      [
+        editorEntry.cli,
+        '--install-extension',
+        vsix,
+        '--force',
+        '--extensions-dir',
+        extensions,
+        '--user-data-dir',
+        path.join(root, 'installer-profile'),
+      ],
+      { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 60000 },
+    );
+    report.checks.push('actual-offline-companion-VSIX-install');
     for (const home of [selected, separate]) {
       fs.mkdirSync(path.join(home, 'sessions'), { recursive: true });
       fs.writeFileSync(path.join(home, 'config.toml'), 'model="before-reload"\n');
@@ -128,8 +151,7 @@ function activations(folder) {
           '--disable-workspace-trust',
           '--disable-gpu',
           '--user-data-dir=' + path.join(root, 'profiles', String(index)),
-          '--extensions-dir=' + path.join(root, 'extensions', String(index)),
-          '--extensionDevelopmentPath=' + path.join(project, 'vscode-companion'),
+          '--extensions-dir=' + extensions,
           '--extensionDevelopmentPath=' + path.join(project, 'scripts', 'editor-fixture'),
           folder,
         ],
@@ -208,7 +230,7 @@ function activations(folder) {
         ? fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
             const file = path.join(directory, entry.name);
             if (entry.isDirectory()) return collect(file);
-            return /(?:exthost|renderer|fixture-trace).*\.log$/.test(file) ? [file] : [];
+            return /^(?:exthost|renderer|fixture-trace)\.log$/.test(entry.name) ? [file] : [];
           })
         : [];
     report.extensionLogs = collect(root)

@@ -7,6 +7,8 @@ on:
 permissions:
   contents: read
 jobs:
+  editor-validation:
+    uses: ./.github/workflows/editor-reload-validation.yml
   package:
     strategy:
       fail-fast: false
@@ -50,7 +52,7 @@ jobs:
           path: dist/*
   publish:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: package
+    needs: [package, editor-validation]
     runs-on: ubuntu-latest
     permissions:
       contents: write
