@@ -48,7 +48,7 @@ jobs:
         run: node scripts/verify-mac-launcher.cjs
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}-${{ matrix.arch }}
+          name: package-${{ matrix.target }}-${{ matrix.arch }}
           path: dist/*
   publish:
     if: startsWith(github.ref, 'refs/tags/')
@@ -60,6 +60,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
+          pattern: package-*
           path: artifacts
           merge-multiple: true
       - name: Publish the platform downloads
