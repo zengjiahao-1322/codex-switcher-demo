@@ -1,6 +1,5 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
-let fastEdited = false;
 // 网页与桌面快捷方式统一使用主页建立的本机会话，直接访问无需附带令牌。
 if (location.hash) {
   history.replaceState(null, '', location.pathname + location.search);
@@ -341,16 +340,17 @@ function updateSwitchAction() {
   const p = selectedProvider(),
     a = selectedAccount(),
     official = officialTarget(),
-    sameSource = official
+    same = official
       ? state?.current.official && a?.current && !a?.pendingLogin
-      : p?.inUse && $('model').value.trim() === state?.current.model,
-    same = sameSource && $('fast').checked === !!state?.current.fast;
+      : p?.inUse && $('model').value.trim() === state?.current.model;
   const locked = pendingRequests.has($('switch')) || switchPending();
   $('provider').disabled = locked;
   $('model').disabled = locked;
-  $('fast').disabled = locked;
   $('fetch-models').disabled = locked || official || pendingRequests.has($('fetch-models'));
   $('probe').disabled = locked || official || pendingRequests.has($('probe'));
+  $('probe-fast').disabled = locked || official || pendingRequests.has($('probe-fast'));
+  $('probe').hidden = official;
+  $('probe-fast').hidden = official;
   $('switch').disabled = locked || !p || (!official && !$('model').value.trim());
   $('switch').textContent = locked
     ? '正在切换…'
@@ -532,10 +532,10 @@ function selected(resetModel = true) {
       (!official && !p.hasKey && !p.local ? ' 请先在 API 配置中填写密钥。' : '')
     : '';
   $('fast-hint').textContent = official
-    ? '与账号、模型支持有关，可能增加额度消耗。随“应用”一起生效。'
+    ? '速度请在 Codex 内选择；切换器不统一修改各对话的 Fast 设置。'
     : p?.apiMode === 'anthropic_messages'
-      ? 'Anthropic Messages 转换不支持此加速，请关闭 Fast 后应用。'
-      : '需要上游中转（如 CPA）支持并转发，可能增加费用；勾选后可点“检测 API”核对上游回报的档位，不保证固定倍速。';
+      ? 'Anthropic Messages 转换暂不支持 Codex Fast。检测不改配置，也不重启。'
+      : 'Fast 请在 Codex 内选择。“检测 Fast 请求”只检查上游是否接受参数，不改配置、不重启；回报 default 不代表加速失败。';
   updateSwitchAction();
   renderSelectedQuota();
 }
@@ -552,7 +552,7 @@ function renderSummary() {
     $('summary').append(
       document.createTextNode(
         c.fast
-          ? ' · Fast 已配置'
+          ? ' · Codex 默认速度：Fast'
           : c.serviceTier === 'default'
             ? ' · 标准速度'
             : ' · ' + c.serviceTier,
@@ -568,7 +568,6 @@ function renderService() {
     : '转换服务未运行或端口 ' + a.port + ' 被占用。';
 }
 function renderSelect(keepDraft = false) {
-  if (!keepDraft || !fastEdited) $('fast').checked = !!state.current.fast;
   const keep = $('provider').value;
   $('provider').replaceChildren();
   const group = (name) => {
@@ -811,10 +810,6 @@ $('provider').onchange = () => {
   selected();
 };
 $('model').addEventListener('input', updateSwitchAction);
-$('fast').onchange = () => {
-  fastEdited = true;
-  updateSwitchAction();
-};
 $('fetch-models').onclick = () =>
   busy($('fetch-models'), async () => {
     const id = $('provider').value;
@@ -826,13 +821,13 @@ $('fetch-models').onclick = () =>
     status(r.message + '点“模型”输入框即可选择，也可输入关键字筛选。');
     $('model').focus();
   });
-$('probe').onclick = () =>
-  busy($('probe'), async () => {
+function detectApi(fast) {
+  return busy($(fast ? 'probe-fast' : 'probe'), async () => {
     const id = $('provider').value,
       model = $('model').value.trim();
-    status('检测中…');
-    const r = await api('probe', { id, model, fast: $('fast').checked });
-    if (!$('fast').checked || r.ok)
+    status(fast ? '正在检测 Fast 请求，不修改当前配置…' : '检测 API 中…');
+    const r = await api('probe', { id, model, fast });
+    if (!fast || r.ok)
       updateAccess(id, {
         mode: r.ok ? r.mode : 'failed',
         model,
@@ -841,6 +836,9 @@ $('probe').onclick = () =>
       });
     status(r.message);
   });
+}
+$('probe').onclick = () => detectApi(false);
+$('probe-fast').onclick = () => detectApi(true);
 $('switch').onclick = () =>
   busy($('switch'), async () => {
     if (officialTarget()) {
@@ -853,10 +851,8 @@ $('switch').onclick = () =>
       status('正在准备应用账号…');
       const r = await api('accountSwitch', {
         id: a.id,
-        fast: $('fast').checked,
         reloadEditors: $('reload-editors').checked,
       });
-      fastEdited = false;
       status(r.message);
       accountData.switchJob = { status: 'queued' };
       watchAccounts();
@@ -868,10 +864,8 @@ $('switch').onclick = () =>
       const r = await api('desktopSwitch', {
         id,
         model,
-        fast: $('fast').checked,
         reloadEditors: $('reload-editors').checked,
       });
-      fastEdited = false;
       status(r.message);
       accountData.switchJob = { status: 'queued' };
       watchAccounts();

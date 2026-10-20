@@ -586,10 +586,11 @@
               <button type="button" id="fetch-models">获取模型</button>
             </div>
           </div>
-          <label class="check"><input type="checkbox" id="fast" /> Fast 加速</label>
           <p id="fast-hint" class="note"></p>
           <div class="actions">
             <button id="switch" class="primary" disabled>切换并重启</button>
+            <button id="probe" disabled>检测 API</button>
+            <button id="probe-fast" disabled>检测 Fast 请求</button>
           </div>
           <label class="check"
             ><input type="checkbox" id="reload-editors" checked />
@@ -657,7 +658,6 @@
           <details id="connection-details" class="technical">
             <summary>连接信息与检测</summary>
             <small id="endpoint"></small><small id="mode-hint" class="hint" hidden></small>
-            <button id="probe">检测连接</button>
             <p class="note">
               首次应用会自动检测，可能产生少量 API 费用；已通过的配置会沿用检测结果。
             </p>

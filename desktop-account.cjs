@@ -143,7 +143,7 @@ async function runSwitch(
     await accounts.syncCurrent({ force: true });
     const result = api
       ? (accounts.captureCurrent(), prepared.apply())
-      : accounts.apply(job.id, job.model, job.catalog, job.fast);
+      : accounts.apply(job.id, job.model, job.catalog);
     applied = true;
     const target = require('smol-toml').parse(
       fs.readFileSync(path.join(job.codexHome, 'config.toml'), 'utf8'),
@@ -154,7 +154,6 @@ async function runSwitch(
         job.codexHome,
         target.model_provider || 'openai',
         target.model,
-        target.service_tier !== undefined,
       ).length
     )
       stoppedEditors = await require('./client-status.cjs').stopEditorBackends(
@@ -236,11 +235,6 @@ async function runSwitch(
         ' 已同步 ' +
         threadRouting.count +
         ' 条旧对话的设置。' +
-        (target.service_tier === 'fast'
-          ? ' Fast 请求已开启，实际加速和费用取决于账号、模型与上游支持。'
-          : target.service_tier === 'default'
-            ? ' 已设为标准速度。'
-            : '') +
         (api && !result.catalogCount
           ? ' 未生成模型目录，下拉可能仍显示官方列表；实际使用所选模型。'
           : ''),

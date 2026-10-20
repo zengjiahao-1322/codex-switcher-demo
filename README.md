@@ -31,13 +31,15 @@ Mac 包按芯片拆分，只携带一套 Node.js，避免原通用包同时下�
 - **统一应用**：官方账号和 API 使用同一入口。桌面版重启，已连接且共用此目录的插件窗口重载；只安装插件也可添加账号、读取额度和应用配置。
 - **官方多账号**：通过 OpenAI 官方授权页添加账号，在列表中切换；添加账号不会自动启用。额度按账号独立查询，批量刷新逐个返回结果，不锁定顶部来源选择器。查询失败时保留并标注上次成功数据。
 - **API 配置**：Responses、Chat Completions、Anthropic Messages；支持直连检测和受限的本机协议转换。检测和实际使用会产生供应商费用。
-- **Fast 加速**：勾选 Fast 后点击“应用”，新旧对话一起更新，桌面和共用配置的编辑器按原流程重载。关闭后应用即恢复标准档位。官方账号需要模型和账号支持；API 会请求 `service_tier=priority`，需要上游中转（如 CPA）接受并转发，可能增加费用，不保证固定 1.5 倍速。Chat Completions 转换保留该参数，Anthropic Messages 转换暂不支持。
+- **Fast 加速**：在 Codex 原生速度选项中选择（CLI 使用 `/fast`），无需重新应用 API 或重启。切换器保留模型目录中的速度能力和各对话已有设置，不另设全局开关。API 请求需要上游中转（如 CPA）接受并转发 `service_tier=priority`，可能增加费用，不保证固定倍速。Chat Completions 转换保留该参数，Anthropic Messages 转换暂不支持。
 - **编辑器窗口**：安装随包提供的伴随扩展后，识别本机配置归属，仅向已确认共用配置的窗口发送重载请求。独立目录、WSL、SSH、容器环境不自动切换。
 - **旧会话诊断**：搜索本机会话、查看模型/供应商/账号差异和关联错误，导出可见对话给新会话继续。
 
-切换会中断目标客户端的运行任务，请先保存工作。统一应用会同步未归档旧对话的来源、模型及所选速度；它不会迁移云端 ChatGPT 对话。额度是 Codex 的服务端额度，不代表 ChatGPT 网页聊天次数或 API 余额。
+切换来源会中断目标客户端的运行任务，请先保存工作。统一应用会同步未归档旧对话的来源和模型，保留各对话原有速度；它不会迁移云端 ChatGPT 对话。额度是 Codex 的服务端额度，不代表 ChatGPT 网页聊天次数或 API 余额。
 
-Fast 使用官方配置 `service_tier = "fast"` 和 `[features].fast_mode = true`；标准档位为 `service_tier = "default"`。界面“Fast 已配置”表示请求设置已保存，不代表上游已经兑现加速。参见 [Codex 速度设置](https://developers.openai.com/codex/speed/)与 [API Fast 模式](https://developers.openai.com/api/docs/guides/priority-processing/)。
+Fast 由 Codex 的会话设置控制，切换器不修改用户的默认 `service_tier` 或 `features.fast_mode`。参见 [Codex 速度设置](https://developers.openai.com/codex/speed/)与 [API Fast 模式](https://developers.openai.com/api/docs/guides/priority-processing/)。
+
+来源下方直接提供“检测 API”和“检测 Fast 请求”，检测不修改配置、不应用来源、不重启。Fast 检测报告请求是否通过、上游回报档位，以及“实际提速未验证”。订阅反代返回 `default` / `auto` 不能用于判定 Fast 失败，回报 `priority` / `fast` 也不等于已经测出实际提速；参见 [Codex 官方说明](https://github.com/openai/codex/issues/14204)。检测接口使用 `fastRequestAccepted` 表示兼容请求通过，`serviceTier` 保留原始回报值，`accelerationStatus` 为 `unverified`；移除会混淆这三件事的 `fastConfirmed` 字段。
 
 ## VS Code / Cursor / Windsurf / Insiders
 

@@ -100,7 +100,7 @@ let releaseSlow;
       await fastRow.getByRole('button', { name: '刷新额度', exact: true }).isEnabled(),
       true,
     );
-    for (const id of ['provider', 'model', 'fast', 'switch', 'fetch-models', 'account-add']) {
+    for (const id of ['provider', 'model', 'probe-fast', 'switch', 'fetch-models', 'account-add']) {
       assert.equal(
         await page.locator('#' + id).isEnabled(),
         true,

@@ -158,38 +158,8 @@ function parseToml(text) {
     throw new Error('Invalid TOML configuration (details redacted)');
   }
 }
-// Fast 是服务档位，不修改模型名称或推理强度；只整理本工具需要修改的配置项。
-function configureSpeed(text, fast) {
-  if (fast === undefined) return text;
-  if (typeof fast !== 'boolean') throw Error('Fast 开关必须为布尔值');
-  const config = parseToml(text),
-    nl = text.includes('\r\n') ? '\r\n' : '\n';
-  let section = [],
-    body = '';
-  for (const statement of statements(text)) {
-    const header = headerPath(statement);
-    if (header) section = header;
-    if (section[0] === 'features') {
-      // 保留原有注释；功能开关统一写回末尾，兼容表、点号和内联表写法。
-      if (!statement.trim() || statement.trimStart().startsWith('#')) body += statement;
-      continue;
-    }
-    if (!section.length) {
-      const entry = toml.parse(statement);
-      if (Object.hasOwn(entry, 'service_tier') || Object.hasOwn(entry, 'features')) continue;
-    }
-    body += statement;
-  }
-  const next =
-    toml.stringify({ service_tier: fast ? 'fast' : 'default' }).replace(/\n/g, nl) +
-    body +
-    (body.endsWith('\n') ? '' : nl) +
-    toml.stringify({ features: { ...config.features, fast_mode: true } }).replace(/\n/g, nl);
-  toml.parse(next);
-  return next;
-}
 // catalogPath：可选的模型目录 JSON 路径，写入 model_catalog_json，使 Codex 模型下拉只显示该配置的模型。
-function prepareConfig(originalToml, provider, model, catalogPath, fast) {
+function prepareConfig(originalToml, provider, model, catalogPath) {
   parseToml(originalToml);
   if (
     !provider ||
@@ -207,19 +177,16 @@ function prepareConfig(originalToml, provider, model, catalogPath, fast) {
   }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
     throw new Error('Provider URL must be HTTP(S) without userinfo');
-  return configureSpeed(
-    editSelection(
-      originalToml,
-      { model, model_provider: 'hermes_bridge', model_catalog_json: catalogPath || undefined },
-      {
-        name: provider.name || provider.id,
-        base_url: provider.baseUrl,
-        wire_api: 'responses',
-        experimental_bearer_token: provider.apiKey,
-        requires_openai_auth: false,
-      },
-    ),
-    fast,
+  return editSelection(
+    originalToml,
+    { model, model_provider: 'hermes_bridge', model_catalog_json: catalogPath || undefined },
+    {
+      name: provider.name || provider.id,
+      base_url: provider.baseUrl,
+      wire_api: 'responses',
+      experimental_bearer_token: provider.apiKey,
+      requires_openai_auth: false,
+    },
   );
 }
 const crypto = require('node:crypto');
@@ -272,10 +239,10 @@ function atomicWrite(file, text, expected) {
     if (fs.existsSync(temp)) fs.unlinkSync(temp);
   }
 }
-function applySwitch(codexHome, provider, model, bridgeHome, catalogPath, fast) {
+function applySwitch(codexHome, provider, model, bridgeHome, catalogPath) {
   const configPath = path.join(codexHome, 'config.toml');
   const original = readOptional(configPath);
-  const next = prepareConfig(original || '', provider, model, catalogPath, fast);
+  const next = prepareConfig(original || '', provider, model, catalogPath);
   fs.mkdirSync(bridgeHome, { recursive: true });
   privateAcl(bridgeHome);
   // 快照记录“切换前的官方状态”：当前不是桥接时每次都刷新（保留用户恢复后对官方设置的改动）；桥接→桥接时保留原快照。
@@ -287,7 +254,7 @@ function applySwitch(codexHome, provider, model, bridgeHome, catalogPath, fast) 
 }
 // 切换到 Codex 官方登录（内置 openai provider，使用 auth.json 中的登录），可指定官方模型；保留 hermes_bridge 定义以便旧对话继续。
 // catalog：切回官方后 model_catalog_json 的值（用户原有设置；通常为空，即使用官方模型列表）。
-function applyOfficial(codexHome, model, catalog, credentialsStore, fast) {
+function applyOfficial(codexHome, model, catalog, credentialsStore) {
   // 新安装的插件可能尚无模型缓存；移除自定义模型后，由官方客户端选择默认模型。
   if (
     model !== undefined &&
@@ -297,17 +264,14 @@ function applyOfficial(codexHome, model, catalog, credentialsStore, fast) {
   const configPath = path.join(codexHome, 'config.toml');
   const current = readOptional(configPath);
   const parsed = parseToml(current || '');
-  const next = configureSpeed(
-    editSelection(
-      current || '',
-      {
-        model: model?.trim() || undefined,
-        model_catalog_json: catalog || undefined,
-        cli_auth_credentials_store: credentialsStore,
-      },
-      parsed.model_providers?.hermes_bridge,
-    ),
-    fast,
+  const next = editSelection(
+    current || '',
+    {
+      model: model?.trim() || undefined,
+      model_catalog_json: catalog || undefined,
+      cli_auth_credentials_store: credentialsStore,
+    },
+    parsed.model_providers?.hermes_bridge,
   );
   fs.mkdirSync(codexHome, { recursive: true });
   atomicWrite(configPath, next, current === null ? undefined : current);
@@ -397,12 +361,10 @@ module.exports = {
   discoverProviders,
   publicProviders,
   prepareConfig,
-  configureSpeed,
   privateAcl,
-  applySwitch: (home, p, m, b, cat, fast) =>
-    withLock(home, () => applySwitch(home, p, m, b, cat, fast)),
+  applySwitch: (home, p, m, b, cat) => withLock(home, () => applySwitch(home, p, m, b, cat)),
   restoreOfficial: (home, b) => withLock(home, () => restoreOfficial(home, b)),
-  applyOfficial: (home, m, cat, credentialsStore, fast) =>
-    withLock(home, () => applyOfficial(home, m, cat, credentialsStore, fast)),
+  applyOfficial: (home, m, cat, credentialsStore) =>
+    withLock(home, () => applyOfficial(home, m, cat, credentialsStore)),
   cleanupBridge: (home, cat) => withLock(home, () => cleanupBridge(home, cat)),
 };

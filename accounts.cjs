@@ -185,12 +185,12 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess = spawn 
       switchJob: switchJob(bridgeHome),
     };
   }
-  function apply(id, model, catalog, fast) {
+  function apply(id, model, catalog) {
     const selected = load().find((a) => a.id === id);
     if (!selected) throw Error('请选择一个已保存的官方账号');
     captureCurrent();
     const auth = readJson(authFile(id));
-    require('./core.cjs').applyOfficial(codexHome, model, catalog, 'file', fast);
+    require('./core.cjs').applyOfficial(codexHome, model, catalog, 'file');
     writeJson(liveFile, auth);
     keychainMode = false;
     keychainAuth = null;

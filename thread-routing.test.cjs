@@ -119,35 +119,42 @@ test(
     assert.equal((await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).count, 0);
     fs.writeFileSync(path.join(home, 'config.toml'), text);
     assert.equal((await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).count, 2);
-    // 来源和模型都不变时，Fast 的开启和关闭仍必须同步两种历史。
-    for (const fast of [true, false]) {
-      fs.writeFileSync(
-        path.join(home, 'config.toml'),
-        require('./core.cjs').configureSpeed(text, fast),
-      );
-      const updated = await synchronizeThreads({ codexHome: home, bridgeHome: bridge });
-      assert.equal(updated.count, 2);
-      assert.equal(updated.serviceTier, fast ? 'fast' : 'default');
-      c = await connect();
-      try {
-        for (const thread of threads) {
-          const resumed = await c.call('thread/resume', {
-            threadId: thread.id,
-            excludeTurns: true,
-          });
-          assert.equal(resumed.serviceTier, fast ? 'priority' : 'default');
-          await c.call('thread/unsubscribe', { threadId: thread.id });
-        }
-      } finally {
-        await c.close();
+    // 两个对话在 Codex 内选择不同速度。切来源时保留各自选择，不统一覆盖。
+    c = await connect();
+    try {
+      for (const [index, thread] of threads.entries()) {
+        await c.call('thread/resume', { threadId: thread.id, excludeTurns: true });
+        await c.call('thread/settings/update', {
+          threadId: thread.id,
+          serviceTier: index ? null : 'priority',
+        });
+        await c.call('thread/unsubscribe', { threadId: thread.id });
       }
+    } finally {
+      await c.close();
     }
+    fs.writeFileSync(
+      path.join(home, 'config.toml'),
+      'model_provider="hermes_bridge"\nservice_tier="fast"\n' + text,
+    );
+    assert.equal((await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).count, 2);
+    for (const [index, thread] of threads.entries()) {
+      const settings = fs
+        .readFileSync(thread.path, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+        .filter((row) => row.payload?.type === 'thread_settings_applied')
+        .at(-1).payload.thread_settings;
+      assert.equal(settings.service_tier, index ? 'default' : 'priority');
+    }
+    assert.equal((await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).count, 0);
     c = await connect();
     try {
       for (const [index, thread] of threads.entries()) {
         const cold = (await c.call('thread/read', { threadId: thread.id, includeTurns: false }))
           .thread;
-        assert.equal(cold.modelProvider, 'openai');
+        assert.equal(cold.modelProvider, 'hermes_bridge');
         // 官方后端会解析 /tmp 链接和 Windows 短路径，比较切换前后的实际目录。
         assert.equal(fs.realpathSync.native(cold.cwd), fs.realpathSync.native(thread.cwd));
         assert.equal(cold.historyMode, thread.historyMode);

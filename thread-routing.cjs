@@ -7,7 +7,7 @@ const toml = require('smol-toml');
 const { findCodex } = require('./runtime.cjs');
 
 // 只读索引用于确定处理范围；供应商和模型由官方接口持久保存，不改写聊天数据库。
-function pendingThreads(home, provider, model, includeMatching = false) {
+function pendingThreads(home, provider, model) {
   const file = fs
     .readdirSync(home)
     .filter((name) => /^state_\d+\.sqlite$/.test(name))
@@ -17,17 +17,35 @@ function pendingThreads(home, provider, model, includeMatching = false) {
   try {
     return db
       .prepare(
-        'SELECT id, model_provider, model FROM threads WHERE archived=0 ' +
+        'SELECT id, model_provider, model, rollout_path FROM threads WHERE archived=0 ' +
           'AND source NOT LIKE \'%"subagent"%\' ' +
-          'AND (? OR ? IS NULL OR model_provider<>? OR model IS NULL OR model<>?) ORDER BY id',
+          'AND (? IS NULL OR model_provider<>? OR model IS NULL OR model<>?) ORDER BY id',
       )
-      .all(Number(includeMatching), model || null, provider, model || null);
+      .all(model || null, provider, model || null);
   } finally {
     db.close();
   }
 }
 
-function openSession(home, bridgeHome, config) {
+// 只读官方历史中的最近设置；切来源时保留 Codex 为每个对话单独选择的速度。
+async function savedServiceTier(file) {
+  const lines = require('node:readline').createInterface({
+    input: fs.createReadStream(file, { encoding: 'utf8' }),
+    crlfDelay: Infinity,
+  });
+  let setting;
+  for await (const line of lines) {
+    const record = JSON.parse(line);
+    if (record.type === 'event_msg' && record.payload?.type === 'thread_settings_applied') {
+      const settings = record.payload.thread_settings;
+      if (settings && Object.hasOwn(settings, 'service_tier'))
+        setting = { tier: settings.service_tier };
+    }
+  }
+  return setting;
+}
+
+function openSession(home, bridgeHome, config, onNotification = () => {}) {
   // 这里只更新会话设置，不发起模型回合，也不启动用户的 MCP、通知或插件。
   const overrides = [
     'notify=[]',
@@ -79,6 +97,10 @@ function openSession(home, bridgeHome, config) {
       } catch {
         continue;
       }
+      if (reply.id === undefined) {
+        onNotification(reply);
+        continue;
+      }
       const item = pending.get(reply.id);
       if (!item) continue;
       clearTimeout(item.timer);
@@ -118,11 +140,8 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
   const config = toml.parse(fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8'));
   const provider = config.model_provider || 'openai';
   let model = config.model;
-  // 档位不在索引表中；配置了档位时让旧对话一起更新，不能因模型没变就跳过。
-  const serviceTier = config.service_tier;
-  const expectedTier = ['fast', 'priority'].includes(serviceTier) ? 'priority' : serviceTier;
-  const rows = pendingThreads(codexHome, provider, model, serviceTier !== undefined);
-  if (!rows.length) return { count: 0, provider, model, serviceTier };
+  const rows = pendingThreads(codexHome, provider, model);
+  if (!rows.length) return { count: 0, provider, model };
   let client = openSession(codexHome, bridgeHome, config);
   const initialize = () =>
     client.call('initialize', {
@@ -138,13 +157,14 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
     }
     for (const [index, row] of rows.entries()) {
       onProgress({ completed: index, total: rows.length });
+      row.speed = await savedServiceTier(row.rollout_path);
       let result;
       try {
         result = await client.call('thread/resume', {
           threadId: row.id,
           modelProvider: provider,
           model,
-          ...(serviceTier !== undefined ? { serviceTier } : {}),
+          ...(row.speed ? { serviceTier: row.speed.tier ?? '' } : {}),
           excludeTurns: true,
         });
       } catch (error) {
@@ -156,8 +176,8 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
       }
       if (result.modelProvider !== provider || result.model !== model)
         throw Error('旧对话 ' + row.id + ' 未采用目标来源或模型。');
-      if (serviceTier !== undefined && result.serviceTier !== expectedTier)
-        throw Error('旧对话 ' + row.id + ' 未采用目标速度档位。');
+      if (row.speed && result.serviceTier !== row.speed.tier)
+        throw Error('旧对话 ' + row.id + ' 的原有速度设置未保留。');
       await client.call('thread/unsubscribe', { threadId: row.id });
     }
     await client.close();
@@ -171,17 +191,10 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
       });
       if (thread.modelProvider !== provider || thread.model !== model)
         throw Error('旧对话 ' + row.id + ' 的来源或模型未能持久保存。');
-      if (serviceTier !== undefined) {
-        const resumed = await client.call('thread/resume', {
-          threadId: row.id,
-          excludeTurns: true,
-        });
-        if (resumed.serviceTier !== expectedTier)
-          throw Error('旧对话 ' + row.id + ' 的速度档位冷启动核对失败。');
-        await client.call('thread/unsubscribe', { threadId: row.id });
-      }
+      if (row.speed && (await savedServiceTier(row.rollout_path))?.tier !== row.speed.tier)
+        throw Error('旧对话 ' + row.id + ' 的原有速度设置未能持久保留。');
     }
-    return { count: rows.length, provider, model, serviceTier };
+    return { count: rows.length, provider, model };
   } finally {
     await client.close();
   }

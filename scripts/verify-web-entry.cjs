@@ -35,6 +35,7 @@ const providerId = require('../providers.cjs').add(bridge, {
 fs.writeFileSync(path.join(bridge, 'current.json'), JSON.stringify({ providerId }));
 let browser, server, port;
 const switchRequests = [];
+const probeRequests = [];
 const report = { platform: process.platform, checks: [] };
 async function start(token) {
   server = createServer({
@@ -46,12 +47,17 @@ async function start(token) {
       // 这里只替代重启客户端这一步，页面传参和配置读写仍使用实际代码。
       desktopSwitch: async (input) => {
         switchRequests.push(input);
-        const file = path.join(home, 'config.toml');
-        fs.writeFileSync(
-          file,
-          require('../core.cjs').configureSpeed(fs.readFileSync(file, 'utf8'), input.fast),
-        );
         return { message: 'fixture switch applied' };
+      },
+      probe: async (input) => {
+        probeRequests.push(input);
+        return {
+          ok: true,
+          mode: 'direct',
+          message: input.fast
+            ? 'Fast 请求通过；上游回报 default。实际提速未验证。订阅反代的该回报值不能用于判定 Fast 失败。'
+            : 'API 连接检测通过。',
+        };
       },
     },
   });
@@ -103,22 +109,34 @@ async function loaded(page, url) {
     await recovered;
     assert.equal(await page.evaluate(async () => (await fetch('/api/state')).status), 200);
     report.checks.push('old-tab-recovers-after-service-restart');
-    // 验证开关随“应用”提交，刷新后从配置恢复，关闭时同样提交 false。
-    for (const fast of [true, false]) {
-      await page.locator('#fast').setChecked(fast);
-      const applied = page.waitForResponse(
-        (response) => response.url().endsWith('/api/desktopSwitch') && response.status() === 200,
+    // 检测入口直接可见；点击 Fast 检测不能触发配置应用或重启。
+    assert.equal(await page.locator('#fast').count(), 0);
+    const configBefore = fs.readFileSync(path.join(home, 'config.toml'), 'utf8');
+    for (const fast of [false, true]) {
+      const button = page.locator(fast ? '#probe-fast' : '#probe');
+      assert.equal(await button.isVisible(), true);
+      const response = page.waitForResponse(
+        (r) => r.url().endsWith('/api/probe') && r.status() === 200,
       );
-      await page.locator('#switch').click();
-      await applied;
-      assert.equal(switchRequests.at(-1).fast, fast);
-      await loaded(page, base + '/');
-      assert.equal(await page.locator('#fast').isChecked(), fast);
-      assert.ok(
-        (await page.locator('#summary').innerText()).includes(fast ? 'Fast 已配置' : '标准速度'),
+      await button.click();
+      await response;
+      await page.waitForFunction(
+        (expected) => document.getElementById('status').textContent.includes(expected),
+        fast ? '实际提速未验证' : 'API 连接检测通过',
       );
+      assert.equal(probeRequests.at(-1).fast, fast);
+      assert.equal(switchRequests.length, 0);
+      assert.equal(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), configBefore);
     }
-    report.checks.push('fast-toggle-submit-and-refresh');
+    report.checks.push('visible-API-and-Fast-probes-without-apply-or-config-writes');
+    const applied = page.waitForResponse(
+      (r) => r.url().endsWith('/api/desktopSwitch') && r.status() === 200,
+    );
+    await page.locator('#switch').click();
+    await applied;
+    assert.equal(Object.hasOwn(switchRequests.at(-1), 'fast'), false);
+    await loaded(page, base + '/');
+    report.checks.push('source-switch-does-not-set-speed');
     await page.screenshot({ path: path.resolve('verification/web-entry.png'), fullPage: true });
     const failed = await context.newPage();
     await failed.route('**/api/accounts', (route) =>
