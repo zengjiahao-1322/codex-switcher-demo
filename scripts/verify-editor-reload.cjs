@@ -40,10 +40,28 @@ function activations(folder) {
         'test-electron',
       ),
     );
-    const editor = await downloadAndUnzipVSCode({
+    let editor = await downloadAndUnzipVSCode({
       version: 'stable',
       cachePath: path.join(project, '.build-cache', 'vscode-test'),
     });
+    if (process.platform === 'darwin') {
+      // 测试下载器可能仍返回旧版 Electron 名称，以下载包的真实元数据为准。
+      const versionRoot = path.resolve(editor, '../../../..');
+      report.downloadedBundleEntries = fs.readdirSync(versionRoot);
+      const app = report.downloadedBundleEntries.find((name) => name.endsWith('.app'));
+      assert.ok(app, 'VS Code 下载目录必须有应用包');
+      const bundle = path.join(versionRoot, app, 'Contents');
+      const name = cp
+        .execFileSync(
+          '/usr/libexec/PlistBuddy',
+          ['-c', 'Print :CFBundleExecutable', path.join(bundle, 'Info.plist')],
+          { encoding: 'utf8' },
+        )
+        .trim();
+      report.editorExecutableName = name;
+      editor = path.join(bundle, 'MacOS', name);
+    }
+    assert.ok(fs.existsSync(editor), '编辑器入口必须存在：' + editor);
     const executable = require('../runtime.cjs').findCodex();
     const selected = path.join(root, 'shared-home');
     const separate = path.join(root, 'separate-home');
