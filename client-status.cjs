@@ -126,6 +126,17 @@ function heartbeat(bridgeHome, input) {
     };
     if (row.command?.id === input.ack) row.command = null;
   }
+  // 新扩展宿主启动后回报上次重载编号；只有编号匹配才能把“已接收”推进到“扩展已重载”。
+  const completed = input.completedReload;
+  if (completed && /^[\w-]{8,80}$/.test(completed.clientId || '')) {
+    const oldFile = path.join(bridgeHome, 'clients', completed.clientId + '.json');
+    const old = readJson(oldFile);
+    if (old?.lastAck?.id === completed.commandId && old.lastAck.status === 'reload_requested') {
+      old.lastAck = { ...old.lastAck, status: 'reloaded', at: Date.now() };
+      row.lastAck = old.lastAck;
+      writeJson(oldFile, old);
+    }
+  }
   writeJson(file, row);
   return { command: row.command };
 }
@@ -253,6 +264,7 @@ function requestReload(codexHome, bridgeHome, { id, stoppedEditors = [] } = {}) 
     const file = path.join(bridgeHome, 'clients', c.editorId + '.json'),
       row = readJson(file);
     row.command = { id: crypto.randomUUID(), type: 'reload', at: Date.now() };
+    c.reloadCommandId = row.command.id;
     writeJson(file, row);
   }
   return {
@@ -263,11 +275,29 @@ function requestReload(codexHome, bridgeHome, { id, stoppedEditors = [] } = {}) 
       id: client.editorId,
       name: client.name,
       workspace: client.workspace,
+      commandId: client.reloadCommandId,
     })),
     message: targets.length
       ? '已向 ' + targets.length + ' 个共用配置的编辑器窗口发送重载请求，等待窗口执行。'
       : '未向任何编辑器窗口发送重载：请先接入伴随扩展，并在客户端列表确认配置目录。',
   };
+}
+function reloadResults(bridgeHome, targets) {
+  return targets.map((target) => {
+    const row = readJson(path.join(bridgeHome, 'clients', target.id + '.json'));
+    const ack = row?.lastAck?.id === target.commandId ? row.lastAck : null;
+    const status =
+      ack?.status === 'reloaded'
+        ? 'reloaded'
+        : ack?.status === 'reload_failed'
+          ? 'failed'
+          : ack?.status === 'reload_requested'
+            ? 'received'
+            : row?.command?.id === target.commandId
+              ? 'pending'
+              : 'unconfirmed';
+    return { ...target, status, error: ack?.error || null };
+  });
 }
 function clientStatus(codexHome, bridgeHome) {
   return snapshot(codexHome, bridgeHome);
@@ -316,6 +346,7 @@ function desktopTargets(exe, codexHome) {
   return [...allowed];
 }
 module.exports = {
+  reloadResults,
   clientStatus,
   snapshot,
   heartbeat,

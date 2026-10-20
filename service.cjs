@@ -540,7 +540,13 @@ function createService({
       }),
     accounts: async () => {
       await accounts.syncCurrent();
-      return accounts.status();
+      const data = accounts.status();
+      if (data.switchJob?.editorReload?.targets)
+        data.switchJob.editorReload.results = require('./client-status.cjs').reloadResults(
+          bridgeHome,
+          data.switchJob.editorReload.targets,
+        );
+      return data;
     },
     // 额度属于账号级只读操作，不持有修改全局配置时使用的 exclusive 锁。
     accountQuota: async ({ id } = {}) => {

@@ -34,6 +34,7 @@ const providerId = require('../providers.cjs').add(bridge, {
 });
 fs.writeFileSync(path.join(bridge, 'current.json'), JSON.stringify({ providerId }));
 let browser, server, port;
+let fixtureJob = null;
 const switchRequests = [];
 const probeRequests = [];
 const report = { platform: process.platform, checks: [] };
@@ -43,10 +44,25 @@ async function start(token) {
     getState: service.state,
     actions: {
       ...service.actions,
-      accounts: async () => ({ items: [] }),
+      accounts: async () => ({ items: [], switchJob: fixtureJob }),
       // 这里只替代重启客户端这一步，页面传参和配置读写仍使用实际代码。
       desktopSwitch: async (input) => {
         switchRequests.push(input);
+        fixtureJob = {
+          status: 'done',
+          startedAt: new Date().toISOString(),
+          elapsedMs: 1250,
+          configurationApplied: true,
+          threadRouting: { count: 3 },
+          steps: [{ id: 'apply', label: '保存并应用目标配置', status: 'done', durationMs: 250 }],
+          editorReload: {
+            results: [
+              { name: 'VS Code A', status: 'reloaded' },
+              { name: 'VS Code B', status: 'received' },
+            ],
+          },
+          message: 'fixture switch applied',
+        };
         return { message: 'fixture switch applied' };
       },
       probe: async (input) => {
@@ -131,7 +147,23 @@ async function loaded(page, url) {
     await page.locator('#switch').click();
     await applied;
     assert.equal(Object.hasOwn(switchRequests.at(-1), 'fast'), false);
+    await page.locator('#switch-progress').waitFor({ state: 'visible' });
+    await page.locator('#switch-progress-title').click();
+    assert.ok((await page.locator('#switch-steps').innerText()).includes('0.3 秒'));
+    assert.ok((await page.locator('#switch-windows').innerText()).includes('已核对 3 条旧对话'));
+    assert.ok((await page.locator('#switch-windows').innerText()).includes('尚未验证实际请求'));
+    assert.ok((await page.locator('#switch-windows').innerText()).includes('等待扩展重新连接'));
+    fixtureJob = {
+      ...fixtureJob,
+      status: 'error',
+      threadRouting: undefined,
+      editorReload: undefined,
+      steps: [{ id: 'threads', label: '同步并核对旧对话', status: 'error', durationMs: 500 }],
+    };
     await loaded(page, base + '/');
+    assert.ok((await page.locator('#switch-progress-title').innerText()).includes('切换未完成'));
+    assert.ok((await page.locator('#switch-steps').innerText()).includes('失败'));
+    report.checks.push('switch-step-timing-failure-and-separate-window-reload-results');
     report.checks.push('source-switch-does-not-set-speed');
     await page.screenshot({ path: path.resolve('verification/web-entry.png'), fullPage: true });
     const failed = await context.newPage();

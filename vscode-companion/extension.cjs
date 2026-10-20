@@ -35,7 +35,8 @@ function activate(context) {
   const vscode = require('vscode'),
     id = crypto.randomUUID();
   let busy = false,
-    stopped = false;
+    stopped = false,
+    completedReload = context.workspaceState.get('codexSwitcher.pendingReload');
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 20);
   status.text = '$(plug) Codex Switcher';
   status.command = 'codexSwitcher.connect';
@@ -102,7 +103,11 @@ function activate(context) {
     try {
       const c = connection(),
         data = report(),
-        r = await post(c, 'clientHeartbeat', data);
+        r = await post(c, 'clientHeartbeat', { ...data, completedReload });
+      if (completedReload) {
+        await context.workspaceState.update('codexSwitcher.pendingReload', undefined);
+        completedReload = undefined;
+      }
       status.tooltip =
         'Connected to ' +
         new URL(c.url).origin +
@@ -124,10 +129,15 @@ function activate(context) {
           ackStatus: 'reload_requested',
         });
         await context.workspaceState.update('codexSwitcher.lastReload', r.command.id);
+        await context.workspaceState.update('codexSwitcher.pendingReload', {
+          clientId: id,
+          commandId: r.command.id,
+        });
         setTimeout(async () => {
           try {
             await vscode.commands.executeCommand('workbench.action.reloadWindow');
           } catch (error) {
+            await context.workspaceState.update('codexSwitcher.pendingReload', undefined);
             // 请求已收到但编辑器未能执行时，不能继续显示为成功或误报服务未运行。
             await post(c, 'clientHeartbeat', {
               ...data,

@@ -252,6 +252,13 @@ async function initializeHome(executable, home) {
       () => folders.slice(0, 2).every((folder) => activations(folder).length >= 2),
       'both shared windows reload',
     );
+    await waitFor(
+      () =>
+        require('../client-status.cjs')
+          .reloadResults(bridge, result.targets)
+          .every((r) => r.status === 'reloaded'),
+      'companion confirms each completed reload',
+    );
     for (let index = 0; index < 2; index++) {
       const latest = activations(folders[index]).at(-1);
       assert.notEqual(latest.extensionHostPid, initial[index].extensionHostPid);
@@ -273,6 +280,7 @@ async function initializeHome(executable, home) {
     }
     report.checks.push(
       'two-window-actual-reload',
+      'companion-confirmed-reload-results',
       'new-backends-read-new-config',
       'shared-windows-read-Fast-setting',
       'independent-window-untouched',

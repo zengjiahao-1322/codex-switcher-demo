@@ -5,6 +5,49 @@ const { test } = require('node:test'),
   path = require('node:path'),
   os = require('node:os'),
   cp = require('node:child_process');
+test('窗口回报只推进对应重载编号，区分接收、重载和失败', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-ack-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const clients = require('./client-status.cjs');
+  const data = { id: 'old-window-1', pid: 1, home: root };
+  clients.heartbeat(root, data);
+  const file = path.join(root, 'clients', data.id + '.json');
+  const row = JSON.parse(fs.readFileSync(file));
+  row.command = { id: 'reload-command-1', type: 'reload' };
+  fs.writeFileSync(file, JSON.stringify(row));
+  const target = [{ id: data.id, commandId: row.command.id }];
+  assert.equal(clients.reloadResults(root, target)[0].status, 'pending');
+  clients.heartbeat(root, { ...data, ack: row.command.id, ackStatus: 'reload_requested' });
+  assert.equal(clients.reloadResults(root, target)[0].status, 'received');
+  clients.heartbeat(root, {
+    id: 'new-window-1',
+    completedReload: {
+      clientId: data.id,
+      commandId: 'different-command',
+    },
+  });
+  assert.equal(clients.reloadResults(root, target)[0].status, 'received');
+  clients.heartbeat(root, {
+    id: 'new-window-1',
+    completedReload: {
+      clientId: data.id,
+      commandId: row.command.id,
+    },
+  });
+  assert.equal(clients.reloadResults(root, target)[0].status, 'reloaded');
+  clients.heartbeat(root, {
+    ...data,
+    ack: row.command.id,
+    ackStatus: 'reload_failed',
+    ackError: 'fixture failure',
+  });
+  assert.equal(clients.reloadResults(root, target)[0].status, 'failed');
+  assert.equal(clients.reloadResults(root, target)[0].error, 'fixture failure');
+  assert.equal(
+    clients.reloadResults(root, [{ id: data.id, commandId: 'unrelated' }])[0].status,
+    'unconfirmed',
+  );
+});
 test('ZIP packages preserve filenames and executable bits', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-zip-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

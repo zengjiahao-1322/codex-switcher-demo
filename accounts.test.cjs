@@ -100,6 +100,15 @@ test('switch waits for desktop exit, preserves refreshed outgoing credentials, a
   );
   assert.deepEqual(events, ['stop', 'sync', 'open']);
   assert.equal(a.status().switchJob.threadRouting.count, 2);
+  const progress = a.status().switchJob;
+  assert.equal(progress.configurationApplied, true);
+  assert.equal(progress.desktopRequested, true);
+  assert.ok(progress.elapsedMs >= 0);
+  for (const id of ['prepare', 'stop', 'apply', 'threads', 'reopen']) {
+    const step = progress.steps.find((s) => s.id === id);
+    assert.equal(step.status, 'done');
+    assert.ok(step.durationMs >= 0);
+  }
   const c = toml.parse(fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8'));
   assert.equal(c.model, 'official');
   assert.equal(c.model_provider, undefined);
@@ -222,6 +231,11 @@ test('old-thread synchronization failure is not reported as a completed switch',
     /fixture active writer/,
   );
   assert.equal(a.status().switchJob.status, 'error');
+  assert.equal(a.status().switchJob.steps.find((s) => s.id === 'threads').status, 'error');
+  assert.equal(
+    a.status().switchJob.steps.some((s) => s.id === 'reopen'),
+    false,
+  );
   assert.equal(
     require('./switch-state.cjs').readEffect(f.codexHome, f.bridgeHome).status,
     'switch_incomplete',

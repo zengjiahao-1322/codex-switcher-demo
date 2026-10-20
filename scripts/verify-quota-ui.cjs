@@ -23,6 +23,8 @@ const reportFile = path.resolve('verification', 'quota-ui.json');
 let browser;
 let server;
 let releaseSlow;
+let officialMode = false,
+  switches = 0;
 
 (async () => {
   try {
@@ -53,10 +55,18 @@ let releaseSlow;
     let calls = 0;
     server = createServer({
       token: 'fixture-ui-token',
-      getState: service.state,
+      getState: async () => {
+        const state = await service.state();
+        if (officialMode) state.current.official = true;
+        return state;
+      },
       actions: {
         ...service.actions,
         accounts: async () => ({ items: accounts }),
+        accountSwitch: async () => {
+          switches++;
+          return {};
+        },
         accountQuota: async ({ id }) => {
           calls++;
           if (id === 'fixture-slow') await slowGate;
@@ -133,6 +143,38 @@ let releaseSlow;
     await page.getByRole('button', { name: '刷新全部额度', exact: true }).waitFor();
     assert.deepEqual(errors, []);
     report.checks.push('each-account-renders-own-result-without-script-errors');
+    officialMode = true;
+    accounts[0].current = true;
+    accounts[0].quota.buckets[0].windows[0].remainingPercent = 10;
+    await page.reload();
+    await page.locator('#quota-notice').waitFor({ state: 'visible' });
+    assert.ok((await page.locator('#quota-notice').innerText()).includes('10%'));
+    await page.getByRole('button', { name: '选择备用账号', exact: true }).click();
+    assert.equal(await page.locator('#provider').inputValue(), 'account:fixture-fast');
+    assert.equal(switches, 0, '额度提醒只选择账号，不自动应用或重启');
+    accounts[0].quota.status = 'error';
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('provider').disabled === false);
+    assert.equal(await page.locator('#quota-notice').isHidden(), true);
+    accounts[0].quota.status = 'ok';
+    accounts[0].quota.buckets[0].windows[0].resetsAt = Math.floor(Date.now() / 1000) - 60;
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('provider').disabled === false);
+    assert.equal(
+      await page.locator('#quota-notice').isHidden(),
+      true,
+      '已重置窗口不能用旧比例提醒',
+    );
+    officialMode = false;
+    accounts[0].quota.buckets[0].windows[0].resetsAt = null;
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('provider').disabled === false);
+    assert.equal(
+      await page.locator('#quota-notice').isHidden(),
+      true,
+      'API 模式不应拿官方额度提醒',
+    );
+    report.checks.push('low-quota-selects-backup-without-switch-and-ignores-failed-read');
     report.passed = true;
   } catch (error) {
     report.passed = false;

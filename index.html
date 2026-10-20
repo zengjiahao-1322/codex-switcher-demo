@@ -396,6 +396,23 @@
     #official-quota {
       margin: -10px 0 20px;
     }
+    #quota-notice {
+      margin: 10px 0;
+    }
+    #quota-notice button {
+      margin-left: 10px;
+    }
+    #switch-progress {
+      margin-top: 10px;
+      font-size: 13px;
+    }
+    #switch-progress > summary {
+      font-weight: 500;
+    }
+    #switch-steps p,
+    #switch-windows p {
+      margin: 6px 0;
+    }
     .quota-bucket {
       margin-top: 10px;
     }
@@ -570,6 +587,7 @@
     </header>
     <div id="summary">正在读取本机配置…</div>
     <div id="effect-notice" class="hint" role="status" hidden></div>
+    <div id="quota-notice" class="hint warn" role="status" hidden></div>
     <div id="usage-notice" class="hint warn" role="note" hidden></div>
     <div class="workspace">
       <section>
@@ -598,6 +616,12 @@
             多个窗口共用配置时都会受影响。正在运行任务时，建议等任务结束再切换；已保存的聊天记录不会被切换器删除。
           </p>
           <div id="status" role="status"></div>
+          <details id="switch-progress" hidden>
+            <summary id="switch-progress-title">切换进度</summary>
+            <div id="switch-steps"></div>
+            <div id="switch-windows"></div>
+            <small class="note">窗口反馈表示重载进度，实际模型请求仍由客户端和上游处理。</small>
+          </details>
           <details id="client-details" class="technical">
             <summary>影响范围与其他客户端</summary>
             <p

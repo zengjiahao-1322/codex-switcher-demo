@@ -222,6 +222,57 @@ const accountStatus = (text) => {
 let accountTimer = null,
   lastQuotaLogin = null;
 const quotaRefreshing = new Set();
+// 只使用近期成功读取、尚未重置的窗口；旧缓存和读取失败不推断为额度耗尽。
+function accountRemaining(account, bucketId) {
+  const quota = account.quota;
+  if (
+    account.pendingLogin ||
+    quota?.status !== 'ok' ||
+    Date.now() - Date.parse(quota.checkedAt) > 600000 ||
+    !Number.isFinite(Date.parse(quota.checkedAt))
+  )
+    return null;
+  const bucket = bucketId
+    ? quota.buckets?.find((b) => b.id === bucketId)
+    : quota.buckets?.find((b) => b.id === 'codex') || quota.buckets?.[0];
+  const windows = (bucket?.windows || []).filter(
+    (w) => Number.isFinite(w.remainingPercent) && (!w.resetsAt || w.resetsAt * 1000 > Date.now()),
+  );
+  return windows.length ? Math.min(...windows.map((w) => w.remainingPercent)) : null;
+}
+function renderQuotaNotice() {
+  const box = $('quota-notice');
+  box.replaceChildren();
+  const current = state?.current.official && accountData?.items.find((a) => a.current);
+  const remaining = current ? accountRemaining(current) : null;
+  box.hidden = remaining === null || remaining > 20;
+  if (box.hidden) return;
+  box.append(
+    document.createTextNode(
+      '当前账号「' + current.label + '」有订阅额度窗口仅剩 ' + Math.round(remaining) + '%。',
+    ),
+  );
+  const bucketId = (current.quota.buckets.find((b) => b.id === 'codex') || current.quota.buckets[0])
+    .id;
+  const alternative = accountData.items
+    .filter((a) => !a.current && accountRemaining(a, bucketId) > 20)
+    .sort((a, b) => accountRemaining(b, bucketId) - accountRemaining(a, bucketId))[0];
+  if (alternative) {
+    box.append(document.createTextNode('「' + alternative.label + '」同类订阅额度尚有余量。'));
+    const button = rowButton(
+      '选择备用账号',
+      () => {
+        $('provider').value = 'account:' + alternative.id;
+        selected();
+        $('switch').focus();
+      },
+      accountStatus,
+    );
+    button.disabled = switchPending();
+    box.append(button);
+  }
+  box.append(document.createTextNode('不会自动切换；如有额外额度，以官方计费为准。'));
+}
 function quotaNode(q) {
   const box = document.createElement('div');
   box.className = 'quota';
@@ -450,18 +501,96 @@ function renderAccounts() {
     ? '正在刷新 ' + quotaRefreshing.size + ' 个账号…'
     : '刷新全部额度';
   renderSelectedQuota();
+  renderQuotaNotice();
   if (waiting) {
     $('login-message').textContent = login.message;
     $('login-link').href = login.authUrl;
   }
 }
 let lastJobMessage = '';
+let reloadWatchUntil = 0;
+let progressJob = null;
+function renderSwitchProgress() {
+  const job = accountData?.switchJob,
+    box = $('switch-progress');
+  box.hidden = !job?.steps?.length;
+  if (box.hidden) return;
+  const running = switchPending();
+  if (progressJob !== job.startedAt) {
+    progressJob = job.startedAt;
+    if (running || job.status === 'error') box.open = true;
+  }
+  const elapsed = running ? Date.now() - Date.parse(job.startedAt) : job.elapsedMs;
+  const seconds = ((elapsed || 0) / 1000).toFixed(1);
+  $('switch-progress-title').textContent =
+    (running ? '切换中' : job.status === 'error' ? '切换未完成' : '切换步骤已执行') +
+    ' · ' +
+    seconds +
+    ' 秒';
+  $('switch-steps').replaceChildren();
+  for (const step of job.steps) {
+    const line = document.createElement('p');
+    line.textContent =
+      (step.status === 'done' ? '✓ ' : step.status === 'error' ? '失败 · ' : '进行中 · ') +
+      step.label +
+      (step.durationMs == null ? '' : ' · ' + (step.durationMs / 1000).toFixed(1) + ' 秒');
+    $('switch-steps').append(line);
+  }
+  $('switch-windows').replaceChildren();
+  if (job.configurationApplied) {
+    const line = document.createElement('p');
+    line.textContent =
+      '配置已保存' +
+      (job.threadRouting ? ' · 已核对 ' + job.threadRouting.count + ' 条旧对话' : '');
+    $('switch-windows').append(line);
+  }
+  if (job.desktopRequested) {
+    const line = document.createElement('p');
+    line.textContent = '桌面端：已请求重新打开，尚未确认实际请求来源。';
+    $('switch-windows').append(line);
+  }
+  const labels = {
+    pending: '等待接收',
+    received: '已接收，等待扩展重新连接',
+    reloaded: '扩展已重载，尚未验证实际请求',
+    failed: '重载失败',
+    unconfirmed: '未确认，请展开客户端列表核对',
+  };
+  const results = job.editorReload?.results || [];
+  if (results.length) {
+    const summary = document.createElement('p');
+    const reloaded = results.filter((w) => w.status === 'reloaded').length;
+    const failed = results.filter((w) => w.status === 'failed').length;
+    summary.textContent =
+      '编辑器 ' +
+      results.length +
+      ' 个窗口：' +
+      reloaded +
+      ' 个扩展已重载，' +
+      (results.length - reloaded - failed) +
+      ' 个待确认' +
+      (failed ? '，' + failed + ' 个失败' : '') +
+      '。';
+    $('switch-windows').append(summary);
+  }
+  for (const window of results) {
+    const line = document.createElement('p');
+    line.textContent =
+      window.name +
+      (window.workspace ? ' · ' + window.workspace : '') +
+      '：' +
+      labels[window.status] +
+      (window.error ? ' · ' + window.error : '');
+    $('switch-windows').append(line);
+  }
+}
 async function refreshAccounts() {
   const wasSwitching = switchPending();
   const data = (accountData = await api('accounts', {})),
     login = data.login,
     switching = switchPending();
   renderAccounts();
+  renderSwitchProgress();
   if (login?.status === 'waiting') accountStatus('等待官方页面完成登录…');
   else if (login && ['done', 'error', 'cancelled'].includes(login.status))
     accountStatus(login.message);
@@ -475,16 +604,23 @@ async function refreshAccounts() {
     renderSelect(true);
     renderSummary();
   }
-  const active = login?.status === 'waiting' || switching;
+  const windows = job?.editorReload?.results || [];
+  const waitingReload = windows.some((w) => ['pending', 'received'].includes(w.status));
+  if (wasSwitching && !switching) reloadWatchUntil = Date.now() + 30000;
+  if (waitingReload && job?.finishedAt)
+    reloadWatchUntil = Math.max(reloadWatchUntil, Date.parse(job.finishedAt) + 30000);
+  const active =
+    login?.status === 'waiting' || switching || (waitingReload && Date.now() < reloadWatchUntil);
+  if (wasSwitching && !switching) await refresh();
   if (!active && accountTimer) {
     clearInterval(accountTimer);
     accountTimer = null;
-    if (wasSwitching) await refresh();
   }
   if (login?.status === 'done' && login.accountId !== lastQuotaLogin) {
     lastQuotaLogin = login.accountId;
     queueMicrotask(() => refreshQuota(login.accountId).catch((e) => accountStatus(e.message)));
   }
+  if (active) watchAccounts();
   return data;
 }
 function watchAccounts() {
@@ -542,6 +678,7 @@ function renderSummary() {
     : 'API · ' + c.name + ' · ' + (c.model || '默认模型');
   $('summary').append(b);
   $('summary').title = state.codexVersion || '';
+  renderQuotaNotice();
 }
 function renderService() {
   const a = state.adapter;
@@ -983,6 +1120,9 @@ async function refreshClients() {
         (client.lastAck?.status === 'reload_requested'
           ? '\n窗口已接收重载请求；若仍显示旧进程，请检查编辑器是否有待处理的保存或任务提示。'
           : '') +
+        (client.lastAck?.status === 'reloaded'
+          ? '\n伴随扩展已重载并重新连接；尚未验证实际模型请求。'
+          : '') +
         (client.lastAck?.status === 'reload_failed' ? '\n重载失败：' + client.lastAck.error : '') +
         (client.stale ? '\n启动早于最近切换，可能需重载。' : '') +
         (client.overridden ? '\n配置档 / 启动参数覆盖了全局模型或供应商，请展开核对。' : '');
@@ -1235,6 +1375,12 @@ $('diagnosis-run').onclick = runDiagnosis;
 refreshAccounts()
   .then(async (data) => {
     await refresh();
+    const current = state.current.official && accountData?.items.find((a) => a.current);
+    if (
+      current &&
+      (!current.quota || Date.now() - Date.parse(current.quota.checkedAt || 0) > 600000)
+    )
+      refreshQuota(current.id).catch((e) => accountStatus(e.message));
     if (data.login?.status === 'waiting' || switchPending()) watchAccounts();
   })
   .catch((e) => {

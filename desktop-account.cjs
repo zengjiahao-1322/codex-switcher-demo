@@ -60,7 +60,11 @@ function stopDesktop(exe, codexHome) {
  $desktopIds=@($p.Id);
  $backendIds=@(Get-CimInstance Win32_Process -Filter "Name = 'codex.exe'" | Where-Object {$_.ParentProcessId -in $desktopIds} | Select-Object -ExpandProperty ProcessId);
  foreach($item in $p){if($item.MainWindowHandle -ne 0){[void]$item.CloseMainWindow()}};
- Start-Sleep -Seconds 2;
+ for($i=0;$i -lt 20;$i++){
+   if(-not ($desktopIds.Count+$backendIds.Count)){break};
+   $waiting=@(Get-Process -Id @($desktopIds+$backendIds) -ErrorAction SilentlyContinue);
+   if(-not $waiting.Count){break};Start-Sleep -Milliseconds 100
+ };
  Get-Process | Where-Object {($_.Path -eq $env:SWITCHER_DESKTOP_EXE -and (-not $restricted -or $_.Id -in $allowed)) -or $_.Id -in $backendIds} | Stop-Process -Force -ErrorAction SilentlyContinue;
  $remaining=@(Get-Process | Where-Object {($_.Path -eq $env:SWITCHER_DESKTOP_EXE -and (-not $restricted -or $_.Id -in $allowed)) -or $_.Id -in $backendIds});
  if($remaining.Count){throw 'Codex 桌面端仍在运行，请关闭桌面端后重试。'}
@@ -88,7 +92,20 @@ async function stopMacDesktop(exe, codexHome) {
     }
   };
   for (const pid of roots) signal(pid, 'SIGTERM');
-  await new Promise((r) => setTimeout(r, 1500));
+  // 客户端提前退出就继续，仍给正在保存状态的进程保留原有等待上限。
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const remaining = [...ids].some((pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (e) {
+        if (e.code === 'ESRCH') return false;
+        throw e;
+      }
+    });
+    if (!remaining) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
   for (const pid of [...ids].reverse()) signal(pid, 'SIGKILL');
 }
 function openDesktop(exe, home) {
@@ -119,32 +136,61 @@ async function runSwitch(
   let prepared,
     stoppedEditors = [],
     applied = false;
-  writeJson(file, {
-    id: job.id,
-    pid: process.pid,
-    status: 'preparing',
-    message: api
-      ? '正在检测 API 并准备模型列表，桌面端仍在运行…'
-      : '正在准备目标账号登录，桌面端仍在运行…',
-  });
-  try {
-    // 后台切换进程是新实例，先读取实际凭据存储，避免漏存 Mac 钥匙串账号。
-    await accounts.syncCurrent({ force: true });
-    if (api) prepared = await require('./service.cjs').createService(job).prepareApi(job);
-    else await accounts.prepare(job.id);
+  const startedAt = new Date().toISOString(),
+    started = performance.now(),
+    steps = [];
+  let currentStatus = 'preparing';
+  const report = (status, message, details = {}) => {
+    currentStatus = status;
     writeJson(file, {
       id: job.id,
       pid: process.pid,
-      status: 'switching',
-      message: desktop ? '准备完成，正在关闭桌面端并应用配置…' : '准备完成，正在应用配置…',
+      status,
+      message,
+      startedAt,
+      elapsedMs: Math.round(performance.now() - started),
+      steps,
+      configurationApplied: applied,
+      ...details,
+      ...(['done', 'error'].includes(status) ? { finishedAt: new Date().toISOString() } : {}),
     });
-    if (desktop) await stop(job.desktopExe, job.codexHome);
+  };
+  // 每步只记录实际执行结果；桌面打开请求与窗口重载完成分别展示。
+  const step = async (id, label, action) => {
+    const item = { id, label, status: 'running' },
+      begin = performance.now();
+    steps.push(item);
+    report(currentStatus, label + '…');
+    try {
+      const result = await action();
+      item.status = 'done';
+      return result;
+    } catch (error) {
+      item.status = 'error';
+      throw error;
+    } finally {
+      item.durationMs = Math.round(performance.now() - begin);
+    }
+  };
+  report('preparing', api ? '正在检查 API 和模型列表…' : '正在准备目标账号登录…');
+  try {
+    // 后台切换进程是新实例，先读取实际凭据存储，避免漏存 Mac 钥匙串账号。
+    await step('prepare', api ? '检查 API 和准备模型' : '准备账号登录', async () => {
+      await accounts.syncCurrent({ force: true });
+      if (api) prepared = await require('./service.cjs').createService(job).prepareApi(job);
+      else await accounts.prepare(job.id);
+    });
+    currentStatus = 'switching';
+    if (desktop) await step('stop', '关闭目标桌面端', () => stop(job.desktopExe, job.codexHome));
     // 退出前官方客户端可能刚刷新令牌；应用目标配置前再保存一次最新登录。
-    await accounts.syncCurrent({ force: true });
-    const result = api
-      ? (accounts.captureCurrent(), prepared.apply())
-      : accounts.apply(job.id, job.model, job.catalog);
-    applied = true;
+    const result = await step('apply', '保存并应用目标配置', async () => {
+      await accounts.syncCurrent({ force: true });
+      const value = api
+        ? (accounts.captureCurrent(), prepared.apply())
+        : accounts.apply(job.id, job.model, job.catalog);
+      applied = true;
+      return value;
+    });
     const target = require('smol-toml').parse(
       fs.readFileSync(path.join(job.codexHome, 'config.toml'), 'utf8'),
     );
@@ -156,9 +202,8 @@ async function runSwitch(
         target.model,
       ).length
     )
-      stoppedEditors = await require('./client-status.cjs').stopEditorBackends(
-        job.codexHome,
-        job.bridgeHome,
+      stoppedEditors = await step('editors', '释放共用配置的编辑器会话', () =>
+        require('./client-status.cjs').stopEditorBackends(job.codexHome, job.bridgeHome),
       );
     recordEffect(
       job.codexHome,
@@ -167,17 +212,22 @@ async function runSwitch(
       '配置已写入，正在同步旧对话，尚未完成切换。',
     );
     // 新旧对话共用一次切换：先持久保存旧会话来源，再让客户端重新加载。
-    const threadRouting = await syncThreads({
-      codexHome: job.codexHome,
-      bridgeHome: job.bridgeHome,
-      onProgress: ({ completed, total }) =>
-        writeJson(file, {
-          id: job.id,
-          pid: process.pid,
-          status: 'switching',
-          message: '配置已应用，正在更新旧对话来源（' + completed + '/' + total + '）…',
-        }),
-    });
+    const threadRouting = await step('threads', '同步并核对旧对话', () =>
+      syncThreads({
+        codexHome: job.codexHome,
+        bridgeHome: job.bridgeHome,
+        onProgress: ({ completed, total, phase }) =>
+          report(
+            'switching',
+            (phase === 'verify' ? '正在核对旧对话持久结果' : '正在同步旧对话来源') +
+              '（' +
+              completed +
+              '/' +
+              total +
+              '）…',
+          ),
+      }),
+    );
     recordEffect(
       job.codexHome,
       job.bridgeHome,
@@ -185,22 +235,17 @@ async function runSwitch(
       '配置已应用，桌面端尚未重新打开。',
     );
     if (desktop) {
-      writeJson(file, {
-        id: job.id,
-        pid: process.pid,
-        status: 'reopening',
-        message: '配置已应用，正在请求重新打开桌面端…',
-      });
-      await open(job.desktopExe, job.codexHome);
+      currentStatus = 'reopening';
+      await step('reopen', '请求重新打开桌面端', () => open(job.desktopExe, job.codexHome));
     }
     let editorNote = '';
     let editorReload = null;
     if (job.reloadEditors !== false) {
       try {
-        const reloaded = require('./client-status.cjs').requestReload(
-          job.codexHome,
-          job.bridgeHome,
-          { stoppedEditors },
+        const reloaded = await step('reload', '发送编辑器重载请求', () =>
+          require('./client-status.cjs').requestReload(job.codexHome, job.bridgeHome, {
+            stoppedEditors,
+          }),
         );
         editorReload = reloaded;
         if (reloaded.count || reloaded.detectedEditors || reloaded.connectedEditors) {
@@ -221,13 +266,9 @@ async function runSwitch(
       'reopen_requested',
       '配置已应用，' + effect + editorNote + ' CLI 请重新启动。',
     );
-    writeJson(file, {
-      id: job.id,
-      status: 'done',
-      editorReload,
-      threadRouting,
-      message:
-        '已应用 ' +
+    report(
+      'done',
+      '已应用 ' +
         (api ? prepared.label + ' · ' + job.model : result.label + ' 的官方配置') +
         '。' +
         effect +
@@ -238,17 +279,16 @@ async function runSwitch(
         (api && !result.catalogCount
           ? ' 未生成模型目录，下拉可能仍显示官方列表；实际使用所选模型。'
           : ''),
-    });
+      { editorReload, threadRouting, desktopRequested: desktop },
+    );
     return { ...result, threadRouting };
   } catch (e) {
     if (applied)
       recordEffect(job.codexHome, job.bridgeHome, 'switch_incomplete', '切换未完成：' + e.message);
-    writeJson(file, {
-      id: job.id,
-      status: 'error',
-      message:
-        (applied ? '配置已应用，但旧对话同步或客户端重新加载未完成：' : '切换未完成：') + e.message,
-    });
+    report(
+      'error',
+      (applied ? '配置已应用，但旧对话同步或客户端重新加载未完成：' : '切换未完成：') + e.message,
+    );
     throw e;
   } finally {
     prepared?.cleanup();

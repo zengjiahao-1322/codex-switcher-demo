@@ -156,7 +156,7 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
       if (!model) throw Error('未找到目标来源的默认模型，旧对话未更新。');
     }
     for (const [index, row] of rows.entries()) {
-      onProgress({ completed: index, total: rows.length });
+      onProgress({ completed: index, total: rows.length, phase: 'sync' });
       row.speed = await savedServiceTier(row.rollout_path);
       let result;
       try {
@@ -184,7 +184,8 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
     // 重新启动官方后端检查持久结果，不能把 resume 的临时返回当成切换成功。
     client = openSession(codexHome, bridgeHome, config);
     await initialize();
-    for (const row of rows) {
+    for (const [index, row] of rows.entries()) {
+      onProgress({ completed: index, total: rows.length, phase: 'verify' });
       const { thread } = await client.call('thread/read', {
         threadId: row.id,
         includeTurns: false,
@@ -194,6 +195,7 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
       if (row.speed && (await savedServiceTier(row.rollout_path))?.tier !== row.speed.tier)
         throw Error('旧对话 ' + row.id + ' 的原有速度设置未能持久保留。');
     }
+    onProgress({ completed: rows.length, total: rows.length, phase: 'verify' });
     return { count: rows.length, provider, model };
   } finally {
     await client.close();
