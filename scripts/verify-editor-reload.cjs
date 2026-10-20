@@ -244,7 +244,7 @@ async function initializeHome(executable, home) {
       }));
     fs.writeFileSync(
       path.join(selected, 'config.toml'),
-      'model="after-reload"\ncli_auth_credentials_store="file"\n',
+      'model="after-reload"\nservice_tier="fast"\ncli_auth_credentials_store="file"\n[features]\nfast_mode=true\n',
     );
     const result = await api('reloadClients');
     assert.equal(result.count, 2);
@@ -257,9 +257,11 @@ async function initializeHome(executable, home) {
       assert.notEqual(latest.extensionHostPid, initial[index].extensionHostPid);
       assert.notEqual(latest.backendPid, initial[index].backendPid);
       assert.equal(latest.configuration.model, 'after-reload');
+      assert.equal(latest.configuration.service_tier, 'fast');
     }
     assert.equal(activations(folders[2]).length, 1);
     assert.equal(activations(folders[2])[0].backendPid, initial[2].backendPid);
+    assert.equal(activations(folders[2])[0].configuration.service_tier, undefined);
     for (const home of [selected, separate]) {
       assert.equal(
         fs.readFileSync(path.join(home, 'sessions', 'saved-history.jsonl'), 'utf8'),
@@ -269,6 +271,7 @@ async function initializeHome(executable, home) {
     report.checks.push(
       'two-window-actual-reload',
       'new-backends-read-new-config',
+      'shared-windows-read-Fast-setting',
       'independent-window-untouched',
       'saved-history-files-preserved',
     );

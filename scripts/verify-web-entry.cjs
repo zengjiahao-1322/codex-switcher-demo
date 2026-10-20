@@ -34,12 +34,26 @@ const providerId = require('../providers.cjs').add(bridge, {
 });
 fs.writeFileSync(path.join(bridge, 'current.json'), JSON.stringify({ providerId }));
 let browser, server, port;
+const switchRequests = [];
 const report = { platform: process.platform, checks: [] };
 async function start(token) {
   server = createServer({
     token,
     getState: service.state,
-    actions: { ...service.actions, accounts: async () => ({ items: [] }) },
+    actions: {
+      ...service.actions,
+      accounts: async () => ({ items: [] }),
+      // 这里只替代重启客户端这一步，页面传参和配置读写仍使用实际代码。
+      desktopSwitch: async (input) => {
+        switchRequests.push(input);
+        const file = path.join(home, 'config.toml');
+        fs.writeFileSync(
+          file,
+          require('../core.cjs').configureSpeed(fs.readFileSync(file, 'utf8'), input.fast),
+        );
+        return { message: 'fixture switch applied' };
+      },
+    },
   });
   await new Promise((resolve) => server.listen(port || 0, '127.0.0.1', resolve));
   port = server.address().port;
@@ -89,6 +103,22 @@ async function loaded(page, url) {
     await recovered;
     assert.equal(await page.evaluate(async () => (await fetch('/api/state')).status), 200);
     report.checks.push('old-tab-recovers-after-service-restart');
+    // 验证开关随“应用”提交，刷新后从配置恢复，关闭时同样提交 false。
+    for (const fast of [true, false]) {
+      await page.locator('#fast').setChecked(fast);
+      const applied = page.waitForResponse(
+        (response) => response.url().endsWith('/api/desktopSwitch') && response.status() === 200,
+      );
+      await page.locator('#switch').click();
+      await applied;
+      assert.equal(switchRequests.at(-1).fast, fast);
+      await loaded(page, base + '/');
+      assert.equal(await page.locator('#fast').isChecked(), fast);
+      assert.ok(
+        (await page.locator('#summary').innerText()).includes(fast ? 'Fast 已配置' : '标准速度'),
+      );
+    }
+    report.checks.push('fast-toggle-submit-and-refresh');
     await page.screenshot({ path: path.resolve('verification/web-entry.png'), fullPage: true });
     const failed = await context.newPage();
     await failed.route('**/api/accounts', (route) =>
@@ -109,6 +139,7 @@ async function loaded(page, url) {
   } catch (error) {
     report.passed = false;
     report.error = error.message;
+    report.errorStack = error.stack;
     process.exitCode = 1;
   } finally {
     await browser?.close();

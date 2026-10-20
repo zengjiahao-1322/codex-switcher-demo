@@ -1,5 +1,6 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
+let fastEdited = false;
 // 网页与桌面快捷方式统一使用主页建立的本机会话，直接访问无需附带令牌。
 if (location.hash) {
   history.replaceState(null, '', location.pathname + location.search);
@@ -340,12 +341,14 @@ function updateSwitchAction() {
   const p = selectedProvider(),
     a = selectedAccount(),
     official = officialTarget(),
-    same = official
+    sameSource = official
       ? state?.current.official && a?.current && !a?.pendingLogin
-      : p?.inUse && $('model').value.trim() === state?.current.model;
+      : p?.inUse && $('model').value.trim() === state?.current.model,
+    same = sameSource && $('fast').checked === !!state?.current.fast;
   const locked = pendingRequests.has($('switch')) || switchPending();
   $('provider').disabled = locked;
   $('model').disabled = locked;
+  $('fast').disabled = locked;
   $('fetch-models').disabled = locked || official || pendingRequests.has($('fetch-models'));
   $('probe').disabled = locked || official || pendingRequests.has($('probe'));
   $('switch').disabled = locked || !p || (!official && !$('model').value.trim());
@@ -528,6 +531,11 @@ function selected(resetModel = true) {
       (p.local ? ' 这是你电脑上的另一个代理服务。' : '') +
       (!official && !p.hasKey && !p.local ? ' 请先在 API 配置中填写密钥。' : '')
     : '';
+  $('fast-hint').textContent = official
+    ? '与账号、模型支持有关，可能增加额度消耗。随“应用”一起生效。'
+    : p?.apiMode === 'anthropic_messages'
+      ? 'Anthropic Messages 转换不支持此加速，请关闭 Fast 后应用。'
+      : '需要上游中转（如 CPA）支持并转发，可能增加费用；勾选后可点“检测 API”核对上游回报的档位，不保证固定倍速。';
   updateSwitchAction();
   renderSelectedQuota();
 }
@@ -540,6 +548,16 @@ function renderSummary() {
     ? '官方 · ' + (account?.label || '未登录')
     : 'API · ' + c.name + ' · ' + (c.model || '默认模型');
   $('summary').append(b);
+  if (c.serviceTier)
+    $('summary').append(
+      document.createTextNode(
+        c.fast
+          ? ' · Fast 已配置'
+          : c.serviceTier === 'default'
+            ? ' · 标准速度'
+            : ' · ' + c.serviceTier,
+      ),
+    );
   $('summary').title = state.codexVersion || '';
 }
 function renderService() {
@@ -550,6 +568,7 @@ function renderService() {
     : '转换服务未运行或端口 ' + a.port + ' 被占用。';
 }
 function renderSelect(keepDraft = false) {
+  if (!keepDraft || !fastEdited) $('fast').checked = !!state.current.fast;
   const keep = $('provider').value;
   $('provider').replaceChildren();
   const group = (name) => {
@@ -792,6 +811,10 @@ $('provider').onchange = () => {
   selected();
 };
 $('model').addEventListener('input', updateSwitchAction);
+$('fast').onchange = () => {
+  fastEdited = true;
+  updateSwitchAction();
+};
 $('fetch-models').onclick = () =>
   busy($('fetch-models'), async () => {
     const id = $('provider').value;
@@ -808,13 +831,14 @@ $('probe').onclick = () =>
     const id = $('provider').value,
       model = $('model').value.trim();
     status('检测中…');
-    const r = await api('probe', { id, model });
-    updateAccess(id, {
-      mode: r.ok ? r.mode : 'failed',
-      model,
-      at: new Date().toISOString(),
-      message: r.message,
-    });
+    const r = await api('probe', { id, model, fast: $('fast').checked });
+    if (!$('fast').checked || r.ok)
+      updateAccess(id, {
+        mode: r.ok ? r.mode : 'failed',
+        model,
+        at: new Date().toISOString(),
+        message: r.message,
+      });
     status(r.message);
   });
 $('switch').onclick = () =>
@@ -829,8 +853,10 @@ $('switch').onclick = () =>
       status('正在准备应用账号…');
       const r = await api('accountSwitch', {
         id: a.id,
+        fast: $('fast').checked,
         reloadEditors: $('reload-editors').checked,
       });
+      fastEdited = false;
       status(r.message);
       accountData.switchJob = { status: 'queued' };
       watchAccounts();
@@ -842,8 +868,10 @@ $('switch').onclick = () =>
       const r = await api('desktopSwitch', {
         id,
         model,
+        fast: $('fast').checked,
         reloadEditors: $('reload-editors').checked,
       });
+      fastEdited = false;
       status(r.message);
       accountData.switchJob = { status: 'queued' };
       watchAccounts();

@@ -245,6 +245,8 @@ function createService({
         model: c.model || null,
         official: officialInUse(c),
         viaAdapter,
+        fast: ['fast', 'priority'].includes(c.service_tier) && c.features?.fast_mode !== false,
+        serviceTier: c.service_tier || null,
       },
       catalog,
       usage: {
@@ -324,22 +326,48 @@ function createService({
     return v && path.resolve(v) !== path.resolve(catalogPath) ? v : undefined;
   }
   // 先测 Responses 直连；不通时按登记协议（登记为 Responses 的按 Chat Completions）再测，可经本机转换接入。
-  async function probeProvider(p, model) {
-    const direct = await probe(p, model);
+  async function probeProvider(p, model, fast = false) {
+    const speedNote = (result) =>
+      !fast
+        ? ''
+        : ['fast', 'priority'].includes(result.serviceTier)
+          ? ' 上游回报 Fast 档位；这不代表已测出固定倍速。'
+          : result.serviceTier
+            ? ' 上游回报 ' + result.serviceTier + ' 档位，本次未确认 Fast。'
+            : ' 上游未回报服务档位，不能确认 Fast 是否生效。';
+    const direct = await probe(p, model, { fast });
     if (direct.ok) {
       passed.set(fingerprint(p, model), { at: Date.now(), mode: 'direct' });
-      return { ok: true, mode: 'direct', message: '可直连：Responses 和函数调用通过。' };
+      return {
+        ok: true,
+        mode: 'direct',
+        ...(fast
+          ? {
+              serviceTier: direct.serviceTier,
+              fastConfirmed: ['fast', 'priority'].includes(direct.serviceTier),
+            }
+          : {}),
+        message: '可直连：Responses 和函数调用通过。' + speedNote(direct),
+      };
     }
     const nativeMode = ['chat_completions', 'anthropic_messages'].includes(p.apiMode)
       ? p.apiMode
       : 'chat_completions';
-    const native = await probeNative({ ...p, apiMode: nativeMode }, model);
+    const native = await probeNative({ ...p, apiMode: nativeMode }, model, { fast });
     if (native.ok) {
       passed.set(fingerprint(p, model), { at: Date.now(), mode: 'adapter', apiMode: nativeMode });
       return {
         ok: true,
         mode: 'adapter',
-        message: `不支持 Responses 直连（${direct.message}），但原生协议可用：将经本机转换服务接入（转换服务须保持运行；不支持 Codex 内置网页搜索）。`,
+        ...(fast
+          ? {
+              serviceTier: native.serviceTier,
+              fastConfirmed: ['fast', 'priority'].includes(native.serviceTier),
+            }
+          : {}),
+        message:
+          `不支持 Responses 直连（${direct.message}），但原生协议可用：将经本机转换服务接入（转换服务须保持运行；不支持 Codex 内置网页搜索）。` +
+          speedNote(native),
       };
     }
     // 限流/服务端错误/超时属于临时故障，不代表协议不兼容。
@@ -356,10 +384,19 @@ function createService({
     if (!r.ok && r.transient && ['direct', 'adapter'].includes(prev.mode)) return;
     store.recordProbe(bridgeHome, p, model, r.ok ? r.mode : 'failed', r.message);
   }
-  async function prepareApi({ id, model, autostart: wantAutostart }) {
+  async function prepareApi({ id, model, fast, autostart: wantAutostart }) {
     model = String(model || '').trim();
     if (!model) throw Error('请选择或填写模型');
-    const p = provider(id);
+    const p = provider(id),
+      currentConfig = readConfig(),
+      wantsFast =
+        fast ??
+        (['fast', 'priority'].includes(currentConfig.service_tier) &&
+          currentConfig.features?.fast_mode !== false);
+    if (wantsFast && p.apiMode === 'anthropic_messages')
+      throw Error(
+        'Anthropic Messages 转换不支持 Codex Fast，请关闭加速或改用 Responses / Chat Completions。',
+      );
     let pass = passed.get(fingerprint(p, model));
     const saved = store.access(bridgeHome, p),
       nativeMode = ['chat_completions', 'anthropic_messages'].includes(p.apiMode)
@@ -369,12 +406,14 @@ function createService({
     if ((!pass || Date.now() - pass.at > 600000) && reuseMode)
       pass = { at: Date.now(), mode: reuseMode, apiMode: nativeMode, reused: true };
     if (!pass || Date.now() - pass.at > 600000) {
-      const r = await probeProvider(p, model);
-      recordProbeResult(p, model, r);
+      const r = await probeProvider(p, model, wantsFast);
+      if (!wantsFast || r.ok) recordProbeResult(p, model, r);
       if (!r.ok) throw Error('检测未通过，未切换：' + r.message);
       pass = passed.get(fingerprint(p, model));
     }
     const a = adapterSettings();
+    if (wantsFast && pass.mode === 'adapter' && pass.apiMode === 'anthropic_messages')
+      throw Error('当前使用 Anthropic Messages 转换，不支持 Codex Fast；配置未改动。');
     let target = p;
     if (pass.mode === 'adapter') {
       if (!(await serviceUp())) {
@@ -406,14 +445,14 @@ function createService({
       catalog = await buildCatalog(p, model, stagedCatalog).catch(() => null);
       const exe = findCodex({ dataHome: bridgeHome });
       let compatible = await require('./compatibility.cjs').validateConfig(
-        core.prepareConfig(original, keyed, model, catalog?.path),
+        core.prepareConfig(original, keyed, model, catalog?.path, fast),
         exe,
       );
       if (!compatible.ok && catalog) {
         catalog = null;
         cleanup();
         compatible = await require('./compatibility.cjs').validateConfig(
-          core.prepareConfig(original, keyed, model),
+          core.prepareConfig(original, keyed, model, undefined, fast),
           exe,
         );
       }
@@ -427,7 +466,14 @@ function createService({
       cleanup,
       apply() {
         if (catalog) fs.renameSync(stagedCatalog, catalogPath);
-        core.applySwitch(codexHome, keyed, model, bridgeHome, catalog ? catalogPath : undefined);
+        core.applySwitch(
+          codexHome,
+          keyed,
+          model,
+          bridgeHome,
+          catalog ? catalogPath : undefined,
+          fast,
+        );
         a.target =
           pass.mode === 'adapter' ? { providerId: p.id, model, apiMode: pass.apiMode } : a.target;
         fs.writeFileSync(
@@ -563,7 +609,7 @@ function createService({
         accounts.remove(id);
         return { message: '已移除保存的账号。' };
       }),
-    accountSwitch: ({ id, reloadEditors = true }) =>
+    accountSwitch: ({ id, fast, reloadEditors = true }) =>
       exclusive(async () => {
         if (['starting', 'waiting'].includes(accounts.status().login?.status))
           throw Error('请先完成或取消当前登录');
@@ -575,6 +621,7 @@ function createService({
           codexHome,
           bridgeHome,
           reloadEditors,
+          fast,
           model: officialModel(c),
           catalog: originalCatalog(c),
         });
@@ -598,7 +645,7 @@ function createService({
       if (!models.length) throw Error('供应商返回了空的模型列表，请手动填写模型');
       return { models, message: `获取到 ${models.length} 个模型。` };
     },
-    probe: ({ id, model }) =>
+    probe: ({ id, model, fast = false }) =>
       exclusive(async () => {
         if (id === OFFICIAL)
           return {
@@ -607,19 +654,20 @@ function createService({
             message: '官方登录使用 Codex 自己的 ChatGPT 登录，无需检测，可直接应用。',
           };
         const p = provider(id);
-        const r = await probeProvider(p, model);
-        recordProbeResult(p, model, r);
+        const r = await probeProvider(p, model, fast);
+        // 加速请求被拒绝不代表标准接入不可用，不能覆盖之前通过的普通检测。
+        if (!fast || r.ok) recordProbeResult(p, model, r);
         if (!r.ok && r.transient)
           r.message += '（这通常是临时的：额度、限流或服务端故障，不代表配置不兼容）';
         return r;
       }),
     // 10 分钟内没有检测过（或检测结果已过期）时自动先检测一次，未通过则不切换。
-    switch: ({ id, model, autostart: wantAutostart }) =>
+    switch: ({ id, model, fast, autostart: wantAutostart }) =>
       exclusive(async () => {
         if (id === OFFICIAL) {
           const c = readConfig();
           const m = String(model || officialModel(c) || '').trim() || undefined;
-          core.applyOfficial(codexHome, m, originalCatalog(c));
+          core.applyOfficial(codexHome, m, originalCatalog(c), undefined, fast);
           fs.rmSync(currentPath, { force: true });
           const threadRouting = await require('./thread-routing.cjs').synchronizeThreads({
             codexHome,
@@ -632,7 +680,7 @@ function createService({
             message: `已切换到 Codex 官方登录（${m ? '模型 ' + m : '由 Codex 选择默认模型'}）。${EFFECT}${officialInUse(c) ? '' : OFFICIAL_RESTART}`,
           };
         }
-        const prepared = await prepareApi({ id, model, autostart: wantAutostart });
+        const prepared = await prepareApi({ id, model, fast, autostart: wantAutostart });
         try {
           const result = prepared.apply();
           const threadRouting = await require('./thread-routing.cjs').synchronizeThreads({

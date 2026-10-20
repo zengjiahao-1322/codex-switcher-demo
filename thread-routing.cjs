@@ -7,7 +7,7 @@ const toml = require('smol-toml');
 const { findCodex } = require('./runtime.cjs');
 
 // 只读索引用于确定处理范围；供应商和模型由官方接口持久保存，不改写聊天数据库。
-function pendingThreads(home, provider, model) {
+function pendingThreads(home, provider, model, includeMatching = false) {
   const file = fs
     .readdirSync(home)
     .filter((name) => /^state_\d+\.sqlite$/.test(name))
@@ -19,9 +19,9 @@ function pendingThreads(home, provider, model) {
       .prepare(
         'SELECT id, model_provider, model FROM threads WHERE archived=0 ' +
           'AND source NOT LIKE \'%"subagent"%\' ' +
-          'AND (? IS NULL OR model_provider<>? OR model IS NULL OR model<>?) ORDER BY id',
+          'AND (? OR ? IS NULL OR model_provider<>? OR model IS NULL OR model<>?) ORDER BY id',
       )
-      .all(model || null, provider, model || null);
+      .all(Number(includeMatching), model || null, provider, model || null);
   } finally {
     db.close();
   }
@@ -118,8 +118,11 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
   const config = toml.parse(fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8'));
   const provider = config.model_provider || 'openai';
   let model = config.model;
-  const rows = pendingThreads(codexHome, provider, model);
-  if (!rows.length) return { count: 0, provider, model };
+  // 档位不在索引表中；配置了档位时让旧对话一起更新，不能因模型没变就跳过。
+  const serviceTier = config.service_tier;
+  const expectedTier = ['fast', 'priority'].includes(serviceTier) ? 'priority' : serviceTier;
+  const rows = pendingThreads(codexHome, provider, model, serviceTier !== undefined);
+  if (!rows.length) return { count: 0, provider, model, serviceTier };
   let client = openSession(codexHome, bridgeHome, config);
   const initialize = () =>
     client.call('initialize', {
@@ -141,6 +144,7 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
           threadId: row.id,
           modelProvider: provider,
           model,
+          ...(serviceTier !== undefined ? { serviceTier } : {}),
           excludeTurns: true,
         });
       } catch (error) {
@@ -152,6 +156,8 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
       }
       if (result.modelProvider !== provider || result.model !== model)
         throw Error('旧对话 ' + row.id + ' 未采用目标来源或模型。');
+      if (serviceTier !== undefined && result.serviceTier !== expectedTier)
+        throw Error('旧对话 ' + row.id + ' 未采用目标速度档位。');
       await client.call('thread/unsubscribe', { threadId: row.id });
     }
     await client.close();
@@ -165,8 +171,17 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
       });
       if (thread.modelProvider !== provider || thread.model !== model)
         throw Error('旧对话 ' + row.id + ' 的来源或模型未能持久保存。');
+      if (serviceTier !== undefined) {
+        const resumed = await client.call('thread/resume', {
+          threadId: row.id,
+          excludeTurns: true,
+        });
+        if (resumed.serviceTier !== expectedTier)
+          throw Error('旧对话 ' + row.id + ' 的速度档位冷启动核对失败。');
+        await client.call('thread/unsubscribe', { threadId: row.id });
+      }
     }
-    return { count: rows.length, provider, model };
+    return { count: rows.length, provider, model, serviceTier };
   } finally {
     await client.close();
   }

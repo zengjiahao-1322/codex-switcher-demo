@@ -18,6 +18,8 @@ async function validateConfig(text, codexExe) {
     model_provider: parsed.model_provider,
     model_catalog_json: parsed.model_catalog_json,
     model_providers: parsed.model_providers,
+    service_tier: parsed.service_tier,
+    features: { fast_mode: parsed.features?.fast_mode },
   };
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bridge-validate-'));
   try {

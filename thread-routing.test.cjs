@@ -119,6 +119,29 @@ test(
     assert.equal((await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).count, 0);
     fs.writeFileSync(path.join(home, 'config.toml'), text);
     assert.equal((await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).count, 2);
+    // 来源和模型都不变时，Fast 的开启和关闭仍必须同步两种历史。
+    for (const fast of [true, false]) {
+      fs.writeFileSync(
+        path.join(home, 'config.toml'),
+        require('./core.cjs').configureSpeed(text, fast),
+      );
+      const updated = await synchronizeThreads({ codexHome: home, bridgeHome: bridge });
+      assert.equal(updated.count, 2);
+      assert.equal(updated.serviceTier, fast ? 'fast' : 'default');
+      c = await connect();
+      try {
+        for (const thread of threads) {
+          const resumed = await c.call('thread/resume', {
+            threadId: thread.id,
+            excludeTurns: true,
+          });
+          assert.equal(resumed.serviceTier, fast ? 'priority' : 'default');
+          await c.call('thread/unsubscribe', { threadId: thread.id });
+        }
+      } finally {
+        await c.close();
+      }
+    }
     c = await connect();
     try {
       for (const [index, thread] of threads.entries()) {

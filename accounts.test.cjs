@@ -78,7 +78,7 @@ test('switch waits for desktop exit, preserves refreshed outgoing credentials, a
   );
   const events = [];
   await runSwitch(
-    { ...f, id: bob.id, model: 'official', desktopExe: 'fixture-desktop.exe' },
+    { ...f, id: bob.id, model: 'official', fast: true, desktopExe: 'fixture-desktop.exe' },
     {
       accounts: a,
       syncThreads: async () => {
@@ -105,9 +105,15 @@ test('switch waits for desktop exit, preserves refreshed outgoing credentials, a
   assert.equal(c.model_provider, undefined);
   assert.equal(c.model_catalog_json, undefined);
   assert.equal(c.mcp_servers.keep.command, 'keep');
+  assert.equal(c.service_tier, 'fast');
+  assert.equal(c.features.fast_mode, true);
   assert.ok(c.model_providers.hermes_bridge);
   assert.equal(a.status().items.find((x) => x.current).id, bob.id);
-  a.apply(alice.id, 'official');
+  a.apply(alice.id, 'official', undefined, false);
+  assert.equal(
+    toml.parse(fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8')).service_tier,
+    'default',
+  );
   assert.equal(
     JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json'), 'utf8')).tokens.refresh_token,
     'REFRESHED_BEFORE_EXIT',
