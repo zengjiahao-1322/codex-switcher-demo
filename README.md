@@ -1,10 +1,10 @@
 # Codex Switcher Demo
 
-为 Codex 管理官方账号和自定义 API 的本机工具，支持 Windows 和 macOS。当前版本：**0.1.2 Demo**。
+为 Codex 管理官方账号和自定义 API 的本机工具，支持 Windows 和 macOS。当前版本：**0.1.3 Demo**。
 
 [下载 Windows / macOS 版本](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest)
 
-[Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.2/codex-switcher-windows-x64.zip) · [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.2/codex-switcher-macos-arm64.zip) · [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.2/codex-switcher-macos-x64.zip)
+[Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-windows-x64.zip) · [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-arm64.zip) · [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-x64.zip)
 
 ## 下载即用
 
@@ -44,7 +44,7 @@ Mac 包按芯片拆分，只携带一套 Node.js，避免原通用包同时下�
 
 更新切换器后，也需要重新接入最新版伴随扩展。每个窗口的状态栏应显示“Codex Switcher · 已连接”；已有窗口可能需要先手动重载一次才能启用新扩展。客户端列表会显示扩展版本、配置归属，以及请求待接收、已接收或重载失败等状态。
 
-也可单独下载 [0.1.2 伴随扩展 VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.2/codex-switcher-companion.vsix)，在各编辑器选择“从 VSIX 安装”，无需为了更新扩展重新下载 Node 运行时。
+也可单独下载 [0.1.3 伴随扩展 VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-companion.vsix)，在各编辑器选择“从 VSIX 安装”，无需为了更新扩展重新下载 Node 运行时。
 
 多个窗口共用 `CODEX_HOME` 时，一次切换会更新默认配置和未归档旧对话的供应商、模型。通过官方会话接口保存并冷启动核对后，再重新打开桌面端、请求编辑器窗口重载；原消息、工具记录和项目目录保留。重载会中断正在执行的任务，请等任务结束再切换，或使用独立配置目录。无法同步的会话会报告失败，不会把部分切换显示为完成；未落盘内容和正在执行的任务不保证自动恢复。
 
@@ -68,13 +68,9 @@ Windows 已在开发机实测真实官方扩展启动、指定窗口重载及独
 
 GitHub Actions 会在 Windows 与 macOS 上安装固定版本的官方 Codex，运行回归检查、构建发行包，再从发行包解压启动服务，验证客户端列表和伴随扩展下载。macOS 原生进程助手也在 macOS 上编译并读取真实进程验证。CI 不使用任何个人账号；macOS 的 Finder 首次授权、真实账号切换和日常桌面交互仍需真实 Mac 用户验收。
 
-本版修复已在 macOS 15 Apple Silicon / Intel 环境验证，每种架构 78 项回归检查全部通过、无跳过。实际下载官方 VSIX，验证不依赖桌面版或 `CODEX_EXE` 的程序发现、真实 Codex 进程归属、默认/自定义配置目录、钥匙串读取、登录启动/取消，以及官方运行程序的额度 RPC 并发。打包后的 `.app` 入口也在最小环境中启动通过。额度测试使用合成账号与本机响应，未上传个人凭据，个人账号完整登录和真实额度仍需在用户 Mac 上复核。
+[本次功能修复验证](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39418411775)覆盖 Windows、macOS 15 Apple Silicon 与 Intel 的回归检查、真实浏览器普通 API 检测与独立额度刷新、打包解压启动，以及真实 VS Code 多窗口重载。VS Code 检查使用安装的伴随扩展和官方 Codex 后端，确认两个共享配置窗口重载，独立配置窗口不受影响；测试使用合成数据，不证明执行中任务能自动恢复。Cursor、Windsurf、Insiders 的接入路径已支持，尚未逐款完成同样的 GUI 验收。
 
-[macOS 验证记录](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39261196550)。两种架构另通过真实浏览器的额度独立刷新检查、切换时钥匙串最新登录保存，以及真实后端进程树的配置隔离/定向重载命令检查；实际 VS Code 窗口的重载交互仍需用户 Mac 复核。原生助手已固定最低编译目标 macOS 12，二进制两个架构的版本标记均已检查；本次执行系统为 macOS 15，没有实际运行 macOS 12。
-
-[0.1.1 安装与启动验证](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39266793668)：两个 Mac 架构均实际复现旧脚本在已有运行记录时的 Bash 错误，新包通过首次安装、重复安装、数据保留、安装后完整签名以及 LaunchServices 打开。系统信任评估仍拒绝未公证的 ad-hoc 应用；这些检查不代表已通过浏览器下载后的 Gatekeeper 首次授权。
-
-[0.1.2 编辑器检查](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39373408163)使用真实 VS Code 1.142.0、实际安装的伴随扩展 VSIX 和官方 Codex 0.163.0 后端：两个窗口共用配置，另一个窗口使用独立目录。检查重载前后的扩展宿主/后端进程变化，并通过官方 `config/read` RPC 核对新配置。配置目录预先完成首次数据库初始化，历史保留检查使用合成标记文件；没有使用个人账号或验证真实聊天任务的自动恢复。Cursor、Windsurf、Insiders 的接入路径已支持，但未逐款完成同样的 GUI 验收。
+macOS CI 另覆盖系统 Bash 安装脚本、首次与重复安装、数据保留、ad-hoc 签名完整性和 LaunchServices 启动。尚未完成浏览器下载后的 Gatekeeper 首次授权、个人账号完整登录与真实额度的真机验收。原生助手最低编译目标为 macOS 12，但实际执行系统为 macOS 15，macOS 12 尚无实机结果。
 
 ## 开发与发布
 
