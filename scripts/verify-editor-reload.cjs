@@ -31,6 +31,52 @@ function activations(folder) {
   return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
 }
 
+async function initializeHome(executable, home) {
+  // 先完成官方运行时的首次数据库迁移，避免把两个全新数据库初始化的竞争当作重载失败。
+  const child = cp.spawn(executable, ['app-server'], {
+    env: { ...process.env, CODEX_HOME: home },
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  const closed = new Promise((resolve) => child.once('close', resolve));
+  let output = '';
+  let errors = '';
+  child.stderr.on('data', (chunk) => {
+    errors += chunk;
+  });
+  child.stdout.on('data', (chunk) => {
+    output += chunk;
+  });
+  child.stdin.write(
+    JSON.stringify({
+      id: 1,
+      method: 'initialize',
+      params: {
+        clientInfo: { name: 'switcher-database-setup', version: '1' },
+      },
+    }) + '\n',
+  );
+  try {
+    await waitFor(
+      () => {
+        if (child.exitCode !== null) throw Error('初始化 Codex 数据库失败：' + errors);
+        return output.split('\n').some((line) => {
+          try {
+            return JSON.parse(line).id === 1 && JSON.parse(line).result;
+          } catch {
+            return false;
+          }
+        });
+      },
+      'initial Codex database setup',
+      20000,
+    );
+  } finally {
+    child.kill();
+    await closed;
+  }
+}
+
 (async () => {
   try {
     const { downloadAndUnzipVSCode } = require(
@@ -98,11 +144,15 @@ function activations(folder) {
     report.checks.push('actual-offline-companion-VSIX-install');
     for (const home of [selected, separate]) {
       fs.mkdirSync(path.join(home, 'sessions'), { recursive: true });
-      fs.writeFileSync(path.join(home, 'config.toml'), 'model="before-reload"\n');
+      fs.writeFileSync(
+        path.join(home, 'config.toml'),
+        'model="before-reload"\ncli_auth_credentials_store="file"\n',
+      );
       fs.writeFileSync(
         path.join(home, 'sessions', 'saved-history.jsonl'),
         'saved-history-marker\n',
       );
+      await initializeHome(executable, home);
     }
     const service = require('../service.cjs').createService({
       codexHome: selected,
@@ -191,7 +241,10 @@ function activations(folder) {
         shared: client.shared,
         canReload: client.canReload,
       }));
-    fs.writeFileSync(path.join(selected, 'config.toml'), 'model="after-reload"\n');
+    fs.writeFileSync(
+      path.join(selected, 'config.toml'),
+      'model="after-reload"\ncli_auth_credentials_store="file"\n',
+    );
     const result = await api('reloadClients');
     assert.equal(result.count, 2);
     await waitFor(

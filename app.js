@@ -964,6 +964,9 @@ async function refreshClients() {
           : '') +
         (client.error ? '\n进程读取失败：' + client.error : '') +
         (client.workspace ? '\n' + client.workspace : '') +
+        (client.kind === 'editor' && !client.confirmed
+          ? '\n尚未确认此窗口的 Codex 后端。请打开 Codex 扩展；若已打开，请查看其输出是否启动失败。'
+          : '') +
         (client.kind === 'editor'
           ? '\n伴随扩展：' + (client.companionVersion || '版本未知，可重新接入以更新')
           : '') +
