@@ -70,6 +70,8 @@ GitHub Actions 会在 Windows 与 macOS 上安装固定版本的官方 Codex，�
 
 [0.1.1 安装与启动验证](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39266793668)：两个 Mac 架构均实际复现旧脚本在已有运行记录时的 Bash 错误，新包通过首次安装、重复安装、数据保留、安装后完整签名以及 LaunchServices 打开。系统信任评估仍拒绝未公证的 ad-hoc 应用；这些检查不代表已通过浏览器下载后的 Gatekeeper 首次授权。
 
+[0.1.2 编辑器检查](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39373408163)使用真实 VS Code 1.142.0、实际安装的伴随扩展 VSIX 和官方 Codex 0.163.0 后端：两个窗口共用配置，另一个窗口使用独立目录。检查重载前后的扩展宿主/后端进程变化，并通过官方 `config/read` RPC 核对新配置。配置目录预先完成首次数据库初始化，历史保留检查使用合成标记文件；没有使用个人账号或验证真实聊天任务的自动恢复。Cursor、Windsurf、Insiders 的接入路径已支持，但未逐款完成同样的 GUI 验收。
+
 ## 开发与发布
 
 需要 Node.js 22.22+。安装依赖后运行：
