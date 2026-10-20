@@ -253,13 +253,15 @@ function requestReload(codexHome, bridgeHome, { id } = {}) {
   }
   return {
     count: targets.length,
+    detectedEditors: status.ide,
+    connectedEditors: status.connectedEditors,
     targets: targets.map((client) => ({
       id: client.editorId,
       name: client.name,
       workspace: client.workspace,
     })),
     message: targets.length
-      ? '已向 ' + targets.length + ' 个共用配置的编辑器窗口发送重载请求，尚不代表重载完成。'
+      ? '已向 ' + targets.length + ' 个共用配置的编辑器窗口发送重载请求，等待窗口执行。'
       : '未向任何编辑器窗口发送重载：请先接入伴随扩展，并在客户端列表确认配置目录。',
   };
 }

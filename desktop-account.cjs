@@ -163,7 +163,9 @@ async function runSwitch(
           job.bridgeHome,
         );
         editorReload = reloaded;
-        editorNote = ' ' + reloaded.message;
+        if (reloaded.count || reloaded.detectedEditors || reloaded.connectedEditors) {
+          editorNote = ' ' + reloaded.message;
+        }
       } catch {
         editorNote = ' 编辑器重载请求未发送，可在客户端列表重试。';
       }

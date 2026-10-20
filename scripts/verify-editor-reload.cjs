@@ -158,6 +158,7 @@ function activations(folder) {
         {
           env: { ...process.env, CODEX_HOME: home },
           windowsHide: true,
+          detached: process.platform === 'darwin',
           stdio: ['ignore', 'pipe', 'pipe'],
         },
       );
@@ -241,6 +242,13 @@ function activations(folder) {
       }));
     process.exitCode = 1;
   } finally {
+    report.checkedAt = new Date().toISOString();
+    fs.mkdirSync(path.join(project, 'verification'), { recursive: true });
+    fs.writeFileSync(
+      path.join(project, 'verification', 'editor-reload.json'),
+      JSON.stringify(report, null, 2),
+    );
+    console.log(JSON.stringify(report));
     for (const entry of processes) fs.writeFileSync(path.join(entry.folder, 'stop'), '');
     for (const entry of processes) {
       await Promise.race([entry.closed, new Promise((resolve) => setTimeout(resolve, 5000))]);
@@ -251,14 +259,19 @@ function activations(folder) {
           });
         else entry.child.kill('SIGTERM');
       }
+      if (process.platform === 'darwin') {
+        // 仅终止本测试创建的独立进程组，避免扩展宿主遗留的心跳让测试服务无法退出。
+        try {
+          process.kill(-entry.child.pid, 'SIGTERM');
+        } catch {}
+      }
+      entry.child.stdout.destroy();
+      entry.child.stderr.destroy();
+      entry.child.unref();
     }
-    if (server) await new Promise((resolve) => server.close(resolve));
-    report.checkedAt = new Date().toISOString();
-    fs.mkdirSync(path.join(project, 'verification'), { recursive: true });
-    fs.writeFileSync(
-      path.join(project, 'verification', 'editor-reload.json'),
-      JSON.stringify(report, null, 2),
-    );
-    console.log(JSON.stringify(report));
+    if (server) {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   }
 })();

@@ -1,10 +1,10 @@
 # Codex Switcher Demo
 
-为 Codex 管理官方账号和自定义 API 的本机工具，支持 Windows 和 macOS。当前版本：**0.1.1 Demo**。
+为 Codex 管理官方账号和自定义 API 的本机工具，支持 Windows 和 macOS。当前版本：**0.1.2 Demo**。
 
 [下载 Windows / macOS 版本](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest)
 
-[Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.1/codex-switcher-windows-x64.zip) · [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.1/codex-switcher-macos-arm64.zip) · [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.1/codex-switcher-macos-x64.zip)
+[Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.2/codex-switcher-windows-x64.zip) · [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.2/codex-switcher-macos-arm64.zip) · [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.2/codex-switcher-macos-x64.zip)
 
 ## 下载即用
 
@@ -34,9 +34,13 @@ Mac 包按芯片拆分，只携带一套 Node.js，避免原通用包同时下�
 
 切换会中断目标客户端的运行任务，请先保存工作。已有会话可能继续使用原供应商和模型；切换默认配置不等于重写全部历史，也不会让所有云端 ChatGPT 对话迁移到本机。额度是 Codex 的服务端额度，不代表 ChatGPT 网页聊天次数或 API 余额。
 
-## VS Code / Cursor
+## VS Code / Cursor / Windsurf / Insiders
 
 在切换器的“影响范围与其他客户端”点击“接入 VS Code / Cursor”，或下载伴随扩展 VSIX，在编辑器的扩展菜单中选择“从 VSIX 安装”。还需安装 OpenAI 官方 Codex 扩展。重载只会发送给已经连接且可确认配置归属的本机窗口。
+
+更新切换器后，也需要重新接入最新版伴随扩展。每个窗口的状态栏应显示“Codex Switcher · 已连接”；已有窗口可能需要先手动重载一次才能启用新扩展。客户端列表会显示扩展版本、配置归属，以及请求待接收、已接收或重载失败等状态。
+
+多个窗口共用 `CODEX_HOME` 时，切换会影响它们共同使用的账号和默认配置。重载窗口会重新启动扩展宿主和 Codex 后端，正在执行的 Codex 任务可能中断；请等任务结束再切换，或为不同用途使用独立配置目录。切换器不会删除已保存的聊天文件，但不能保证未落盘内容或执行中的任务自动恢复。旧会话也可能继续使用原有模型和供应商，请在新会话确认新默认配置。
 
 ## 数据与配置
 
@@ -84,7 +88,7 @@ node scripts/build-release.cjs darwin --arch=arm64
 node scripts/build-release.cjs darwin --arch=x64
 ```
 
-打包文件由 `release-files.json` 明确列出；`private/`、本机运行时、验证目录和研究记录不会提交。发布 `v*` 标签后，CI 仅在 Windows 与两种 Mac 芯片的检查通过时创建 GitHub Release，附带各平台压缩包及 SHA-256。Mac 还会实际执行系统 Bash 安装脚本、验证安装后签名，并通过 LaunchServices 启动应用。
+打包文件由 `release-files.json` 明确列出；`private/`、本机运行时、验证目录和研究记录不会提交。发布 `v*` 标签后，CI 仅在 Windows 与两种 Mac 芯片的检查通过时创建 GitHub Release，附带各平台压缩包及 SHA-256。Mac 还会实际执行系统 Bash 安装脚本、验证安装后签名，并通过 LaunchServices 启动应用。发布前另外启动真实 VS Code 的三个隔离窗口，验证伴随扩展安装、共享目录窗口重载和独立目录隔离；该检查同时在 Windows、Mac M 系列和 Mac Intel 执行。测试编辑器不会放入发行包。
 
 ## 卸载
 
