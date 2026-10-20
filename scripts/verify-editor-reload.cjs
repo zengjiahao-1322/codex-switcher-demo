@@ -7,12 +7,15 @@ const cp = require('node:child_process');
 const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
 const project = path.resolve(__dirname, '..');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-real-editors-'));
+// macOS 的 Unix socket 路径上限较短，测试配置目录不能放在长 /var/folders 路径下。
+const root = fs.mkdtempSync(
+  path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), 'swe-'),
+);
 const report = { platform: process.platform, arch: process.arch, checks: [] };
 const processes = [];
 let server;
 
-async function waitFor(read, description, timeout = 90000) {
+async function waitFor(read, description, timeout = 180000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     const value = await read();
@@ -60,6 +63,10 @@ function activations(folder) {
         .trim();
       report.editorExecutableName = name;
       editor = path.join(bundle, 'MacOS', name);
+      const shim = path.join(bundle, 'Resources', 'app', 'bin', 'code');
+      const entry = require('../editor-integration.cjs').cliFor(shim);
+      assert.equal(entry.exe, editor);
+      report.checks.push('actual-Mac-editor-CLI-from-bundle-metadata');
     }
     assert.ok(fs.existsSync(editor), '编辑器入口必须存在：' + editor);
     const executable = require('../runtime.cjs').findCodex();

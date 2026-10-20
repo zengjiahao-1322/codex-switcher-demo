@@ -100,11 +100,16 @@ function cliFor(shim) {
   if (process.platform === 'darwin') {
     const app = path.resolve(path.dirname(shim), '..'),
       macos = path.resolve(app, '..', '..', 'MacOS'),
-      exe = ['Electron', 'Cursor', 'Windsurf', 'Code - Insiders']
-        .map((name) => path.join(macos, name))
-        .find((file) => fs.existsSync(file)),
+      name = cp
+        .execFileSync(
+          '/usr/libexec/PlistBuddy',
+          ['-c', 'Print :CFBundleExecutable', path.resolve(app, '..', '..', 'Info.plist')],
+          { encoding: 'utf8', timeout: 3000 },
+        )
+        .trim(),
+      exe = path.join(macos, name),
       cli = path.join(app, 'out', 'cli.js');
-    if (!exe || !fs.existsSync(cli)) throw Error('无法识别编辑器 CLI 入口');
+    if (!fs.existsSync(exe) || !fs.existsSync(cli)) throw Error('无法识别编辑器 CLI 入口');
     return { exe, cli };
   }
   const script = fs.readFileSync(shim, 'utf8'),
