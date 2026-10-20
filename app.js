@@ -348,9 +348,7 @@ function updateSwitchAction() {
   $('model').disabled = locked;
   $('fetch-models').disabled = locked || official || pendingRequests.has($('fetch-models'));
   $('probe').disabled = locked || official || pendingRequests.has($('probe'));
-  $('probe-fast').disabled = locked || official || pendingRequests.has($('probe-fast'));
   $('probe').hidden = official;
-  $('probe-fast').hidden = official;
   $('switch').disabled = locked || !p || (!official && !$('model').value.trim());
   $('switch').textContent = locked
     ? '正在切换…'
@@ -531,11 +529,6 @@ function selected(resetModel = true) {
       (p.local ? ' 这是你电脑上的另一个代理服务。' : '') +
       (!official && !p.hasKey && !p.local ? ' 请先在 API 配置中填写密钥。' : '')
     : '';
-  $('fast-hint').textContent = official
-    ? '速度请在 Codex 内选择；切换器不统一修改各对话的 Fast 设置。'
-    : p?.apiMode === 'anthropic_messages'
-      ? 'Anthropic Messages 转换暂不支持 Codex Fast。检测不改配置，也不重启。'
-      : 'Fast 请在 Codex 内选择。“检测 Fast 请求”只检查上游是否接受参数，不改配置、不重启；回报 default 不代表加速失败。';
   updateSwitchAction();
   renderSelectedQuota();
 }
@@ -548,16 +541,6 @@ function renderSummary() {
     ? '官方 · ' + (account?.label || '未登录')
     : 'API · ' + c.name + ' · ' + (c.model || '默认模型');
   $('summary').append(b);
-  if (c.serviceTier)
-    $('summary').append(
-      document.createTextNode(
-        c.fast
-          ? ' · Codex 默认速度：Fast'
-          : c.serviceTier === 'default'
-            ? ' · 标准速度'
-            : ' · ' + c.serviceTier,
-      ),
-    );
   $('summary').title = state.codexVersion || '';
 }
 function renderService() {
@@ -821,24 +804,22 @@ $('fetch-models').onclick = () =>
     status(r.message + '点“模型”输入框即可选择，也可输入关键字筛选。');
     $('model').focus();
   });
-function detectApi(fast) {
-  return busy($(fast ? 'probe-fast' : 'probe'), async () => {
+function detectApi() {
+  return busy($('probe'), async () => {
     const id = $('provider').value,
       model = $('model').value.trim();
-    status(fast ? '正在检测 Fast 请求，不修改当前配置…' : '检测 API 中…');
-    const r = await api('probe', { id, model, fast });
-    if (!fast || r.ok)
-      updateAccess(id, {
-        mode: r.ok ? r.mode : 'failed',
-        model,
-        at: new Date().toISOString(),
-        message: r.message,
-      });
+    status('检测 API 中…');
+    const r = await api('probe', { id, model });
+    updateAccess(id, {
+      mode: r.ok ? r.mode : 'failed',
+      model,
+      at: new Date().toISOString(),
+      message: r.message,
+    });
     status(r.message);
   });
 }
-$('probe').onclick = () => detectApi(false);
-$('probe-fast').onclick = () => detectApi(true);
+$('probe').onclick = detectApi;
 $('switch').onclick = () =>
   busy($('switch'), async () => {
     if (officialTarget()) {

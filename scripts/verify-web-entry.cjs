@@ -54,9 +54,7 @@ async function start(token) {
         return {
           ok: true,
           mode: 'direct',
-          message: input.fast
-            ? 'Fast 请求通过；上游回报 default。实际提速未验证。订阅反代的该回报值不能用于判定 Fast 失败。'
-            : 'API 连接检测通过。',
+          message: 'API 连接检测通过。',
         };
       },
     },
@@ -109,26 +107,24 @@ async function loaded(page, url) {
     await recovered;
     assert.equal(await page.evaluate(async () => (await fetch('/api/state')).status), 200);
     report.checks.push('old-tab-recovers-after-service-restart');
-    // 检测入口直接可见；点击 Fast 检测不能触发配置应用或重启。
+    // 页面只保留普通 API 检测，不再展示或提交独立加速选项。
     assert.equal(await page.locator('#fast').count(), 0);
+    assert.equal(await page.locator('#probe-fast, #fast-hint').count(), 0);
     const configBefore = fs.readFileSync(path.join(home, 'config.toml'), 'utf8');
-    for (const fast of [false, true]) {
-      const button = page.locator(fast ? '#probe-fast' : '#probe');
-      assert.equal(await button.isVisible(), true);
-      const response = page.waitForResponse(
-        (r) => r.url().endsWith('/api/probe') && r.status() === 200,
-      );
-      await button.click();
-      await response;
-      await page.waitForFunction(
-        (expected) => document.getElementById('status').textContent.includes(expected),
-        fast ? '实际提速未验证' : 'API 连接检测通过',
-      );
-      assert.equal(probeRequests.at(-1).fast, fast);
-      assert.equal(switchRequests.length, 0);
-      assert.equal(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), configBefore);
-    }
-    report.checks.push('visible-API-and-Fast-probes-without-apply-or-config-writes');
+    const button = page.locator('#probe');
+    assert.equal(await button.isVisible(), true);
+    const response = page.waitForResponse(
+      (r) => r.url().endsWith('/api/probe') && r.status() === 200,
+    );
+    await button.click();
+    await response;
+    await page.waitForFunction(() =>
+      document.getElementById('status').textContent.includes('API 连接检测通过'),
+    );
+    assert.equal(Object.hasOwn(probeRequests.at(-1), 'fast'), false);
+    assert.equal(switchRequests.length, 0);
+    assert.equal(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), configBefore);
+    report.checks.push('only-API-probe-without-speed-apply-or-config-writes');
     const applied = page.waitForResponse(
       (r) => r.url().endsWith('/api/desktopSwitch') && r.status() === 200,
     );

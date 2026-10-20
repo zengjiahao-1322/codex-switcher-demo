@@ -1,4 +1,4 @@
-async function probe(provider, model, { fast = false } = {}) {
+async function probe(provider, model) {
   const url = new URL(provider.baseUrl.replace(/\/$/, '') + '/responses');
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
     throw Error('无效 API 地址');
@@ -30,7 +30,6 @@ async function probe(provider, model, { fast = false } = {}) {
     store: false,
     stream: false,
   };
-  if (fast) payload.service_tier = 'priority';
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -66,9 +65,6 @@ async function probe(provider, model, { fast = false } = {}) {
       ok: !!toolCall,
       status: response.status,
       toolCall: !!toolCall,
-      ...(fast
-        ? { serviceTier: typeof obj.service_tier === 'string' ? obj.service_tier : null }
-        : {}),
       message: toolCall
         ? 'Responses 和函数调用通过；流式输出仍需 Codex 实测。'
         : '未返回完整 Responses 函数调用，未通过兼容性检测。',
@@ -93,9 +89,7 @@ function nativeUrl(provider) {
     : base + '/chat/completions';
 }
 // 检测供应商在 Hermes 中登记的原生协议（Chat Completions / Anthropic Messages）能否完成一次强制函数调用，用于判断协议转换路径是否可行。
-async function probeNative(provider, model, { fast = false } = {}) {
-  if (fast && provider.apiMode === 'anthropic_messages')
-    return { ok: false, message: 'Anthropic Messages 转换不支持 Codex Fast' };
+async function probeNative(provider, model) {
   const url = new URL(nativeUrl(provider));
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
     throw Error('无效 API 地址');
@@ -134,7 +128,6 @@ async function probeNative(provider, model, { fast = false } = {}) {
         max_tokens: 1024,
         stream: false,
       };
-  if (fast) payload.service_tier = 'priority';
   const headers = anthropic
     ? {
         'Content-Type': 'application/json',
@@ -167,7 +160,6 @@ async function probeNative(provider, model, { fast = false } = {}) {
     return {
       ok: tool,
       status: response.status,
-      ...(fast ? { serviceTier: typeof j.service_tier === 'string' ? j.service_tier : null } : {}),
       message: tool ? '原生协议函数调用通过' : '原生协议未返回函数调用',
     };
   } catch (e) {

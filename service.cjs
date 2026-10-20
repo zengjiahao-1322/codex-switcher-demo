@@ -245,8 +245,6 @@ function createService({
         model: c.model || null,
         official: officialInUse(c),
         viaAdapter,
-        fast: ['fast', 'priority'].includes(c.service_tier) && c.features?.fast_mode !== false,
-        serviceTier: c.service_tier || null,
       },
       catalog,
       usage: {
@@ -326,62 +324,32 @@ function createService({
     return v && path.resolve(v) !== path.resolve(catalogPath) ? v : undefined;
   }
   // 先测 Responses 直连；不通时按登记协议（登记为 Responses 的按 Chat Completions）再测，可经本机转换接入。
-  async function probeProvider(p, model, fast = false) {
-    // 回包档位只是上游回报值，尤其订阅反代可能始终回报 default，不能据此判定提速。
-    const speedResult = (result) =>
-      fast
-        ? {
-            requestedServiceTier: 'priority',
-            fastRequestAccepted: true,
-            serviceTier: result.serviceTier,
-            accelerationStatus: 'unverified',
-          }
-        : {};
-    const speedNote = (result) =>
-      !fast
-        ? ''
-        : ' Fast 请求通过；' +
-          (result.serviceTier ? '上游回报 ' + result.serviceTier + '。' : '上游未回报服务档位。') +
-          '实际提速未验证。' +
-          (result.serviceTier === 'default' || result.serviceTier === 'auto'
-            ? '订阅反代的该回报值不能用于判定 Fast 失败。'
-            : '回报档位不能作为实际提速的证明。');
-    const direct = await probe(p, model, { fast });
+  async function probeProvider(p, model) {
+    const direct = await probe(p, model);
     if (direct.ok) {
       passed.set(fingerprint(p, model), { at: Date.now(), mode: 'direct' });
       return {
         ok: true,
         mode: 'direct',
-        ...speedResult(direct),
-        message: '可直连：Responses 和函数调用通过。' + speedNote(direct),
+        message: '可直连：Responses 和函数调用通过。',
       };
     }
     const nativeMode = ['chat_completions', 'anthropic_messages'].includes(p.apiMode)
       ? p.apiMode
       : 'chat_completions';
-    const native = await probeNative({ ...p, apiMode: nativeMode }, model, { fast });
+    const native = await probeNative({ ...p, apiMode: nativeMode }, model);
     if (native.ok) {
       passed.set(fingerprint(p, model), { at: Date.now(), mode: 'adapter', apiMode: nativeMode });
       return {
         ok: true,
         mode: 'adapter',
-        ...speedResult(native),
-        message:
-          `不支持 Responses 直连（${direct.message}），但原生协议可用：将经本机转换服务接入（转换服务须保持运行；不支持 Codex 内置网页搜索）。` +
-          speedNote(native),
+        message: `不支持 Responses 直连（${direct.message}），但原生协议可用：将经本机转换服务接入（转换服务须保持运行；不支持 Codex 内置网页搜索）。`,
       };
     }
     // 限流/服务端错误/超时属于临时故障，不代表协议不兼容。
     const transient = (r) => r.status === 429 || r.status >= 500 || /超时/.test(r.message || '');
     return {
       ok: false,
-      ...(fast
-        ? {
-            requestedServiceTier: 'priority',
-            fastRequestAccepted: false,
-            accelerationStatus: 'unverified',
-          }
-        : {}),
       transient: transient(direct) && transient(native),
       message: '未通过：' + direct.message + '；' + native.message,
     };
@@ -634,7 +602,7 @@ function createService({
       if (!models.length) throw Error('供应商返回了空的模型列表，请手动填写模型');
       return { models, message: `获取到 ${models.length} 个模型。` };
     },
-    probe: ({ id, model, fast = false }) =>
+    probe: ({ id, model }) =>
       exclusive(async () => {
         if (id === OFFICIAL)
           return {
@@ -643,9 +611,8 @@ function createService({
             message: '官方登录使用 Codex 自己的 ChatGPT 登录，无需检测，可直接应用。',
           };
         const p = provider(id);
-        const r = await probeProvider(p, model, fast);
-        // 加速请求被拒绝不代表标准接入不可用，不能覆盖之前通过的普通检测。
-        if (!fast || r.ok) recordProbeResult(p, model, r);
+        const r = await probeProvider(p, model);
+        recordProbeResult(p, model, r);
         if (!r.ok && r.transient)
           r.message += '（这通常是临时的：额度、限流或服务端故障，不代表配置不兼容）';
         return r;
