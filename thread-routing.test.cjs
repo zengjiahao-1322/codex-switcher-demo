@@ -125,7 +125,8 @@ test(
         const cold = (await c.call('thread/read', { threadId: thread.id, includeTurns: false }))
           .thread;
         assert.equal(cold.modelProvider, 'openai');
-        assert.equal(cold.cwd, root);
+        // 官方后端会解析 /tmp 链接和 Windows 短路径，比较切换前后的实际目录。
+        assert.equal(cold.cwd, thread.cwd);
         assert.equal(cold.historyMode, thread.historyMode);
         assert.deepEqual(stored(thread), before[index]);
       }
