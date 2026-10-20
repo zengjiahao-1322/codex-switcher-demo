@@ -27,7 +27,7 @@ function scan() {
     .filter(
       (p) =>
         /^codex(?:-(?:aarch64|x86_64).*)?$/.test(p.name) ||
-        /\/(?:Codex|ChatGPT)\.app\/Contents\/MacOS\/(?:Codex|ChatGPT)$/.test(p.exe),
+        require('./platform.cjs').isCodexDesktop(p.exe),
     )
     .map((p) => {
       let context = { ok: false, error: 'process_context_helper_missing' };

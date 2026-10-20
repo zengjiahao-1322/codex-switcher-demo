@@ -13,10 +13,7 @@ const canonical = (p) => {
   return process.platform === 'win32' ? value.toLowerCase() : value;
 };
 const sameHome = (a, b) => !!a && !!b && canonical(a) === canonical(b);
-const isDesktop = (p) =>
-  /(?:OpenAI[.\\/]Codex[^\\/\n]*[\\/]app[\\/](?:ChatGPT|Codex)\.exe$|\/(?:Codex|ChatGPT)\.app\/Contents\/MacOS\/(?:Codex|ChatGPT)$)/i.test(
-    p.exe || '',
-  );
+const isDesktop = (p) => require('./platform.cjs').isCodexDesktop(p.exe || '');
 let cached;
 function scan({ force = false } = {}) {
   if (!force && cached && Date.now() - cached.at < 2500) return cached.value;
@@ -157,7 +154,8 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
             /^node_repl(?:\.exe)?$/i.test(a.name || '') ||
             /[\\/]runtimes[\\/]cua_node[\\/]/i.test(a.exe || ''),
         ),
-        desktop = !auxiliary && [p, ...ancestors].some(isDesktop),
+        desktopShell = [p, ...ancestors].find(isDesktop),
+        desktop = !auxiliary && !!desktopShell,
         editor = ancestors.find((a) =>
           /^(Code|Code - Insiders|Cursor|Windsurf)(?:\.exe| Helper(?: \(Plugin\))?)?$/i.test(
             a.name || '',
@@ -188,7 +186,8 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
         pid: p.pid,
         kind,
         executable: p.exe || null,
-        desktopExecutable: [p, ...ancestors].find(isDesktop)?.exe || null,
+        desktopExecutable: desktopShell?.exe || null,
+        desktopPid: desktopShell?.pid || null,
         name:
           kind === 'auxiliary'
             ? '自动化工具辅助后台'
@@ -216,7 +215,19 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
         error: context.error || null,
       };
     })
-    .filter((p) => p.kind !== 'tool');
+    .filter(
+      (p, index, rows) =>
+        p.kind !== 'tool' &&
+        // 有后端就按它的实际配置归属展示；桌面壳仅补足没有后端的空闲状态。
+        !(
+          p.kind === 'desktop' &&
+          p.pid === p.desktopPid &&
+          rows.some(
+            (other) =>
+              other.kind === 'desktop' && other.desktopPid === p.pid && other.pid !== p.pid,
+          )
+        ),
+    );
   for (const w of windows) {
     // 伴随扩展的环境只是候选信息；重载归属必须由真实 Codex 后端进程确认，
     // 否则可能把独立 CODEX_HOME 的窗口误判为共享配置。
@@ -338,13 +349,17 @@ async function stopEditorBackends(codexHome, bridgeHome) {
   }
   return editors;
 }
-function desktopTargets(exe, codexHome) {
-  const inventory = scan({ force: true }),
-    allowed = new Set();
-  for (const p of inventory.processes) {
-    if (!sameHome(p.context?.home, codexHome)) continue;
-    for (const a of [p, ...ancestryOf(p, inventory.ancestry)])
-      if (a.exe && sameHome(a.exe, exe)) allowed.add(a.pid);
+function desktopTargets(exe, codexHome, { inventory = scan({ force: true }) } = {}) {
+  const allowed = new Set();
+  const status = snapshot(codexHome, require('./platform.cjs').dataHome(), { inventory });
+  for (const client of status.clients) {
+    if (
+      client.kind === 'desktop' &&
+      client.confirmed &&
+      client.shared &&
+      sameHome(client.desktopExecutable, exe)
+    )
+      allowed.add(client.desktopPid);
   }
   for (let pass = 0; pass < 5; pass++)
     for (const p of inventory.ancestry)

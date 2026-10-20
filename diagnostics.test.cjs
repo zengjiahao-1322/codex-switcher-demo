@@ -157,13 +157,13 @@ test('window registry reloads only confirmed shared-home editor and records ackn
   c.heartbeat(f.bridge, { id: 'editor-shared', pid: 100, ack: 'reload-1' });
   assert.equal(JSON.parse(fs.readFileSync(file)).command, null);
 });
-test('桌面壳尚无后端时仍识别 Windows、Codex.app 和 ChatGPT.app，独立目录不跟随', (t) => {
+test('桌面壳尚无后端时仍识别 Codex，独立目录不跟随', (t) => {
   const f = fixture(t),
     c = require('./client-status.cjs');
   const shells = [
     'C:/Program Files/WindowsApps/OpenAI.Codex_demo/app/ChatGPT.exe',
     '/Applications/Codex.app/Contents/MacOS/Codex',
-    '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT',
+    '/Applications/Codex.app/Contents/MacOS/ChatGPT',
   ];
   for (const exe of shells) {
     const p = { pid: 500, parentPid: 1, exe, context: { ok: true, home: f.home, overrides: {} } };
@@ -188,6 +188,73 @@ test('桌面壳尚无后端时仍识别 Windows、Codex.app 和 ChatGPT.app，�
   };
   assert.equal(
     c.snapshot(f.home, f.bridge, { inventory: { ancestry: [], processes: [backend] } }).desktop,
+    false,
+  );
+});
+
+test('有真实后端时不重复显示桌面壳，并以实际后端的目录为准', (t) => {
+  const f = fixture(t),
+    c = require('./client-status.cjs');
+  const shell = {
+    pid: 700,
+    parentPid: 1,
+    exe: '/Applications/Codex.app/Contents/MacOS/Codex',
+    context: { ok: true, home: f.home },
+  };
+  const backend = {
+    pid: 701,
+    parentPid: 700,
+    exe: '/Applications/Codex.app/Contents/Resources/codex',
+    context: { ok: true, home: path.join(f.root, 'separate') },
+  };
+  const status = c.snapshot(f.home, f.bridge, {
+    inventory: { ancestry: [shell], processes: [shell, backend] },
+  });
+  const desktops = status.clients.filter((p) => p.kind === 'desktop');
+  assert.equal(desktops.length, 1);
+  assert.equal(desktops[0].pid, backend.pid);
+  assert.equal(desktops[0].shared, false);
+  assert.deepEqual(
+    c.desktopTargets(shell.exe, f.home, {
+      inventory: { ancestry: [shell], processes: [shell, backend] },
+    }),
+    [],
+  );
+  backend.context.home = f.home;
+  const sharedInventory = { ancestry: [shell], processes: [shell, backend] };
+  assert.equal(c.snapshot(f.home, f.bridge, { inventory: sharedInventory }).clients.length, 1);
+  assert.deepEqual(c.desktopTargets(shell.exe, f.home, { inventory: sharedInventory }), [
+    shell.pid,
+  ]);
+});
+
+test('Mac 普通 ChatGPT 应用不参与 Codex 的发现和重启', (t) => {
+  const f = fixture(t),
+    cp = require('node:child_process');
+  const run = cp.execFileSync;
+  t.mock.method(cp, 'execFileSync', (exe, args, options) =>
+    exe === '/bin/ps'
+      ? '90001 1 00:10 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT\n90002 1 00:10 /Applications/Codex.app/Contents/MacOS/ChatGPT\n'
+      : run(exe, args, options),
+  );
+  const inventory = require('./mac-processes.cjs').scan();
+  assert.equal(
+    inventory.processes.some((p) => p.pid === 90001),
+    false,
+  );
+  assert.equal(
+    inventory.processes.some((p) => p.pid === 90002),
+    true,
+  );
+  const ordinary = {
+    pid: 90001,
+    exe: '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT',
+    context: { ok: true, home: f.home },
+  };
+  assert.equal(
+    require('./client-status.cjs').snapshot(f.home, f.bridge, {
+      inventory: { ancestry: [], processes: [ordinary] },
+    }).desktop,
     false,
   );
 });

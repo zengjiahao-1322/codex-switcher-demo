@@ -50,6 +50,17 @@ function macApps() {
     ),
   ].filter(Boolean);
 }
+function isCodexDesktop(exe = '') {
+  if (/OpenAI[.\\/]Codex[^\\/\n]*[\\/]app[\\/](?:ChatGPT|Codex)\.exe$/i.test(exe)) return true;
+  const app = exe.match(/^(.+\.app)\/Contents\/MacOS\/(?:Codex|ChatGPT)$/)?.[1];
+  // ChatGPT.app 是另一个产品；只有 Codex 应用或用户明确指定的应用才参与切换。
+  return (
+    !!app &&
+    (app.endsWith('/Codex.app') ||
+      (!!process.env.CODEX_DESKTOP_APP &&
+        path.resolve(app) === path.resolve(process.env.CODEX_DESKTOP_APP)))
+  );
+}
 let proxyCache;
 function codexEnv(home) {
   // Finder 启动的应用通常没有终端 PATH 和代理变量。补入随包 Node 路径，
@@ -87,4 +98,14 @@ function codexEnv(home) {
   }
   return env;
 }
-module.exports = { mac, dataHome, codexHome, nodePath, openUrl, launch, macApps, codexEnv };
+module.exports = {
+  mac,
+  dataHome,
+  codexHome,
+  nodePath,
+  openUrl,
+  launch,
+  macApps,
+  isCodexDesktop,
+  codexEnv,
+};

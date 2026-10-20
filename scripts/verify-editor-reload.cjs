@@ -339,6 +339,69 @@ async function initializeHome(executable, home) {
       'independent-window-untouched',
       'saved-history-files-preserved',
     );
+    // 在真实后端已经停止后注入同步错误，确认失败清理能恢复两个插件窗口。
+    const beforeRecovery = folders.map((folder) => activations(folder).at(-1));
+    const counts = folders.map((folder) => activations(folder).length);
+    await waitFor(async () => {
+      const clients = (await api('clients')).clients;
+      return clients.filter((c) => c.kind === 'editor' && c.canReload).length === 2;
+    }, 'reloaded windows reconnect before failure recovery');
+    const routing = require('../thread-routing.cjs');
+    const pending = routing.pendingThreads;
+    routing.pendingThreads = () => [{}];
+    try {
+      await assert.rejects(
+        require('../desktop-account.cjs').runSwitch(
+          {
+            codexHome: selected,
+            bridgeHome: bridge,
+            id: 'recovery-fixture',
+            desktopExe: null,
+          },
+          {
+            accounts: {
+              syncCurrent: async () => {},
+              prepare: async () => {},
+              apply: () => ({ label: 'Fixture' }),
+            },
+            syncThreads: async () => {
+              for (const entry of beforeRecovery.slice(0, 2)) {
+                assert.throws(() => process.kill(entry.backendPid, 0));
+              }
+              assert.doesNotThrow(() => process.kill(beforeRecovery[2].backendPid, 0));
+              throw Error('fixture sync failure');
+            },
+          },
+        ),
+        /fixture sync failure/,
+      );
+    } finally {
+      routing.pendingThreads = pending;
+    }
+    const failedJob = JSON.parse(fs.readFileSync(path.join(bridge, 'account-switch.json')));
+    assert.equal(failedJob.status, 'error');
+    assert.equal(failedJob.editorReload.count, 2);
+    await waitFor(
+      () => folders.slice(0, 2).every((folder, i) => activations(folder).length > counts[i]),
+      'both stopped backends recover after sync failure',
+    );
+    await waitFor(
+      () =>
+        require('../client-status.cjs')
+          .reloadResults(bridge, failedJob.editorReload.targets)
+          .every((r) => r.status === 'reloaded'),
+      'recovery reloads are acknowledged',
+    );
+    assert.equal(activations(folders[2]).length, counts[2]);
+    for (let i = 0; i < 2; i++) {
+      const latest = activations(folders[i]).at(-1);
+      assert.notEqual(latest.backendPid, beforeRecovery[i].backendPid);
+      assert.equal(latest.configuration.model_provider, 'hermes_bridge');
+    }
+    report.checks.push(
+      'injected-sync-failure-restores-real-shared-backends',
+      'failed-switch-still-reports-error-and-reload-results',
+    );
     report.passed = true;
   } catch (error) {
     report.passed = false;

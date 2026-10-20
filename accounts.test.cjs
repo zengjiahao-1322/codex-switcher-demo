@@ -266,6 +266,56 @@ test('插件没有重载通道时在关闭客户端和修改配置之前停止�
   assert.equal(a.status().switchJob.configurationApplied, false);
 });
 
+test('旧对话同步失败后恢复已停止的插件，保留失败状态和重载反馈', async (t) => {
+  const f = configured(t),
+    a = loginFixture(f),
+    id = a.status().items[0].id;
+  const client = require('./client-status.cjs');
+  const editor = { editorId: 'fixture-editor', name: 'VS Code' };
+  let reloads = 0,
+    rejectRecovery = false;
+  t.mock.method(require('./thread-routing.cjs'), 'pendingThreads', () => [{}]);
+  t.mock.method(client, 'stopEditorBackends', async () => [editor]);
+  t.mock.method(client, 'requestReload', (home, bridge, { stoppedEditors }) => {
+    assert.deepEqual(stoppedEditors, [editor]);
+    reloads++;
+    if (rejectRecovery) throw Error('fixture reload unavailable');
+    return { count: 1, targets: [{ id: editor.editorId, commandId: 'fixture-recovery' }] };
+  });
+  await assert.rejects(
+    runSwitch(
+      { ...f, id, desktopExe: null },
+      {
+        accounts: a,
+        clients: () => ({ clients: [] }),
+        syncThreads: async () => {
+          throw Error('fixture sync failure');
+        },
+      },
+    ),
+    /fixture sync failure/,
+  );
+  assert.equal(reloads, 1);
+  assert.equal(a.status().switchJob.status, 'error');
+  assert.equal(a.status().switchJob.editorReload.count, 1);
+  rejectRecovery = true;
+  await assert.rejects(
+    runSwitch(
+      { ...f, id, desktopExe: null },
+      {
+        accounts: a,
+        clients: () => ({ clients: [] }),
+        syncThreads: async () => {
+          throw Error('fixture sync failure');
+        },
+      },
+    ),
+    /fixture sync failure/,
+  );
+  assert.match(a.status().switchJob.message, /插件恢复请求未发送：fixture reload unavailable/);
+  assert.equal(a.status().switchJob.status, 'error');
+});
+
 test('quota requests deduplicate only the same account and publish each result independently', async (t) => {
   const f = configured(t),
     started = [];

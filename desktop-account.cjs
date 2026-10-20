@@ -31,9 +31,7 @@ function powershell(script, env = {}) {
 function desktopInfo() {
   if (process.platform === 'darwin') {
     const inventory = require('./client-status.cjs').scan();
-    const running = inventory.ancestry.find((p) =>
-      /\/(?:Codex|ChatGPT)\.app\/Contents\/MacOS\/(?:Codex|ChatGPT)$/.test(p.exe || ''),
-    );
+    const running = inventory.ancestry.find((p) => require('./platform.cjs').isCodexDesktop(p.exe));
     if (running) return { exe: running.exe };
     for (const app of require('./platform.cjs').macApps())
       for (const name of ['Codex', 'ChatGPT']) {
@@ -156,6 +154,8 @@ async function runSwitch(
   let prepared,
     stoppedEditors = [],
     desktopStarted = null,
+    editorReload = null,
+    reloadAttempted = false,
     applied = false;
   const startedAt = new Date().toISOString(),
     started = performance.now(),
@@ -274,8 +274,8 @@ async function runSwitch(
       );
     }
     let editorNote = '';
-    let editorReload = null;
     if (job.reloadEditors !== false) {
+      reloadAttempted = true;
       try {
         const reloaded = await step('reload', '发送编辑器重载请求', () =>
           require('./client-status.cjs').requestReload(job.codexHome, job.bridgeHome, {
@@ -320,11 +320,34 @@ async function runSwitch(
     );
     return { ...result, threadRouting };
   } catch (e) {
+    let recoveryNote = '';
+    // 同步失败也要恢复已主动停止的插件，不能留下失去后端的面板；切换仍按失败回报。
+    if (stoppedEditors.length && !reloadAttempted) {
+      try {
+        editorReload = await step('recoverEditors', '恢复已停止的编辑器插件', () =>
+          require('./client-status.cjs').requestReload(job.codexHome, job.bridgeHome, {
+            stoppedEditors,
+          }),
+        );
+        recoveryNote =
+          ' 已向 ' + editorReload.count + ' 个已停止的插件窗口发送恢复请求，旧对话切换仍未完成。';
+      } catch (recoveryError) {
+        recoveryNote = ' 插件恢复请求未发送：' + recoveryError.message;
+      }
+    }
     if (applied)
-      recordEffect(job.codexHome, job.bridgeHome, 'switch_incomplete', '切换未完成：' + e.message);
+      recordEffect(
+        job.codexHome,
+        job.bridgeHome,
+        'switch_incomplete',
+        '切换未完成：' + e.message + recoveryNote,
+      );
     report(
       'error',
-      (applied ? '配置已应用，但旧对话同步或客户端重新加载未完成：' : '切换未完成：') + e.message,
+      (applied ? '配置已应用，但旧对话同步或客户端重新加载未完成：' : '切换未完成：') +
+        e.message +
+        recoveryNote,
+      { editorReload, desktopStarted },
     );
     throw e;
   } finally {
