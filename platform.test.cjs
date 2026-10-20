@@ -78,6 +78,51 @@ test(
     require('./desktop-account.cjs').stopDesktop(missing);
   },
 );
+
+test(
+  'Windows 桌面可执行文件名为 Codex.exe 时不把渲染子进程当成另一客户端',
+  { skip: process.platform !== 'win32' },
+  async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-shell-'));
+    const app = path.join(root, 'OpenAI.Codex_test', 'app');
+    fs.mkdirSync(app, { recursive: true });
+    const exe = path.join(app, 'Codex.exe');
+    fs.copyFileSync(process.execPath, exe);
+    const marker = path.join(root, 'renderer.pid');
+    const code =
+      "const fs=require('fs'),cp=require('child_process');const p=cp.spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{stdio:'ignore',windowsHide:true});fs.writeFileSync(process.argv[1],String(p.pid));setTimeout(()=>{},30000);";
+    const shell = cp.spawn(exe, ['-e', code, marker], {
+      env: { ...process.env, CODEX_HOME: root },
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    const closed = new Promise((resolve) => shell.once('close', resolve));
+    let renderer;
+    try {
+      const deadline = Date.now() + 10000;
+      while (!fs.existsSync(marker) && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      renderer = Number(fs.readFileSync(marker, 'utf8'));
+      const rows = require('./client-status.cjs')
+        .scan({ force: true })
+        .processes.filter((p) => [shell.pid, renderer].includes(p.pid));
+      assert.deepEqual(
+        rows.map((p) => p.pid),
+        [shell.pid],
+      );
+      assert.equal(rows[0].context.ok, true);
+    } finally {
+      if (renderer) {
+        try {
+          process.kill(renderer);
+        } catch {}
+      }
+      shell.kill();
+      await closed;
+      await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  },
+);
 test(
   'macOS helper reads actual process home without exposing unrelated environment',
   { skip: process.platform !== 'darwin' },

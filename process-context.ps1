@@ -43,8 +43,9 @@ $all = @(Get-CimInstance Win32_Process | Select-Object Name,ProcessId,ParentProc
 $targets = @($all | Where-Object {
  $candidate = $_
  # 空闲桌面也要参与切换；同路径的渲染子进程由主进程统一关闭。
- $nativeBackend = $candidate.Name -ieq 'codex.exe'
- $desktopShell = $candidate.Name -ieq 'ChatGPT.exe' -and $candidate.ExecutablePath -match 'OpenAI[.\\/]Codex'
+ $desktopShell = ($candidate.Name -ieq 'ChatGPT.exe' -or $candidate.Name -ieq 'Codex.exe') -and
+   $candidate.ExecutablePath -match 'OpenAI[.\\/]Codex[^\\/]*[\\/]app[\\/]'
+ $nativeBackend = $candidate.Name -ieq 'codex.exe' -and -not $desktopShell
  $sameExecutableParent = @($all | Where-Object {
    $_.ProcessId -eq $candidate.ParentProcessId -and $_.ExecutablePath -eq $candidate.ExecutablePath
  }).Count -gt 0
