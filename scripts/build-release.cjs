@@ -170,6 +170,16 @@ async function runtime(platform, arch) {
   }
   const digest = crypto.createHash('sha256').update(fs.readFileSync(artifact)).digest('hex');
   fs.writeFileSync(artifact + '.sha256', digest + '  ' + filename + '\n');
+  if (target === 'win32') {
+    // 伴随扩展单独提供小体积下载，两种系统都能安装，不必为了更新扩展重下运行时。
+    const companion = path.join(out, 'codex-switcher-companion.vsix');
+    fs.copyFileSync(require('../editor-integration.cjs').build(project), companion);
+    const companionHash = crypto
+      .createHash('sha256')
+      .update(fs.readFileSync(companion))
+      .digest('hex');
+    fs.writeFileSync(companion + '.sha256', companionHash + '  codex-switcher-companion.vsix\n');
+  }
   console.log(
     JSON.stringify({
       artifact,

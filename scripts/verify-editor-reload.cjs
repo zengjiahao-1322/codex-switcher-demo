@@ -226,6 +226,7 @@ async function initializeHome(executable, home) {
       'three real extension hosts',
     );
     const initial = folders.map((folder) => activations(folder)[0]);
+    assert.ok(initial.every((entry) => entry.configuration.model === 'before-reload'));
     const before = await waitFor(async () => {
       const status = await api('clients');
       const editors = status.clients.filter((client) => client.kind === 'editor');
@@ -255,7 +256,7 @@ async function initializeHome(executable, home) {
       const latest = activations(folders[index]).at(-1);
       assert.notEqual(latest.extensionHostPid, initial[index].extensionHostPid);
       assert.notEqual(latest.backendPid, initial[index].backendPid);
-      assert.match(latest.configuration, /after-reload/);
+      assert.equal(latest.configuration.model, 'after-reload');
     }
     assert.equal(activations(folders[2]).length, 1);
     assert.equal(activations(folders[2])[0].backendPid, initial[2].backendPid);

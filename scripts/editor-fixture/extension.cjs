@@ -25,19 +25,29 @@ function activate(context) {
   backend.stdout.on('data', (chunk) => {
     output += chunk;
     trace(String(chunk));
-    const line = output.split('\n').find((value) => value.includes('"id":1'));
-    if (!line) return;
-    const message = JSON.parse(line);
-    if (!message.result) return;
-    backend.stdout.removeAllListeners('data');
-    fs.appendFileSync(
-      path.join(folder, 'activations.jsonl'),
-      JSON.stringify({
-        extensionHostPid: process.pid,
-        backendPid: backend.pid,
-        configuration: fs.readFileSync(path.join(config.home, 'config.toml'), 'utf8'),
-      }) + '\n',
-    );
+    while (output.includes('\n')) {
+      const at = output.indexOf('\n');
+      const line = output.slice(0, at);
+      output = output.slice(at + 1);
+      const message = JSON.parse(line);
+      if (message.id === 1 && message.result) {
+        // 读取官方后端真正加载的配置，不能仅以磁盘文件变更当作客户端已生效。
+        backend.stdin.write(
+          JSON.stringify({ id: 2, method: 'config/read', params: { includeLayers: false } }) + '\n',
+        );
+      }
+      if (message.id === 2 && message.result) {
+        backend.stdout.removeAllListeners('data');
+        fs.appendFileSync(
+          path.join(folder, 'activations.jsonl'),
+          JSON.stringify({
+            extensionHostPid: process.pid,
+            backendPid: backend.pid,
+            configuration: message.result.config,
+          }) + '\n',
+        );
+      }
+    }
   });
   backend.stdin.write(
     JSON.stringify({
