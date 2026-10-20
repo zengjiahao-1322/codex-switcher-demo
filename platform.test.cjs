@@ -68,6 +68,17 @@ test('ZIP packages preserve filenames and executable bits', (t) => {
     assert.ok(fs.statSync(path.join(root, 'Demo.app/Contents/MacOS/start')).mode & 0o111);
 });
 test(
+  'Windows 未运行目标桌面时跳过退出等待，不向空 PID 查询进程',
+  { skip: process.platform !== 'win32' },
+  (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-no-desktop-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const missing = path.join(root, 'nonexistent-desktop.exe');
+    assert.equal(fs.existsSync(missing), false);
+    require('./desktop-account.cjs').stopDesktop(missing);
+  },
+);
+test(
   'macOS helper reads actual process home without exposing unrelated environment',
   { skip: process.platform !== 'darwin' },
   async (t) => {
