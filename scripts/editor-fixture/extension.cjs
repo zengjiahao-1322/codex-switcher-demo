@@ -9,16 +9,22 @@ let backend;
 function activate(context) {
   const vscode = require('vscode');
   const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
+  const trace = (message) =>
+    fs.appendFileSync(path.join(folder, 'fixture-trace.log'), message + '\n');
+  trace('activate extension host ' + process.pid);
   const config = JSON.parse(fs.readFileSync(path.join(folder, 'fixture.json'), 'utf8'));
   backend = cp.spawn(config.executable, ['app-server'], {
     env: { ...process.env, CODEX_HOME: config.home },
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
-  backend.stderr.resume();
+  backend.on('error', (error) => trace(error.stack));
+  backend.on('exit', (code) => trace('backend exited ' + code));
+  backend.stderr.on('data', (chunk) => trace(String(chunk)));
   let output = '';
   backend.stdout.on('data', (chunk) => {
     output += chunk;
+    trace(String(chunk));
     const line = output.split('\n').find((value) => value.includes('"id":1'));
     if (!line) return;
     const message = JSON.parse(line);

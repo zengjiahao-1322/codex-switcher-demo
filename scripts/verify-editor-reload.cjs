@@ -195,6 +195,21 @@ function activations(folder) {
     for (const file of fs.readdirSync(root).filter((file) => /^editor-\d\.log$/.test(file))) {
       report[file] = fs.readFileSync(path.join(root, file), 'utf8').slice(-8000);
     }
+    // 保留真实扩展宿主的诊断，不把主进程的启动成功误认为扩展已经激活。
+    const collect = (directory) =>
+      fs.existsSync(directory)
+        ? fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+            const file = path.join(directory, entry.name);
+            if (entry.isDirectory()) return collect(file);
+            return /(?:exthost|renderer|fixture-trace).*\.log$/.test(file) ? [file] : [];
+          })
+        : [];
+    report.extensionLogs = collect(root)
+      .slice(0, 12)
+      .map((file) => ({
+        file: path.relative(root, file),
+        text: fs.readFileSync(file, 'utf8').slice(-6000),
+      }));
     process.exitCode = 1;
   } finally {
     for (const entry of processes) fs.writeFileSync(path.join(entry.folder, 'stop'), '');
