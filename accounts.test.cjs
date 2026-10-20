@@ -7,7 +7,13 @@ const { test } = require('node:test'),
   { spawn } = require('node:child_process'),
   toml = require('smol-toml');
 const { createAccounts, identity, writeJson } = require('./accounts.cjs'),
-  { runSwitch } = require('./desktop-account.cjs');
+  { runSwitch: performSwitch } = require('./desktop-account.cjs');
+// 业务单元检查不读取开发机上的其他编辑器；实际发现与重载由三窗口检查覆盖。
+const runSwitch = (job, dependencies = {}) =>
+  performSwitch(job, {
+    clients: () => ({ clients: [] }),
+    ...dependencies,
+  });
 const jwt = (payload) =>
   'fixture.' + Buffer.from(JSON.stringify(payload)).toString('base64url') + '.signature';
 function auth(user, refresh = 'refresh-' + user, account = 'workspace-' + user) {
@@ -146,6 +152,68 @@ function loginFixture(f, { cancel = false, loginUser = 'new-user', failPrepare =
     spawnProcess: (_exe, args, options) => spawn(process.execPath, [fake, ...args], options),
   });
 }
+
+test('当前账号访问令牌过期时，先向官方服务刷新而非直接要求重新登录', async (t) => {
+  const f = configured(t),
+    expired = auth('alice');
+  const payload = JSON.parse(Buffer.from(expired.tokens.access_token.split('.')[1], 'base64url'));
+  expired.tokens.access_token = jwt({ ...payload, exp: 1 });
+  writeJson(path.join(f.codexHome, 'auth.json'), expired);
+  const a = loginFixture(f),
+    id = a.status().items[0].id;
+  await a.prepare(id);
+  const saved = JSON.parse(fs.readFileSync(path.join(f.bridgeHome, 'accounts', id, 'auth.json')));
+  assert.match(saved.tokens.refresh_token, /-prepared$/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json'))), expired);
+  const rejected = loginFixture(f, { failPrepare: true });
+  await assert.rejects(rejected.prepare(id), /官方登录已失效/);
+  const unavailable = createAccounts({
+    ...f,
+    codexExe: process.execPath,
+    spawnProcess: (_exe, _args, options) =>
+      spawn(
+        process.execPath,
+        [
+          '-e',
+          "require('readline').createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.id)console.log(JSON.stringify(m.method==='initialize'?{id:m.id,result:{}}:{id:m.id,error:{code:-32000,message:'failed to refresh token: connection timed out'}}));});",
+        ],
+        options,
+      ),
+  });
+  await assert.rejects(unavailable.prepare(id), /尚未确认登录失效/);
+});
+
+test('相同模型切换官方账号仍会停止旧插件后端', async (t) => {
+  const f = configured(t),
+    a = loginFixture(f);
+  a.status();
+  writeJson(path.join(f.codexHome, 'auth.json'), auth('bob'));
+  const bob = a.status().items.find((p) => p.current);
+  writeJson(path.join(f.codexHome, 'auth.json'), auth('alice'));
+  let stops = 0;
+  const clients = require('./client-status.cjs');
+  t.mock.method(clients, 'stopEditorBackends', async () => {
+    stops++;
+    return [];
+  });
+  t.mock.method(clients, 'requestReload', () => ({ count: 0, targets: [] }));
+  await runSwitch(
+    { ...f, id: bob.id, model: 'official', desktopExe: null },
+    {
+      accounts: a,
+      clients: () => ({ clients: [] }),
+      syncThreads: async () => {
+        assert.equal(stops, 1);
+        return { count: 0 };
+      },
+    },
+  );
+  assert.equal(stops, 1);
+  assert.equal(
+    identity(JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json')))).id,
+    bob.id,
+  );
+});
 test('official login completion adds the new account without changing the active desktop login', async (t) => {
   const f = configured(t),
     a = loginFixture(f),
@@ -264,6 +332,18 @@ test('插件没有重载通道时在关闭客户端和修改配置之前停止�
   );
   assert.equal(fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8'), before);
   assert.equal(a.status().switchJob.configurationApplied, false);
+  await assert.rejects(
+    runSwitch(
+      { ...f, id, desktopExe: 'fixture-desktop.exe' },
+      {
+        accounts: a,
+        clients: () => ({ clients: [{ kind: 'ide', confirmed: false }] }),
+        stop: () => assert.fail('must not stop unknown client'),
+      },
+    ),
+    /无法确认部分 Codex 插件后端/,
+  );
+  assert.equal(fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8'), before);
 });
 
 test('旧对话同步失败后恢复已停止的插件，保留失败状态和重载反馈', async (t) => {
@@ -274,7 +354,6 @@ test('旧对话同步失败后恢复已停止的插件，保留失败状态和�
   const editor = { editorId: 'fixture-editor', name: 'VS Code' };
   let reloads = 0,
     rejectRecovery = false;
-  t.mock.method(require('./thread-routing.cjs'), 'pendingThreads', () => [{}]);
   t.mock.method(client, 'stopEditorBackends', async () => [editor]);
   t.mock.method(client, 'requestReload', (home, bridge, { stoppedEditors }) => {
     assert.deepEqual(stoppedEditors, [editor]);

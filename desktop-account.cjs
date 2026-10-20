@@ -202,7 +202,12 @@ async function runSwitch(
       else await accounts.prepare(job.id);
       // 没有重载通道时不能先停止插件后端，否则 Codex 面板只能等用户手动恢复。
       if (job.reloadEditors !== false) {
-        const missing = clients().clients.filter(
+        const detected = clients().clients;
+        if (detected.some((c) => c.kind === 'ide' && !c.confirmed && (!c.home || c.shared)))
+          throw Error(
+            '无法确认部分 Codex 插件后端的配置目录，尚未切换。请展开“影响范围与其他客户端”查看进程读取错误。',
+          );
+        const missing = detected.filter(
           (c) => c.kind === 'ide' && c.confirmed && c.shared && !c.editorId,
         );
         if (missing.length)
@@ -224,17 +229,8 @@ async function runSwitch(
       applied = true;
       return value;
     });
-    const target = require('smol-toml').parse(
-      fs.readFileSync(path.join(job.codexHome, 'config.toml'), 'utf8'),
-    );
-    if (
-      job.reloadEditors !== false &&
-      require('./thread-routing.cjs').pendingThreads(
-        job.codexHome,
-        target.model_provider || 'openai',
-        target.model,
-      ).length
-    )
+    // 账号变更可能不改变供应商和模型，仍须结束旧后端持有的登录和执行中的回合。
+    if (job.reloadEditors !== false)
       stoppedEditors = await step('editors', '释放共用配置的编辑器会话', () =>
         require('./client-status.cjs').stopEditorBackends(job.codexHome, job.bridgeHome),
       );

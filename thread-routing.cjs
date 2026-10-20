@@ -140,8 +140,8 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
   const config = toml.parse(fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8'));
   const provider = config.model_provider || 'openai';
   let model = config.model;
-  const rows = pendingThreads(codexHome, provider, model);
-  if (!rows.length) return { count: 0, provider, model };
+  if (!fs.readdirSync(codexHome).some((name) => /^state_\d+\.sqlite$/.test(name)))
+    return { count: 0, provider, model };
   let client = openSession(codexHome, bridgeHome, config);
   const initialize = () =>
     client.call('initialize', {
@@ -150,6 +150,10 @@ async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {}
     });
   try {
     await initialize();
+    // 多窗口的最后一个后端退出后，先由官方运行时正常打开索引和恢复 WAL，
+    // 再做只读查询；直接读取退出中的共享索引可能得到 disk I/O error。
+    const rows = pendingThreads(codexHome, provider, model);
+    if (!rows.length) return { count: 0, provider, model };
     if (!model) {
       const { data } = await client.call('model/list', {});
       model = data.find((item) => item.isDefault)?.model || data[0]?.model;

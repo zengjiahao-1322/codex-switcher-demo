@@ -374,9 +374,8 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess = spawn 
     if (!identity(auth)) throw Error('登录记录不完整，请重新登录 ' + row.label);
     if (live?.id === id && !row.pendingLogin) {
       const exp = claims(auth.tokens.access_token).exp;
-      if (exp && exp * 1000 <= Date.now())
-        throw Error(row.label + ' 的当前登录已过期，请先点“重新登录”；本次未关闭桌面端。');
-      return row;
+      // 访问令牌过期时仍可能通过刷新令牌恢复；由官方服务确认，不能仅凭 exp 要求重新登录。
+      if (!exp || exp * 1000 > Date.now()) return row;
     }
     const check = openSession(path.dirname(authFile(id)));
     try {
@@ -386,9 +385,14 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess = spawn 
       const refreshed = readJson(authFile(id));
       if (identity(refreshed)?.id !== id) throw Error('返回的账号与所选账号不一致');
       return remember(refreshed, { pendingLogin: row.pendingLogin });
-    } catch {
+    } catch (error) {
+      const invalid = error.reason === 'auth' || [401, 'AUTH_REQUIRED'].includes(error.code);
       throw Error(
-        '无法准备 ' + row.label + ' 的官方登录，请重试或点“重新登录”；本次未关闭桌面端。',
+        invalid
+          ? row.label + ' 的官方登录已失效，请点“重新登录”；本次未关闭桌面端。'
+          : '无法准备 ' +
+              row.label +
+              ' 的官方登录，请检查网络后重试；尚未确认登录失效，本次未关闭桌面端。',
       );
     } finally {
       await check.close();
@@ -486,11 +490,14 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess = spawn 
   };
 }
 function classifyError(message = '') {
-  return /401|unauthoriz|refresh.token|expired|not authenticated|login required/i.test(message)
+  // 刷新请求的网络错误不等于凭证失效，不能只看到 refresh token 就要求用户重登。
+  if (/network|connect|dns|timed? ?out|proxy|transport|send.*request/i.test(message))
+    return 'network';
+  return /401|unauthoriz|invalid.grant|token.{0,80}(?:expired|invalid|revoked|reused|already been used)|not authenticated|login required/i.test(
+    message,
+  )
     ? 'auth'
-    : /network|connect|dns|timed? ?out|proxy|transport|send.*request/i.test(message)
-      ? 'network'
-      : null;
+    : null;
 }
 function quotaError(e) {
   if (e.code === -32601) return '当前 Codex 版本不支持额度查询，请更新官方扩展或桌面版。';

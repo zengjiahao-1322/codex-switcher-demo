@@ -157,6 +157,43 @@ test('window registry reloads only confirmed shared-home editor and records ackn
   c.heartbeat(f.bridge, { id: 'editor-shared', pid: 100, ack: 'reload-1' });
   assert.equal(JSON.parse(fs.readFileSync(file)).command, null);
 });
+
+test('同一 VS Code 实例的窗口共用通信标识时，按扩展宿主进程关联后端', (t) => {
+  const f = fixture(t),
+    c = require('./client-status.cjs');
+  c.heartbeat(f.bridge, {
+    id: 'window-first',
+    pid: 810,
+    windowKey: 'same-vscode-instance',
+    home: f.home,
+  });
+  c.heartbeat(f.bridge, {
+    id: 'window-second',
+    pid: 820,
+    windowKey: 'same-vscode-instance',
+    home: f.home,
+  });
+  const inventory = {
+    ancestry: [
+      { pid: 810, parentPid: 1, name: 'Code Helper (Plugin)' },
+      { pid: 820, parentPid: 1, name: 'Code Helper (Plugin)' },
+    ],
+    processes: [810, 820].map((parentPid) => ({
+      pid: parentPid + 1,
+      parentPid,
+      exe: '/extensions/openai.chatgpt/bin/codex',
+      context: { ok: true, home: f.home, windowKey: 'same-vscode-instance' },
+    })),
+  };
+  const rows = c.snapshot(f.home, f.bridge, { inventory }).clients;
+  assert.equal(rows.find((p) => p.pid === 811).editorId, 'window-first');
+  assert.equal(rows.find((p) => p.pid === 821).editorId, 'window-second');
+  assert.equal(rows.filter((p) => p.kind === 'editor' && p.canReload).length, 2);
+  const ambiguous = c.snapshot(f.home, f.bridge, {
+    inventory: { ...inventory, processes: [{ ...inventory.processes[0], parentPid: 999 }] },
+  });
+  assert.equal(ambiguous.clients.find((p) => p.kind === 'ide').editorId, null);
+});
 test('桌面壳尚无后端时仍识别 Codex，独立目录不跟随', (t) => {
   const f = fixture(t),
     c = require('./client-status.cjs');

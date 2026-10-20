@@ -170,14 +170,15 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
       else if (auxiliary) kind = 'auxiliary';
       else if (desktop) kind = 'desktop';
       else if (editor || /openai\.chatgpt[-\\/]/i.test(p.exe || '')) kind = 'ide';
-      const companion = windows.find(
+      const byProcess = windows.find(
         (w) =>
-          !w.remote &&
-          !w.wsl &&
-          (w.pid === p.parentPid ||
-            ancestors.some((a) => a.pid === w.pid) ||
-            (w.windowKey && w.windowKey === context.windowKey)),
+          !w.remote && !w.wsl && (w.pid === p.parentPid || ancestors.some((a) => a.pid === w.pid)),
       );
+      // 通信标识可能属于整个 VS Code 实例；不能先匹配它而抢走另一个窗口的后端。
+      const byHook = windows.filter(
+        (w) => !w.remote && !w.wsl && w.windowKey && w.windowKey === context.windowKey,
+      );
+      const companion = byProcess || (byHook.length === 1 ? byHook[0] : null);
       const shared = sameHome(context.home, codexHome),
         layers = configLayers(context.home, context.cwd, context.profile, context.overrides);
       const stale = shared && !!effect && Date.parse(p.startedAt) < Date.parse(effect.at);
@@ -320,7 +321,7 @@ function clientStatus(codexHome, bridgeHome) {
   return snapshot(codexHome, bridgeHome);
 }
 async function stopEditorBackends(codexHome, bridgeHome) {
-  // 旧后端持有会话写锁。先停止共用配置的 Codex 子进程，保留编辑器窗口，
+  // 旧后端持有登录、运行中的回合和会话写锁。停止共用配置的 Codex 子进程，保留编辑器窗口，
   // 同步完成后再由既有重载流程恢复扩展；独立配置目录不受影响。
   const status = snapshot(codexHome, bridgeHome);
   const editors = status.clients.filter((client) => client.kind === 'editor' && client.canReload);

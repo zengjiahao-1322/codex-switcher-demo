@@ -133,21 +133,54 @@ async function initializeHome(executable, home) {
     process.env.BRIDGE_HOME = bridge;
     const extensions = path.join(root, 'installed-extensions');
     const vsix = require('../editor-integration.cjs').build(project);
-    report.extensionInstall = cp.execFileSync(
-      editorEntry.exe,
+    // 普通安装避免扩展开发宿主只允许一个开发窗口，真实覆盖同一实例的多个窗口。
+    const fixtureVsix = require('../zip.cjs').zip(
       [
-        editorEntry.cli,
-        '--install-extension',
-        vsix,
-        '--force',
-        '--extensions-dir',
-        extensions,
-        '--user-data-dir',
-        path.join(root, 'installer-profile'),
+        {
+          name: 'extension/package.json',
+          file: path.join(__dirname, 'editor-fixture', 'package.json'),
+        },
+        {
+          name: 'extension/extension.cjs',
+          file: path.join(__dirname, 'editor-fixture', 'extension.cjs'),
+        },
+        {
+          name: '[Content_Types].xml',
+          file: path.join(project, 'vscode-companion', 'content-types.xml'),
+        },
+        {
+          name: 'extension.vsixmanifest',
+          data: `<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+<Metadata><Identity Language="en-US" Id="switcher-reload-fixture" Version="0.0.1" Publisher="switcher-test"/>
+<DisplayName>Switcher reload fixture</DisplayName><Description xml:space="preserve">Isolated editor verification.</Description>
+<Properties><Property Id="Microsoft.VisualStudio.Code.Engine" Value="^1.85.0"/></Properties></Metadata>
+<Installation><InstallationTarget Id="Microsoft.VisualStudio.Code"/></Installation><Dependencies/>
+<Assets><Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true"/></Assets></PackageManifest>`,
+        },
       ],
-      { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 60000 },
+      path.join(root, 'editor-fixture.vsix'),
     );
-    report.checks.push('actual-offline-companion-VSIX-install');
+    report.extensionInstall = '';
+    for (const packageFile of [vsix, fixtureVsix])
+      report.extensionInstall += cp.execFileSync(
+        editorEntry.exe,
+        [
+          editorEntry.cli,
+          '--install-extension',
+          packageFile,
+          '--force',
+          '--extensions-dir',
+          extensions,
+          '--user-data-dir',
+          path.join(root, 'installer-profile'),
+        ],
+        { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 60000 },
+      );
+    report.checks.push(
+      'actual-offline-companion-VSIX-install',
+      'actual-offline-fixture-VSIX-install',
+    );
     for (const home of [selected, separate]) {
       fs.mkdirSync(path.join(home, 'sessions'), { recursive: true });
       fs.writeFileSync(
@@ -206,9 +239,8 @@ async function initializeHome(executable, home) {
           '--skip-release-notes',
           '--disable-workspace-trust',
           '--disable-gpu',
-          '--user-data-dir=' + path.join(root, 'profiles', String(index)),
+          '--user-data-dir=' + path.join(root, 'profiles', index === 2 ? 'separate' : 'shared'),
           '--extensions-dir=' + extensions,
-          '--extensionDevelopmentPath=' + path.join(project, 'scripts', 'editor-fixture'),
           folder,
         ],
         {
@@ -226,6 +258,8 @@ async function initializeHome(executable, home) {
         folder,
         closed: new Promise((resolve) => child.once('exit', resolve)),
       });
+      if (index === 0)
+        await waitFor(() => activations(folder).length, 'first ordinary editor window starts');
     }
     await waitFor(
       () => folders.every((folder) => activations(folder).length),
@@ -241,6 +275,7 @@ async function initializeHome(executable, home) {
       );
     }, 'two shared windows and one isolated window');
     report.checks.push('real-VS-Code-companion-heartbeats', 'native-backend-window-association');
+    report.checks.push('two-shared-windows-in-one-editor-instance');
     report.before = before.clients
       .filter((client) => client.kind === 'editor')
       .map((client) => ({
@@ -346,38 +381,31 @@ async function initializeHome(executable, home) {
       const clients = (await api('clients')).clients;
       return clients.filter((c) => c.kind === 'editor' && c.canReload).length === 2;
     }, 'reloaded windows reconnect before failure recovery');
-    const routing = require('../thread-routing.cjs');
-    const pending = routing.pendingThreads;
-    routing.pendingThreads = () => [{}];
-    try {
-      await assert.rejects(
-        require('../desktop-account.cjs').runSwitch(
-          {
-            codexHome: selected,
-            bridgeHome: bridge,
-            id: 'recovery-fixture',
-            desktopExe: null,
+    await assert.rejects(
+      require('../desktop-account.cjs').runSwitch(
+        {
+          codexHome: selected,
+          bridgeHome: bridge,
+          id: 'recovery-fixture',
+          desktopExe: null,
+        },
+        {
+          accounts: {
+            syncCurrent: async () => {},
+            prepare: async () => {},
+            apply: () => ({ label: 'Fixture' }),
           },
-          {
-            accounts: {
-              syncCurrent: async () => {},
-              prepare: async () => {},
-              apply: () => ({ label: 'Fixture' }),
-            },
-            syncThreads: async () => {
-              for (const entry of beforeRecovery.slice(0, 2)) {
-                assert.throws(() => process.kill(entry.backendPid, 0));
-              }
-              assert.doesNotThrow(() => process.kill(beforeRecovery[2].backendPid, 0));
-              throw Error('fixture sync failure');
-            },
+          syncThreads: async () => {
+            for (const entry of beforeRecovery.slice(0, 2)) {
+              assert.throws(() => process.kill(entry.backendPid, 0));
+            }
+            assert.doesNotThrow(() => process.kill(beforeRecovery[2].backendPid, 0));
+            throw Error('fixture sync failure');
           },
-        ),
-        /fixture sync failure/,
-      );
-    } finally {
-      routing.pendingThreads = pending;
-    }
+        },
+      ),
+      /fixture sync failure/,
+    );
     const failedJob = JSON.parse(fs.readFileSync(path.join(bridge, 'account-switch.json')));
     assert.equal(failedJob.status, 'error');
     assert.equal(failedJob.editorReload.count, 2);
