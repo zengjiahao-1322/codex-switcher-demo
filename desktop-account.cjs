@@ -74,7 +74,7 @@ function stopDesktop(exe, codexHome) {
 }
 function openWindowsDesktop() {
   powershell(
-    "$pkg=Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1;Start-Process explorer.exe -ArgumentList ('shell:AppsFolder\\'+$pkg.PackageFamilyName+'!App')",
+    "$pkg=Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1;if(-not $pkg){throw '未找到 Codex 桌面应用'};Start-Process explorer.exe -ArgumentList ('shell:AppsFolder\\'+$pkg.PackageFamilyName+'!App')",
   );
 }
 async function stopMacDesktop(exe, codexHome) {
@@ -108,16 +108,35 @@ async function stopMacDesktop(exe, codexHome) {
   }
   for (const pid of [...ids].reverse()) signal(pid, 'SIGKILL');
 }
-function openDesktop(exe, home) {
+async function openDesktop(exe, home) {
   if (process.platform === 'darwin') {
-    cp.spawn(exe, [], {
-      env: { ...process.env, CODEX_HOME: home },
-      detached: true,
-      stdio: 'ignore',
-    }).unref();
-    return;
+    await new Promise((resolve, reject) => {
+      const child = cp.spawn(exe, [], {
+        env: { ...process.env, CODEX_HOME: home },
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.once('error', reject);
+      child.once('spawn', () => {
+        child.unref();
+        resolve();
+      });
+    });
+  } else openWindowsDesktop();
+  // 启动命令返回不等于应用已打开；等待同一配置目录的新桌面主进程。
+  const status = require('./client-status.cjs');
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    const process = status
+      .scan({ force: true })
+      .processes.find(
+        (p) =>
+          status.sameHome(p.exe, exe) && p.context?.ok && status.sameHome(p.context.home, home),
+      );
+    if (process) return { pid: process.pid, startedAt: process.startedAt };
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  return openWindowsDesktop();
+  throw Error('未检测到 Codex 桌面主进程重新启动，请查看系统是否阻止打开应用。');
 }
 async function runSwitch(
   job,
@@ -126,6 +145,7 @@ async function runSwitch(
     open = openDesktop,
     accounts = createAccounts(job),
     syncThreads = require('./thread-routing.cjs').synchronizeThreads,
+    clients = () => require('./client-status.cjs').clientStatus(job.codexHome, job.bridgeHome),
   } = {},
 ) {
   // desktopExe 为 null 表示只有 IDE / CLI：应用配置并请求匹配窗口重载，
@@ -135,6 +155,7 @@ async function runSwitch(
     desktop = job.desktopExe !== null;
   let prepared,
     stoppedEditors = [],
+    desktopStarted = null,
     applied = false;
   const startedAt = new Date().toISOString(),
     started = performance.now(),
@@ -179,6 +200,18 @@ async function runSwitch(
       await accounts.syncCurrent({ force: true });
       if (api) prepared = await require('./service.cjs').createService(job).prepareApi(job);
       else await accounts.prepare(job.id);
+      // 没有重载通道时不能先停止插件后端，否则 Codex 面板只能等用户手动恢复。
+      if (job.reloadEditors !== false) {
+        const missing = clients().clients.filter(
+          (c) => c.kind === 'ide' && c.confirmed && c.shared && !c.editorId,
+        );
+        if (missing.length)
+          throw Error(
+            '检测到 ' +
+              missing.length +
+              ' 个共用配置的 Codex 插件后端尚未接入伴随扩展。请先在“影响范围与其他客户端”接入编辑器；配置尚未修改，客户端未关闭。若要稍后手动重载，可取消“同时重载”。',
+          );
+      }
     });
     currentStatus = 'switching';
     if (desktop) await step('stop', '关闭目标桌面端', () => stop(job.desktopExe, job.codexHome));
@@ -236,7 +269,9 @@ async function runSwitch(
     );
     if (desktop) {
       currentStatus = 'reopening';
-      await step('reopen', '请求重新打开桌面端', () => open(job.desktopExe, job.codexHome));
+      desktopStarted = await step('reopen', '重新打开并确认桌面主进程', () =>
+        open(job.desktopExe, job.codexHome),
+      );
     }
     let editorNote = '';
     let editorReload = null;
@@ -251,14 +286,16 @@ async function runSwitch(
         if (reloaded.count || reloaded.detectedEditors || reloaded.connectedEditors) {
           editorNote = ' ' + reloaded.message;
         }
-      } catch {
-        editorNote = ' 编辑器重载请求未发送，可在客户端列表重试。';
+      } catch (error) {
+        throw Error('编辑器重载请求未发送：' + error.message);
       }
     } else {
       editorNote = ' 本次未重载编辑器；完成任务后请手动重载需要更新的窗口。';
     }
     const effect = desktop
-      ? '已请求重新打开桌面端。'
+      ? desktopStarted
+        ? '已确认桌面主进程重新启动。'
+        : '已请求重新打开桌面端。'
       : '已同步新旧对话；未接入伴随扩展的编辑器窗口请执行“重载窗口”。';
     recordEffect(
       job.codexHome,
@@ -279,7 +316,7 @@ async function runSwitch(
         (api && !result.catalogCount
           ? ' 未生成模型目录，下拉可能仍显示官方列表；实际使用所选模型。'
           : ''),
-      { editorReload, threadRouting, desktopRequested: desktop },
+      { editorReload, threadRouting, desktopRequested: desktop, desktopStarted },
     );
     return { ...result, threadRouting };
   } catch (e) {
@@ -295,8 +332,7 @@ async function runSwitch(
     release(job.bridgeHome);
   }
 }
-function scheduleSwitch(job) {
-  const status = require('./client-status.cjs').clientStatus(job.codexHome, job.bridgeHome);
+function desktopForClients(status, lookup = desktopInfo) {
   const desktops = status.clients.filter((client) => client.kind === 'desktop');
   const matchingDesktop = desktops.some((client) => client.confirmed && client.shared);
   const matchingEditor = status.clients.some(
@@ -306,7 +342,17 @@ function scheduleSwitch(job) {
   if (desktops.some((client) => !client.confirmed)) {
     throw Error('尚未读到桌面端的配置目录，请先在客户端列表核对进程读取错误。');
   }
-  const info = matchingDesktop || (!desktops.length && !matchingEditor) ? desktopInfo() : null;
+  // 桌面壳可能还没有 Codex 后端，直接使用已确认归属的壳进程路径，不能被 IDE 窗口遮蔽。
+  const selectedDesktop = desktops.find((client) => client.confirmed && client.shared);
+  return selectedDesktop?.desktopExecutable
+    ? { exe: selectedDesktop.desktopExecutable }
+    : matchingDesktop || (!desktops.length && !matchingEditor)
+      ? lookup()
+      : null;
+}
+function scheduleSwitch(job) {
+  const status = require('./client-status.cjs').clientStatus(job.codexHome, job.bridgeHome);
+  const info = desktopForClients(status);
   job = { ...job, desktopExe: info?.exe || null };
   const file = path.join(job.bridgeHome, 'account-switch-job.json');
   writeJson(file, job);
@@ -338,4 +384,11 @@ if (require.main === module) {
     1500,
   );
 }
-module.exports = { scheduleSwitch, runSwitch, desktopInfo, stopDesktop, powershell };
+module.exports = {
+  scheduleSwitch,
+  runSwitch,
+  desktopInfo,
+  desktopForClients,
+  stopDesktop,
+  powershell,
+};

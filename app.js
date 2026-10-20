@@ -546,7 +546,9 @@ function renderSwitchProgress() {
   }
   if (job.desktopRequested) {
     const line = document.createElement('p');
-    line.textContent = '桌面端：已请求重新打开，尚未确认实际请求来源。';
+    line.textContent = job.desktopStarted
+      ? '桌面端：已确认新主进程启动 · PID ' + job.desktopStarted.pid + '；尚未验证实际请求来源。'
+      : '桌面端：已请求重新打开，尚未确认实际请求来源。';
     $('switch-windows').append(line);
   }
   const labels = {
@@ -1071,6 +1073,16 @@ async function refreshClients() {
   if (!lastClients) $('clients-status').textContent = '正在查看运行中的 Codex…';
   try {
     const c = await api('clients', {});
+    // 自动重载的前提直接显示在勾选框旁，避免用户把“勾选”当成“已连接”。
+    const missing = c.clients.filter(
+      (p) => p.kind === 'ide' && p.confirmed && p.shared && !p.editorId,
+    );
+    const ready = c.clients.filter((p) => p.kind === 'editor' && p.canReload);
+    $('editor-reload-hint').textContent = missing.length
+      ? missing.length + ' 个共用配置的 Codex 插件后端未接入；自动切换前请先接入伴随扩展。'
+      : ready.length
+        ? ready.length + ' 个共用配置的窗口已连接，可接收重载请求。'
+        : '尚无已确认共用配置、可自动重载的编辑器窗口。';
     $('clients-status').textContent =
       `本次切换目录：${c.home}\nCodex 程序：${c.runtime || '未找到，请安装官方扩展或填写下方路径'}\n检测到 ${c.clients.length} 个客户端 / 窗口，${c.connectedEditors} 个伴随扩展连接。`;
     if (document.activeElement !== $('config-home')) $('config-home').value = c.home;
@@ -1115,6 +1127,9 @@ async function refreshClients() {
           : '') +
         (client.kind === 'editor'
           ? '\n伴随扩展：' + (client.companionVersion || '版本未知，可重新接入以更新')
+          : '') +
+        (client.kind === 'editor' && client.reloadProtocol < 2
+          ? '\n当前伴随扩展较旧，请重新接入以获取重载完成回报。'
           : '') +
         (client.commandPending ? '\n重载请求等待窗口接收；请查看编辑器状态栏是否已连接。' : '') +
         (client.lastAck?.status === 'reload_requested'
@@ -1188,9 +1203,13 @@ async function refreshClients() {
       );
   } catch (e) {
     $('clients-status').textContent = e.message;
+    $('editor-reload-hint').textContent = '无法确认编辑器连接：' + e.message;
   }
 }
 let clientsTimer = null;
+$('editor-connection').onclick = () => {
+  $('client-details').open = true;
+};
 $('client-details').ontoggle = () => {
   if (clientsTimer) {
     clearInterval(clientsTimer);
@@ -1375,6 +1394,7 @@ $('diagnosis-run').onclick = runDiagnosis;
 refreshAccounts()
   .then(async (data) => {
     await refresh();
+    refreshClients();
     const current = state.current.official && accountData?.items.find((a) => a.current);
     if (
       current &&

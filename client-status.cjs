@@ -13,9 +13,13 @@ const canonical = (p) => {
   return process.platform === 'win32' ? value.toLowerCase() : value;
 };
 const sameHome = (a, b) => !!a && !!b && canonical(a) === canonical(b);
+const isDesktop = (p) =>
+  /(?:OpenAI[.\\/]Codex[^\\/\n]*[\\/]app[\\/](?:ChatGPT|Codex)\.exe$|\/(?:Codex|ChatGPT)\.app\/Contents\/MacOS\/(?:Codex|ChatGPT)$)/i.test(
+    p.exe || '',
+  );
 let cached;
-function scan() {
-  if (cached && Date.now() - cached.at < 2500) return cached.value;
+function scan({ force = false } = {}) {
+  if (!force && cached && Date.now() - cached.at < 2500) return cached.value;
   const value =
     process.platform === 'darwin'
       ? require('./mac-processes.cjs').scan()
@@ -113,6 +117,7 @@ function heartbeat(bridgeHome, input) {
     remote: input.remote ? String(input.remote) : null,
     wsl: !!input.wsl,
     companionVersion: input.companionVersion || null,
+    reloadProtocol: input.reloadProtocol || 0,
     seenAt: Date.now(),
     command: prior.command || null,
     lastAck: prior.lastAck || null,
@@ -152,9 +157,7 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
             /^node_repl(?:\.exe)?$/i.test(a.name || '') ||
             /[\\/]runtimes[\\/]cua_node[\\/]/i.test(a.exe || ''),
         ),
-        desktop =
-          !auxiliary &&
-          ancestors.some((a) => /OpenAI\.Codex|\/Codex\.app\/Contents\/MacOS\//i.test(a.exe || '')),
+        desktop = !auxiliary && [p, ...ancestors].some(isDesktop),
         editor = ancestors.find((a) =>
           /^(Code|Code - Insiders|Cursor|Windsurf)(?:\.exe| Helper(?: \(Plugin\))?)?$/i.test(
             a.name || '',
@@ -184,6 +187,8 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
         id: 'process-' + p.pid,
         pid: p.pid,
         kind,
+        executable: p.exe || null,
+        desktopExecutable: [p, ...ancestors].find(isDesktop)?.exe || null,
         name:
           kind === 'auxiliary'
             ? '自动化工具辅助后台'
@@ -235,6 +240,7 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
       commandPending: !!w.command,
       lastAck: w.lastAck,
       companionVersion: w.companionVersion,
+      reloadProtocol: w.reloadProtocol,
       layers: matching[0]?.layers || [],
       cwd: w.workspace,
     });
@@ -333,11 +339,11 @@ async function stopEditorBackends(codexHome, bridgeHome) {
   return editors;
 }
 function desktopTargets(exe, codexHome) {
-  const inventory = scan(),
+  const inventory = scan({ force: true }),
     allowed = new Set();
   for (const p of inventory.processes) {
     if (!sameHome(p.context?.home, codexHome)) continue;
-    for (const a of ancestryOf(p, inventory.ancestry))
+    for (const a of [p, ...ancestryOf(p, inventory.ancestry)])
       if (a.exe && sameHome(a.exe, exe)) allowed.add(a.pid);
   }
   for (let pass = 0; pass < 5; pass++)

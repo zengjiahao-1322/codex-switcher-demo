@@ -157,3 +157,37 @@ test('window registry reloads only confirmed shared-home editor and records ackn
   c.heartbeat(f.bridge, { id: 'editor-shared', pid: 100, ack: 'reload-1' });
   assert.equal(JSON.parse(fs.readFileSync(file)).command, null);
 });
+test('桌面壳尚无后端时仍识别 Windows、Codex.app 和 ChatGPT.app，独立目录不跟随', (t) => {
+  const f = fixture(t),
+    c = require('./client-status.cjs');
+  const shells = [
+    'C:/Program Files/WindowsApps/OpenAI.Codex_demo/app/ChatGPT.exe',
+    '/Applications/Codex.app/Contents/MacOS/Codex',
+    '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT',
+  ];
+  for (const exe of shells) {
+    const p = { pid: 500, parentPid: 1, exe, context: { ok: true, home: f.home, overrides: {} } };
+    const status = c.snapshot(f.home, f.bridge, { inventory: { ancestry: [], processes: [p] } });
+    assert.equal(status.desktop, true);
+    assert.equal(status.clients[0].desktopExecutable, exe);
+    assert.equal(status.clients[0].shared, true);
+    const mixed = { clients: [...status.clients, { kind: 'ide', shared: true, confirmed: true }] };
+    const choose = require('./desktop-account.cjs').desktopForClients;
+    assert.equal(choose(mixed, () => assert.fail('use confirmed desktop path')).exe, exe);
+    const separate = c.snapshot(path.join(f.root, 'other'), f.bridge, {
+      inventory: { ancestry: [], processes: [p] },
+    });
+    assert.equal(separate.clients[0].shared, false);
+    assert.equal(choose({ clients: [...separate.clients, mixed.clients.at(-1)] }), null);
+  }
+  const backend = {
+    pid: 600,
+    parentPid: 1,
+    exe: 'C:/Users/demo/AppData/Local/OpenAI/Codex/bin/hash/codex.exe',
+    context: { ok: true, home: f.home, overrides: {} },
+  };
+  assert.equal(
+    c.snapshot(f.home, f.bridge, { inventory: { ancestry: [], processes: [backend] } }).desktop,
+    false,
+  );
+});

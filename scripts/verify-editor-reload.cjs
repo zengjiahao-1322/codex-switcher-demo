@@ -5,15 +5,19 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 const crypto = require('node:crypto');
+const http = require('node:http');
 const assert = require('node:assert/strict');
 const project = path.resolve(__dirname, '..');
 // macOS 的 Unix socket 路径上限较短，测试配置目录不能放在长 /var/folders 路径下。
 const root = fs.mkdtempSync(
-  path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), 'swe-'),
+  path.join(
+    process.env.SWITCHER_VERIFY_HOME || (process.platform === 'darwin' ? '/tmp' : os.tmpdir()),
+    'swe-',
+  ),
 );
 const report = { platform: process.platform, arch: process.arch, checks: [] };
 const processes = [];
-let server;
+let server, upstream;
 
 async function waitFor(read, description, timeout = 180000) {
   const deadline = Date.now() + timeout;
@@ -89,10 +93,12 @@ async function initializeHome(executable, home) {
         'test-electron',
       ),
     );
-    let editor = await downloadAndUnzipVSCode({
-      version: 'stable',
-      cachePath: path.join(project, '.build-cache', 'vscode-test'),
-    });
+    let editor =
+      process.env.SWITCHER_VERIFY_EDITOR ||
+      (await downloadAndUnzipVSCode({
+        version: 'stable',
+        cachePath: path.join(project, '.build-cache', 'vscode-test'),
+      }));
     let editorEntry;
     if (process.platform === 'darwin') {
       // 测试下载器可能仍返回旧版 Electron 名称，以下载包的真实元数据为准。
@@ -242,12 +248,54 @@ async function initializeHome(executable, home) {
         shared: client.shared,
         canReload: client.canReload,
       }));
-    fs.writeFileSync(
+    // 走用户真正点击的应用接口，覆盖后台 worker、配置应用和窗口重载的整条链路。
+    const requests = [];
+    upstream = http.createServer((request, response) => {
+      requests.push(request.url);
+      request.resume();
+      request.on('end', () => {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            object: 'response',
+            status: 'completed',
+            output: [
+              {
+                type: 'function_call',
+                name: 'bridge_ping',
+                arguments: '{"ok":true}',
+                call_id: 'fixture-ping',
+              },
+            ],
+          }),
+        );
+      });
+    });
+    await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    const providerId = require('../providers.cjs').add(bridge, {
+      name: 'Editor switch fixture',
+      baseUrl: 'http://127.0.0.1:' + upstream.address().port + '/v1',
+      apiMode: 'responses',
+      model: 'after-reload',
+      apiKey: 'fixture-key',
+    });
+    // 保留用户已有的速度设置，切来源不引入额外速度操作。
+    fs.appendFileSync(
       path.join(selected, 'config.toml'),
-      'model="after-reload"\nservice_tier="fast"\ncli_auth_credentials_store="file"\n[features]\nfast_mode=true\n',
+      'service_tier="fast"\n[features]\nfast_mode=true\n',
     );
-    const result = await api('reloadClients');
+    await api('desktopSwitch', { id: providerId, model: 'after-reload', reloadEditors: true });
+    const job = await waitFor(async () => {
+      const state = await api('accounts');
+      if (state.switchJob?.status === 'error') throw Error(state.switchJob.message);
+      return state.switchJob?.status === 'done' && state.switchJob;
+    }, 'complete official-to-API switch');
+    assert.equal(job.desktopRequested, false, 'IDE-only switch must not open a desktop app');
+    assert.equal(job.configurationApplied, true);
+    assert.ok(requests.includes('/v1/responses'));
+    const result = job.editorReload;
     assert.equal(result.count, 2);
+    report.checks.push('full-official-config-to-API-worker-and-reload');
     await waitFor(
       () => folders.slice(0, 2).every((folder) => activations(folder).length >= 2),
       'both shared windows reload',
@@ -264,6 +312,11 @@ async function initializeHome(executable, home) {
       assert.notEqual(latest.extensionHostPid, initial[index].extensionHostPid);
       assert.notEqual(latest.backendPid, initial[index].backendPid);
       assert.equal(latest.configuration.model, 'after-reload');
+      assert.equal(latest.configuration.model_provider, 'hermes_bridge');
+      assert.equal(
+        latest.configuration.model_providers.hermes_bridge.base_url,
+        'http://127.0.0.1:' + upstream.address().port + '/v1',
+      );
       assert.equal(latest.configuration.service_tier, 'fast');
     }
     assert.equal(activations(folders[2]).length, 1);
@@ -340,6 +393,10 @@ async function initializeHome(executable, home) {
     if (server) {
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
+    }
+    if (upstream) {
+      upstream.closeAllConnections();
+      await new Promise((resolve) => upstream.close(resolve));
     }
   }
 })();

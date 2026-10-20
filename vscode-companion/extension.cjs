@@ -75,6 +75,7 @@ function activate(context) {
     return {
       id,
       companionVersion: require('./package.json').version,
+      reloadProtocol: 2,
       pid: process.pid,
       name: vscode.env.appName,
       workspace: folders.map((f) => f.uri.fsPath).join(' | '),

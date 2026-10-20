@@ -24,7 +24,11 @@ function scan() {
   });
   const helper = path.join(__dirname, 'bin', 'mac-process-context');
   const processes = ancestry
-    .filter((p) => /^codex(?:-(?:aarch64|x86_64).*)?$/.test(p.name))
+    .filter(
+      (p) =>
+        /^codex(?:-(?:aarch64|x86_64).*)?$/.test(p.name) ||
+        /\/(?:Codex|ChatGPT)\.app\/Contents\/MacOS\/(?:Codex|ChatGPT)$/.test(p.exe),
+    )
     .map((p) => {
       let context = { ok: false, error: 'process_context_helper_missing' };
       if (fs.existsSync(helper)) {

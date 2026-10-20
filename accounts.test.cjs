@@ -95,6 +95,7 @@ test('switch waits for desktop exit, preserves refreshed outgoing credentials, a
           identity(JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json'), 'utf8'))).id,
           bob.id,
         );
+        return { pid: 12345, startedAt: new Date().toISOString() };
       },
     },
   );
@@ -103,6 +104,7 @@ test('switch waits for desktop exit, preserves refreshed outgoing credentials, a
   const progress = a.status().switchJob;
   assert.equal(progress.configurationApplied, true);
   assert.equal(progress.desktopRequested, true);
+  assert.equal(progress.desktopStarted.pid, 12345);
   assert.ok(progress.elapsedMs >= 0);
   for (const id of ['prepare', 'stop', 'apply', 'threads', 'reopen']) {
     const step = progress.steps.find((s) => s.id === id);
@@ -240,6 +242,28 @@ test('old-thread synchronization failure is not reported as a completed switch',
     require('./switch-state.cjs').readEffect(f.codexHome, f.bridgeHome).status,
     'switch_incomplete',
   );
+});
+test('插件没有重载通道时在关闭客户端和修改配置之前停止切换', async (t) => {
+  const f = configured(t),
+    a = loginFixture(f),
+    id = a.status().items[0].id;
+  const before = fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8');
+  await assert.rejects(
+    runSwitch(
+      { ...f, id, desktopExe: 'fixture-desktop.exe' },
+      {
+        accounts: a,
+        clients: () => ({
+          clients: [{ kind: 'ide', confirmed: true, shared: true, editorId: null }],
+        }),
+        stop: () => assert.fail('must not stop desktop'),
+        open: () => assert.fail('must not open desktop'),
+      },
+    ),
+    /尚未接入伴随扩展/,
+  );
+  assert.equal(fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8'), before);
+  assert.equal(a.status().switchJob.configurationApplied, false);
 });
 
 test('quota requests deduplicate only the same account and publish each result independently', async (t) => {
