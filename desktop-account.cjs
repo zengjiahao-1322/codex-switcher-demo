@@ -104,7 +104,12 @@ function openDesktop(exe, home) {
 }
 async function runSwitch(
   job,
-  { stop = stopDesktop, open = openDesktop, accounts = createAccounts(job) } = {},
+  {
+    stop = stopDesktop,
+    open = openDesktop,
+    accounts = createAccounts(job),
+    syncThreads = require('./thread-routing.cjs').synchronizeThreads,
+  } = {},
 ) {
   // desktopExe 为 null 表示只有 IDE / CLI：应用配置并请求匹配窗口重载，
   // 不调用桌面端关闭与启动流程。两种模式共用账号准备和配置应用逻辑。
@@ -112,6 +117,7 @@ async function runSwitch(
   const api = job.kind === 'api',
     desktop = job.desktopExe !== null;
   let prepared,
+    stoppedEditors = [],
     applied = false;
   writeJson(file, {
     id: job.id,
@@ -139,6 +145,39 @@ async function runSwitch(
       ? (accounts.captureCurrent(), prepared.apply())
       : accounts.apply(job.id, job.model, job.catalog);
     applied = true;
+    const target = require('smol-toml').parse(
+      fs.readFileSync(path.join(job.codexHome, 'config.toml'), 'utf8'),
+    );
+    if (
+      job.reloadEditors !== false &&
+      require('./thread-routing.cjs').pendingThreads(
+        job.codexHome,
+        target.model_provider || 'openai',
+        target.model,
+      ).length
+    )
+      stoppedEditors = await require('./client-status.cjs').stopEditorBackends(
+        job.codexHome,
+        job.bridgeHome,
+      );
+    recordEffect(
+      job.codexHome,
+      job.bridgeHome,
+      'thread_sync_pending',
+      '配置已写入，正在同步旧对话，尚未完成切换。',
+    );
+    // 新旧对话共用一次切换：先持久保存旧会话来源，再让客户端重新加载。
+    const threadRouting = await syncThreads({
+      codexHome: job.codexHome,
+      bridgeHome: job.bridgeHome,
+      onProgress: ({ completed, total }) =>
+        writeJson(file, {
+          id: job.id,
+          pid: process.pid,
+          status: 'switching',
+          message: '配置已应用，正在更新旧对话来源（' + completed + '/' + total + '）…',
+        }),
+    });
     recordEffect(
       job.codexHome,
       job.bridgeHome,
@@ -161,6 +200,7 @@ async function runSwitch(
         const reloaded = require('./client-status.cjs').requestReload(
           job.codexHome,
           job.bridgeHome,
+          { stoppedEditors },
         );
         editorReload = reloaded;
         if (reloaded.count || reloaded.detectedEditors || reloaded.connectedEditors) {
@@ -174,7 +214,7 @@ async function runSwitch(
     }
     const effect = desktop
       ? '已请求重新打开桌面端。'
-      : '请在编辑器的新会话中使用；未接入伴随扩展的窗口请执行“重载窗口”。';
+      : '已同步新旧对话；未接入伴随扩展的编辑器窗口请执行“重载窗口”。';
     recordEffect(
       job.codexHome,
       job.bridgeHome,
@@ -185,22 +225,29 @@ async function runSwitch(
       id: job.id,
       status: 'done',
       editorReload,
+      threadRouting,
       message:
         '已应用 ' +
         (api ? prepared.label + ' · ' + job.model : result.label + ' 的官方配置') +
         '。' +
         effect +
         editorNote +
+        ' 已同步 ' +
+        threadRouting.count +
+        ' 条旧对话的来源和模型。' +
         (api && !result.catalogCount
           ? ' 未生成模型目录，下拉可能仍显示官方列表；实际使用所选模型。'
           : ''),
     });
-    return result;
+    return { ...result, threadRouting };
   } catch (e) {
+    if (applied)
+      recordEffect(job.codexHome, job.bridgeHome, 'switch_incomplete', '切换未完成：' + e.message);
     writeJson(file, {
       id: job.id,
       status: 'error',
-      message: (applied ? '配置已应用，但重新打开失败：' : '切换未完成：') + e.message,
+      message:
+        (applied ? '配置已应用，但旧对话同步或客户端重新加载未完成：' : '切换未完成：') + e.message,
     });
     throw e;
   } finally {

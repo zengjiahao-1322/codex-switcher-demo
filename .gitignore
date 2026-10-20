@@ -22,6 +22,8 @@
 !/server.cjs
 !/service.cjs
 !/switch-state.cjs
+!/thread-routing.cjs
+!/thread-routing.test.cjs
 !/zip.cjs
 !/mac-processes.cjs
 !/process-context.ps1

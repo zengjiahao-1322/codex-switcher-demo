@@ -61,7 +61,7 @@ test('specific diagnosis distinguishes missing provider, official identity and c
   assert.deepEqual(fs.readFileSync(file), before);
   session(f, 'official', 'openai');
   const official = await diagnose({ codexHome: f.home, bridgeHome: f.bridge, id: 'official' });
-  assert.ok(official.actions.some((x) => x.type === 'official'));
+  assert.ok(official.actions.some((x) => x.type === 'reapply'));
   assert.equal(listThreads(f.home, { query: 'official' }).items.length, 1);
 });
 

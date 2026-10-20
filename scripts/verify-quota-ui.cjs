@@ -4,13 +4,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const assert = require('node:assert/strict');
-const { chromium } = require('../.build-cache/browser-check/node_modules/playwright');
+let chromium;
+try {
+  ({ chromium } = require('playwright'));
+} catch {
+  ({ chromium } = require('../.build-cache/browser-check/node_modules/playwright'));
+}
 const { createServer } = require('../server.cjs');
 const { createService } = require('../service.cjs');
 
 // 运行发行包使用的同一份 HTML / app.js，验证刷新时的真实 DOM 状态。
 // 此处仅控制测试浏览器，不接触用户桌面或个人账号。
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-ui-parity-'));
+const root = fs.mkdtempSync(
+  path.join(process.env.SWITCHER_VERIFY_HOME || os.tmpdir(), 'switcher-ui-parity-'),
+);
 const report = { platform: process.platform, arch: process.arch, checks: [] };
 const reportFile = path.resolve('verification', 'quota-ui.json');
 let browser;
@@ -69,7 +76,12 @@ let releaseSlow;
       },
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({
+      headless: true,
+      ...(process.env.SWITCHER_BROWSER_CHANNEL
+        ? { channel: process.env.SWITCHER_BROWSER_CHANNEL }
+        : {}),
+    });
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));

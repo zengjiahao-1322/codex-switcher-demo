@@ -81,6 +81,10 @@ test('switch waits for desktop exit, preserves refreshed outgoing credentials, a
     { ...f, id: bob.id, model: 'official', desktopExe: 'fixture-desktop.exe' },
     {
       accounts: a,
+      syncThreads: async () => {
+        events.push('sync');
+        return { count: 2, provider: 'openai', model: 'official' };
+      },
       stop: async () => {
         events.push('stop');
         writeJson(path.join(f.codexHome, 'auth.json'), auth('alice', 'REFRESHED_BEFORE_EXIT'));
@@ -94,7 +98,8 @@ test('switch waits for desktop exit, preserves refreshed outgoing credentials, a
       },
     },
   );
-  assert.deepEqual(events, ['stop', 'open']);
+  assert.deepEqual(events, ['stop', 'sync', 'open']);
+  assert.equal(a.status().switchJob.threadRouting.count, 2);
   const c = toml.parse(fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8'));
   assert.equal(c.model, 'official');
   assert.equal(c.model_provider, undefined);
@@ -191,6 +196,31 @@ test('IDE-only official switch works with no desktop, model or model cache', asy
   assert.equal(c.model_provider, undefined);
   assert.equal(c.mcp_servers.keep.command, 'keep');
   assert.equal(a.status().switchJob.status, 'done');
+});
+
+test('old-thread synchronization failure is not reported as a completed switch', async (t) => {
+  const f = configured(t),
+    a = loginFixture(f),
+    id = a.status().items[0].id;
+  await assert.rejects(
+    runSwitch(
+      { ...f, id, model: 'official', desktopExe: 'fixture-desktop.exe' },
+      {
+        accounts: a,
+        stop: async () => {},
+        open: async () => assert.fail('must not reopen before thread synchronization succeeds'),
+        syncThreads: async () => {
+          throw Error('fixture active writer');
+        },
+      },
+    ),
+    /fixture active writer/,
+  );
+  assert.equal(a.status().switchJob.status, 'error');
+  assert.equal(
+    require('./switch-state.cjs').readEffect(f.codexHome, f.bridgeHome).status,
+    'switch_incomplete',
+  );
 });
 
 test('quota requests deduplicate only the same account and publish each result independently', async (t) => {
@@ -454,8 +484,11 @@ test('API desktop switch prepares before closing, applies after closing, and all
     }),
     /fixture reopen failed/,
   );
-  assert.equal(op.readEffect(f.codexHome, f.bridgeHome).status, 'restart_required');
-  assert.match(op.switchJob(f.bridgeHome).message, /配置已应用，但重新打开失败/);
+  assert.equal(op.readEffect(f.codexHome, f.bridgeHome).status, 'switch_incomplete');
+  assert.match(
+    op.switchJob(f.bridgeHome).message,
+    /配置已应用，但旧对话同步或客户端重新加载未完成/,
+  );
   await runSwitch(job, { stop: async () => {}, open: async () => {} });
   assert.equal(op.switchJob(f.bridgeHome).status, 'done');
   assert.equal(

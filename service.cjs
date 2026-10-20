@@ -23,8 +23,7 @@ const readJson = (p) => {
     return null;
   }
 };
-const EFFECT =
-  '配置已应用。请完整退出并重新打开桌面端，以载入账号与模型列表；已有对话继续沿用原设置。';
+const EFFECT = '配置已应用。请完整退出并重新打开客户端，以载入新旧对话的来源与模型。';
 const API_USAGE_NOTICE =
   '当前为 API 模式，适用于 Codex。聊天 / Work 或部分官方旧会话无法加载时，请选择官方账号并切换。';
 const OFFICIAL_RESTART =
@@ -622,15 +621,25 @@ function createService({
           const m = String(model || officialModel(c) || '').trim() || undefined;
           core.applyOfficial(codexHome, m, originalCatalog(c));
           fs.rmSync(currentPath, { force: true });
+          const threadRouting = await require('./thread-routing.cjs').synchronizeThreads({
+            codexHome,
+            bridgeHome,
+          });
           operation.recordEffect(codexHome, bridgeHome, 'restart_required', EFFECT);
           return {
             mode: 'official',
+            threadRouting,
             message: `已切换到 Codex 官方登录（${m ? '模型 ' + m : '由 Codex 选择默认模型'}）。${EFFECT}${officialInUse(c) ? '' : OFFICIAL_RESTART}`,
           };
         }
         const prepared = await prepareApi({ id, model, autostart: wantAutostart });
         try {
-          return prepared.apply();
+          const result = prepared.apply();
+          const threadRouting = await require('./thread-routing.cjs').synchronizeThreads({
+            codexHome,
+            bridgeHome,
+          });
+          return { ...result, threadRouting };
         } finally {
           prepared.cleanup();
         }
@@ -639,10 +648,16 @@ function createService({
       exclusive(async () => {
         const r = core.restoreOfficial(codexHome, bridgeHome);
         fs.rmSync(currentPath, { force: true });
+        const threadRouting = await require('./thread-routing.cjs').synchronizeThreads({
+          codexHome,
+          bridgeHome,
+        });
         if (!r.alreadyOfficial)
           operation.recordEffect(codexHome, bridgeHome, 'restart_required', EFFECT);
-        if (r.alreadyOfficial) return { message: 'Codex 当前已是官方登录，配置未改动。' };
+        if (r.alreadyOfficial)
+          return { threadRouting, message: 'Codex 当前已是官方登录，已同步旧对话来源。' };
         return {
+          threadRouting,
           message: `已切回 Codex 官方登录（模型 ${r.model}）。${EFFECT}${OFFICIAL_RESTART}`,
         };
       }),

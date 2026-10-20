@@ -43,6 +43,8 @@ jobs:
           node .build-cache/browser-check/node_modules/playwright/cli.js install chromium
       - name: Verify independent quota refresh in the actual frontend
         run: node scripts/verify-quota-ui.cjs
+      - name: Verify direct browser entry and session recovery
+        run: node scripts/verify-web-entry.cjs
       - name: Build a local universal test package
         run: node scripts/build-release.cjs darwin
       - name: Verify the extracted test package
@@ -75,4 +77,6 @@ jobs:
             verification/macos-package.json
             verification/quota-ui.json
             verification/quota-ui-waiting.png
+            verification/web-entry.json
+            verification/web-entry.png
           retention-days: 7

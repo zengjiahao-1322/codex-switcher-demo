@@ -57,9 +57,8 @@ async function diagnose({codexHome,bridgeHome,id,clients}){
   if(!info.exists)add('error','会话文件缺失','索引存在，但对应会话文件不在本机。恢复原文件或在官方账号查看云端记录。');
   const builtin=['openai','ollama','lmstudio','oss'].includes(provider),defined=builtin||!!config.model_providers?.[provider];
   if(!defined)add('error','此旧会话的供应商没有定义','会话绑定 '+provider+'，当前配置中没有该供应商；切换全局默认模型不会补齐这个定义。');
-  else if(provider!==(config.model_provider||'openai'))add('warn','旧会话与当前默认来源不同','旧会话绑定 '+provider+'，当前默认是 '+(config.model_provider||'openai')+'。旧会话可能继续沿用其原供应商。');
+  else if(provider!==(config.model_provider||'openai')){add('warn','旧会话尚未同步当前来源','旧会话保存的是 '+provider+'，当前选择是 '+(config.model_provider||'openai')+'。重新应用当前来源会自动同步未归档旧对话，无需逐条处理。');actions.push({type:'reapply',label:'重新应用当前来源并同步旧对话'})}
   if(model){const catalogFile=provider==='openai'?path.join(codexHome,'models_cache.json'):provider===(config.model_provider||'openai')&&config.model_catalog_json?path.resolve(codexHome,config.model_catalog_json):null,catalog=catalogFile&&readJson(catalogFile);if(Array.isArray(catalog?.models)&&!catalog.models.some(m=>m.slug===model))add('warn','旧会话模型不在本机对应目录',model+' 不在当前缓存的模型目录中。这不能证明服务端下线；可在旧会话内选择可用模型，打不开时导出可见对话供新会话继续。')}
-  if(provider==='openai'&&!official){add('warn','官方旧会话处于 API 模式','当前 API 模式不提供完整官方身份。可先切回官方账号。');actions.push({type:'official',label:'选择官方账号'})}
   if(row.creator_account_id&&active?.accountId&&row.creator_account_id!==active.accountId){const saved=accounts.find(a=>a.accountId===row.creator_account_id&&(!row.creator_user_id||a.id===require('node:crypto').createHash('sha256').update(row.creator_account_id+'\0'+row.creator_user_id).digest('hex').slice(0,20)));add('warn','会话创建账号与当前文件登录不同','这是会话元数据的账号差异，是否导致访问失败还需关联错误确认。');if(saved)actions.push({type:'account',id:saved.id,label:'切换到会话创建账号'})}
   const evidence=[...info.errors,...logEvidence(codexHome,id)].sort((a,b)=>(Date.parse(b.at)||0)-(Date.parse(a.at)||0)),seen=new Set();
   for(const e of evidence){if(seen.has(e.code))continue;seen.add(e.code);const [title,detail]=labels[e.code];add('error','关联错误记录：'+title,detail+' 证据：'+e.source+'，'+e.at+'。这是历史记录，当前是否仍失败可通过新会话或实时检测确认。')}

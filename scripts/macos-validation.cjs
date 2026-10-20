@@ -334,7 +334,7 @@ async function validate() {
   // 测试网络只连接本机合成服务，不使用真实账号或官方额度。
   const result = cp.spawnSync(
     process.execPath,
-    ['--test', '--test-timeout=120000', 'native-quota.test.cjs'],
+    ['--test', '--test-timeout=120000', 'native-quota.test.cjs', 'thread-routing.test.cjs'],
     {
       cwd: project,
       env: { ...process.env, CODEX_EXE: executable },
@@ -346,6 +346,7 @@ async function validate() {
   process.stderr.write(result.stderr || '');
   assert.equal(result.status, 0, '官方插件内置程序的额度并发验证失败');
   record('official-extension-native-quota-concurrency-with-local-fixtures');
+  record('official-extension-thread-provider-switch-and-cold-restart');
 }
 
 (async () => {

@@ -239,11 +239,15 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
     checkedAt: new Date().toISOString(),
   };
 }
-function requestReload(codexHome, bridgeHome, { id } = {}) {
+function requestReload(codexHome, bridgeHome, { id, stoppedEditors = [] } = {}) {
   const status = snapshot(codexHome, bridgeHome),
     targets = status.clients.filter(
       (c) => c.kind === 'editor' && c.canReload && (!id || c.editorId === id),
     );
+  // 本次切换已核对并停止的后端不再出现在进程列表中，仍向原窗口发送重载。
+  for (const editor of stoppedEditors)
+    if ((!id || editor.editorId === id) && !targets.some((c) => c.editorId === editor.editorId))
+      targets.push(editor);
   if (id && !targets.length) throw Error('该窗口未连接伴随扩展，或未确认共用当前配置目录。');
   for (const c of targets) {
     const file = path.join(bridgeHome, 'clients', c.editorId + '.json'),
@@ -268,6 +272,36 @@ function requestReload(codexHome, bridgeHome, { id } = {}) {
 function clientStatus(codexHome, bridgeHome) {
   return snapshot(codexHome, bridgeHome);
 }
+async function stopEditorBackends(codexHome, bridgeHome) {
+  // 旧后端持有会话写锁。先停止共用配置的 Codex 子进程，保留编辑器窗口，
+  // 同步完成后再由既有重载流程恢复扩展；独立配置目录不受影响。
+  const status = snapshot(codexHome, bridgeHome);
+  const editors = status.clients.filter((client) => client.kind === 'editor' && client.canReload);
+  const targets = status.clients.filter(
+    (client) => client.kind === 'ide' && client.confirmed && client.shared,
+  );
+  for (const client of targets) {
+    try {
+      process.kill(client.pid);
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+    }
+  }
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const deadline = Date.now() + 5000;
+  while (targets.some((client) => alive(client.pid))) {
+    if (Date.now() >= deadline) throw Error('编辑器的旧 Codex 后端尚未退出，未完成旧对话同步。');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return editors;
+}
 function desktopTargets(exe, codexHome) {
   const inventory = scan(),
     allowed = new Set();
@@ -289,5 +323,6 @@ module.exports = {
   sameHome,
   configLayers,
   desktopTargets,
+  stopEditorBackends,
   scan,
 };

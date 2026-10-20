@@ -1,9 +1,8 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
-const token = location.hash.slice(1) || sessionStorage.getItem('bridgeToken');
+// 网页与桌面快捷方式统一使用主页建立的本机会话，直接访问无需附带令牌。
 if (location.hash) {
-  sessionStorage.setItem('bridgeToken', token);
-  history.replaceState(null, '', location.pathname);
+  history.replaceState(null, '', location.pathname + location.search);
 }
 let state = null,
   editing = null,
@@ -13,14 +12,21 @@ const pendingRequests = new Set(),
 async function api(route, data) {
   let r;
   try {
-    r = await fetch('/api/' + route, {
+    const options = {
       method: data ? 'POST' : 'GET',
+      credentials: 'same-origin',
       headers: {
-        Authorization: 'Bearer ' + token,
         ...(data ? { 'Content-Type': 'application/json' } : {}),
       },
       ...(data ? { body: JSON.stringify(data) } : {}),
-    });
+    };
+    r = await fetch('/api/' + route, options);
+    if (r.status === 401) {
+      // 后台重启会更新凭证；旧标签页自动重新建立会话，再重试一次原请求。
+      const session = await fetch('/', { credentials: 'same-origin', cache: 'no-store' });
+      await session.text();
+      if (session.ok) r = await fetch('/api/' + route, options);
+    }
   } catch {
     throw Error('本机服务未连接，请重新打开桌面上的切换器快捷方式。');
   }
@@ -1228,4 +1234,7 @@ refreshAccounts()
     await refresh();
     if (data.login?.status === 'waiting' || switchPending()) watchAccounts();
   })
-  .catch((e) => status(e.message));
+  .catch((e) => {
+    $('summary').textContent = '本机配置读取失败';
+    status(e.message);
+  });
