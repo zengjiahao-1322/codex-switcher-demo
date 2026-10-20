@@ -261,7 +261,10 @@ async function initializeHome(executable, home) {
     }
     assert.equal(activations(folders[2]).length, 1);
     assert.equal(activations(folders[2])[0].backendPid, initial[2].backendPid);
-    assert.equal(activations(folders[2])[0].configuration.service_tier, undefined);
+    // RPC 会把未设置的档位序列化为 null；独立窗口必须保留原值，且不能变成 Fast。
+    const independentTier = activations(folders[2])[0].configuration.service_tier;
+    assert.equal(independentTier, initial[2].configuration.service_tier);
+    assert.ok(independentTier == null);
     for (const home of [selected, separate]) {
       assert.equal(
         fs.readFileSync(path.join(home, 'sessions', 'saved-history.jsonl'), 'utf8'),
