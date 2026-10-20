@@ -55,7 +55,7 @@ function stopDesktop(exe, codexHome) {
     : null;
   powershell(
     `
- $restricted=$env:SWITCHER_DESKTOP_IDS -ne '*';$allowed=@($env:SWITCHER_DESKTOP_IDS.Split(',') | Where-Object {$_} | ForEach-Object {[int]$_});
+ $restricted=$env:SWITCHER_DESKTOP_IDS -ne '*';$allowed=@($env:SWITCHER_DESKTOP_IDS.Split(',') | Where-Object {$_ -and $_ -ne '*'} | ForEach-Object {[int]$_});
  $p=@(Get-Process | Where-Object {$_.Path -eq $env:SWITCHER_DESKTOP_EXE -and (-not $restricted -or $_.Id -in $allowed)});
  $desktopIds=@($p | Select-Object -ExpandProperty Id);
  $backendIds=@(Get-CimInstance Win32_Process -Filter "Name = 'codex.exe'" | Where-Object {$_.ParentProcessId -in $desktopIds} | Select-Object -ExpandProperty ProcessId);
