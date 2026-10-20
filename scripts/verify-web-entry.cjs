@@ -38,6 +38,10 @@ let fixtureJob = null;
 const switchRequests = [];
 const probeRequests = [];
 const report = { platform: process.platform, checks: [] };
+function checked(...checks) {
+  report.checks.push(...checks);
+  console.log('PASS ' + checks.join(', '));
+}
 async function start(token) {
   server = createServer({
     token,
@@ -100,20 +104,25 @@ async function loaded(page, url) {
     page.on('pageerror', (error) => errors.push(error.message));
     const base = 'http://127.0.0.1:' + port;
     await loaded(page, base + '/');
-    report.checks.push('fresh-browser-direct-url');
+    checked('fresh-browser-direct-url');
     await page.goto('about:blank');
     await loaded(page, base + '/#expired-shortcut-token');
     assert.equal(new URL(page.url()).hash, '');
-    report.checks.push('old-shortcut-link');
+    checked('old-shortcut-link');
     const second = await context.newPage();
     await loaded(second, base + '/');
     await second.reload();
     await second.waitForFunction(() => document.getElementById('provider').options.length > 0);
-    report.checks.push('new-tab-and-refresh');
+    checked('new-tab-and-refresh');
     const local = await context.newPage();
     await loaded(local, 'http://localhost:' + port + '/');
-    report.checks.push('localhost-address');
-    await new Promise((resolve) => server.close(resolve));
+    checked('localhost-address');
+    console.log('Restarting fixture server');
+    await new Promise((resolve) => {
+      server.close(resolve);
+      // 模拟后台退出时同时断开已有连接，避免旧页面的活动请求卡住测试服务器关闭。
+      server.closeAllConnections();
+    });
     await start('fixture-session-after-restart');
     // 不刷新页面，直接使用旧标签页里的按钮，确认请求自行恢复访问。
     const recovered = page.waitForResponse(
@@ -122,7 +131,7 @@ async function loaded(page, url) {
     await page.locator('#threads-refresh').evaluate((button) => button.click());
     await recovered;
     assert.equal(await page.evaluate(async () => (await fetch('/api/state')).status), 200);
-    report.checks.push('old-tab-recovers-after-service-restart');
+    checked('old-tab-recovers-after-service-restart');
     // 页面只保留普通 API 检测，不再展示或提交独立加速选项。
     assert.equal(await page.locator('#fast').count(), 0);
     assert.equal(await page.locator('#probe-fast, #fast-hint').count(), 0);
@@ -140,7 +149,7 @@ async function loaded(page, url) {
     assert.equal(Object.hasOwn(probeRequests.at(-1), 'fast'), false);
     assert.equal(switchRequests.length, 0);
     assert.equal(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), configBefore);
-    report.checks.push('only-API-probe-without-speed-apply-or-config-writes');
+    checked('only-API-probe-without-speed-apply-or-config-writes');
     const applied = page.waitForResponse(
       (r) => r.url().endsWith('/api/desktopSwitch') && r.status() === 200,
     );
@@ -163,9 +172,14 @@ async function loaded(page, url) {
     await loaded(page, base + '/');
     assert.ok((await page.locator('#switch-progress-title').innerText()).includes('切换未完成'));
     assert.ok((await page.locator('#switch-steps').innerText()).includes('失败'));
-    report.checks.push('switch-step-timing-failure-and-separate-window-reload-results');
-    report.checks.push('source-switch-does-not-set-speed');
-    await page.screenshot({ path: path.resolve('verification/web-entry.png'), fullPage: true });
+    checked('switch-step-timing-failure-and-separate-window-reload-results');
+    checked('source-switch-does-not-set-speed');
+    console.log('Capturing verified page');
+    await page.screenshot({
+      path: path.resolve('verification/web-entry.png'),
+      fullPage: true,
+      timeout: 15000,
+    });
     const failed = await context.newPage();
     await failed.route('**/api/accounts', (route) =>
       route.fulfill({
@@ -179,7 +193,7 @@ async function loaded(page, url) {
       () => document.getElementById('summary').textContent === '本机配置读取失败',
     );
     assert.ok((await failed.locator('#status').innerText()).includes('fixture load failure'));
-    report.checks.push('load-error-does-not-stay-loading');
+    checked('load-error-does-not-stay-loading');
     assert.deepEqual(errors, []);
     report.passed = true;
   } catch (error) {
