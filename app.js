@@ -964,6 +964,14 @@ async function refreshClients() {
           : '') +
         (client.error ? '\n进程读取失败：' + client.error : '') +
         (client.workspace ? '\n' + client.workspace : '') +
+        (client.kind === 'editor'
+          ? '\n伴随扩展：' + (client.companionVersion || '版本未知，可重新接入以更新')
+          : '') +
+        (client.commandPending ? '\n重载请求等待窗口接收；请查看编辑器状态栏是否已连接。' : '') +
+        (client.lastAck?.status === 'reload_requested'
+          ? '\n窗口已接收重载请求；若仍显示旧进程，请检查编辑器是否有待处理的保存或任务提示。'
+          : '') +
+        (client.lastAck?.status === 'reload_failed' ? '\n重载失败：' + client.lastAck.error : '') +
         (client.stale ? '\n启动早于最近切换，可能需重载。' : '') +
         (client.overridden ? '\n配置档 / 启动参数覆盖了全局模型或供应商，请展开核对。' : '');
       row.append(detail);
@@ -1021,6 +1029,7 @@ async function refreshClients() {
             status('正在安装伴随扩展…');
             const r = await api('companionInstall', { id: editor.id });
             status(r.message);
+            await refreshClients();
           },
           status,
         ),

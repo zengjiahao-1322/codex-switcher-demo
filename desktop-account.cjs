@@ -155,16 +155,20 @@ async function runSwitch(
       await open(job.desktopExe, job.codexHome);
     }
     let editorNote = '';
+    let editorReload = null;
     if (job.reloadEditors !== false) {
       try {
         const reloaded = require('./client-status.cjs').requestReload(
           job.codexHome,
           job.bridgeHome,
         );
-        if (reloaded.count) editorNote = ' ' + reloaded.message;
+        editorReload = reloaded;
+        editorNote = ' ' + reloaded.message;
       } catch {
         editorNote = ' 编辑器重载请求未发送，可在客户端列表重试。';
       }
+    } else {
+      editorNote = ' 本次未重载编辑器；完成任务后请手动重载需要更新的窗口。';
     }
     const effect = desktop
       ? '已请求重新打开桌面端。'
@@ -178,6 +182,7 @@ async function runSwitch(
     writeJson(file, {
       id: job.id,
       status: 'done',
+      editorReload,
       message:
         '已应用 ' +
         (api ? prepared.label + ' · ' + job.model : result.label + ' 的官方配置') +

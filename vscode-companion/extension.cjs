@@ -73,6 +73,7 @@ function activate(context) {
         ));
     return {
       id,
+      companionVersion: require('./package.json').version,
       pid: process.pid,
       name: vscode.env.appName,
       workspace: folders.map((f) => f.uri.fsPath).join(' | '),
@@ -107,6 +108,7 @@ function activate(context) {
         new URL(c.url).origin +
         ' · ' +
         (data.home || 'separate remote/WSL environment');
+      status.text = '$(plug) Codex Switcher · 已连接';
       if (r.command?.type === 'reload') {
         if (data.remote || data.wsl) {
           await post(c, 'clientHeartbeat', {
@@ -122,11 +124,23 @@ function activate(context) {
           ackStatus: 'reload_requested',
         });
         await context.workspaceState.update('codexSwitcher.lastReload', r.command.id);
-        setTimeout(() => vscode.commands.executeCommand('workbench.action.reloadWindow'), 200);
+        setTimeout(async () => {
+          try {
+            await vscode.commands.executeCommand('workbench.action.reloadWindow');
+          } catch (error) {
+            // 请求已收到但编辑器未能执行时，不能继续显示为成功或误报服务未运行。
+            await post(c, 'clientHeartbeat', {
+              ...data,
+              ack: r.command.id,
+              ackStatus: 'reload_failed',
+              ackError: error.message,
+            }).catch(() => {});
+          }
+        }, 200);
       }
-    } catch {
-      status.tooltip =
-        'Local switcher is not running. Open the switcher, then connect this window.';
+    } catch (error) {
+      status.text = '$(debug-disconnect) Codex Switcher · 未连接';
+      status.tooltip = '未连接切换器：' + error.message;
     } finally {
       busy = false;
     }

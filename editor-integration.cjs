@@ -4,50 +4,51 @@ const fs = require('node:fs'),
   os = require('node:os'),
   cp = require('node:child_process');
 function editors() {
-  const candidates =
-    process.platform === 'darwin'
-      ? ['/Applications', path.join(os.homedir(), 'Applications')].flatMap((dir) => [
-          [
-            'VS Code',
-            path.join(dir, 'Visual Studio Code.app', 'Contents', 'Resources', 'app', 'bin', 'code'),
-          ],
-          ['Cursor', path.join(dir, 'Cursor.app', 'Contents', 'Resources', 'app', 'bin', 'cursor')],
-        ])
-      : [
-          [
-            'VS Code',
-            path.join(
-              process.env.LOCALAPPDATA || '',
-              'Programs',
-              'Microsoft VS Code',
-              'bin',
-              'code.cmd',
-            ),
-          ],
-          [
-            'VS Code',
-            path.join(
-              process.env.ProgramFiles || 'C:/Program Files',
-              'Microsoft VS Code',
-              'bin',
-              'code.cmd',
-            ),
-          ],
-          [
-            'Cursor',
-            path.join(
-              process.env.LOCALAPPDATA || '',
-              'Programs',
-              'cursor',
-              'resources',
-              'app',
-              'bin',
-              'cursor.cmd',
-            ),
-          ],
-        ];
+  const brands = [
+    ['VS Code', 'Visual Studio Code.app', 'code', 'Microsoft VS Code', 'bin'],
+    [
+      'VS Code Insiders',
+      'Visual Studio Code - Insiders.app',
+      'code-insiders',
+      'Microsoft VS Code Insiders',
+      'bin',
+    ],
+    ['Cursor', 'Cursor.app', 'cursor', 'cursor', 'resources/app/bin'],
+    ['Windsurf', 'Windsurf.app', 'windsurf', 'Windsurf', 'bin'],
+  ];
+  let candidates;
+  if (process.platform === 'darwin') {
+    const apps = new Set(
+      ['/Applications', path.join(os.homedir(), 'Applications')].flatMap((dir) =>
+        brands.map(([, app]) => path.join(dir, app)),
+      ),
+    );
+    // 也接入正在运行的非标准目录安装，例如用户直接从 Downloads 打开的编辑器。
+    for (const process of require('./client-status.cjs').scan().ancestry) {
+      const app = process.exe?.match(/^(.+?\.app)\/Contents\//)?.[1];
+      if (app) apps.add(app);
+    }
+    candidates = [...apps].flatMap((app) =>
+      brands.map(([name, , cli]) => [
+        name,
+        path.join(app, 'Contents', 'Resources', 'app', 'bin', cli),
+      ]),
+    );
+  } else {
+    candidates = [
+      path.join(process.env.LOCALAPPDATA || '', 'Programs'),
+      process.env.ProgramFiles || 'C:/Program Files',
+    ].flatMap((dir) =>
+      brands.map(([name, , cli, folder, bin]) => [name, path.join(dir, folder, bin, cli + '.cmd')]),
+    );
+  }
+  const seen = new Set();
   return candidates
-    .filter(([, file]) => fs.existsSync(file))
+    .filter(([, file]) => {
+      if (!fs.existsSync(file) || seen.has(file)) return false;
+      seen.add(file);
+      return true;
+    })
     .map(([name, file], id) => ({ id, name, file }));
 }
 function build(projectDir = __dirname) {
@@ -89,7 +90,10 @@ async function install(id, projectDir = __dirname) {
     ),
   );
   return {
-    message: '已为 ' + editor.name + ' 安装伴随扩展。打开 Codex 扩展后，此窗口会出现在客户端列表。',
+    message:
+      '已为 ' +
+      editor.name +
+      ' 安装伴随扩展。请在各窗口确认状态栏显示“Codex Switcher · 已连接”；已有窗口可能需要先执行一次“重载窗口”才能启用新版本。',
   };
 }
 function cliFor(shim) {

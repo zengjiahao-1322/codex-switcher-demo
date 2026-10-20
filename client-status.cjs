@@ -112,13 +112,19 @@ function heartbeat(bridgeHome, input) {
     codexExe: input.codexExe ? String(input.codexExe) : null,
     remote: input.remote ? String(input.remote) : null,
     wsl: !!input.wsl,
+    companionVersion: input.companionVersion || null,
     seenAt: Date.now(),
     command: prior.command || null,
     lastAck: prior.lastAck || null,
   };
-  if (input.ack && row.command?.id === input.ack) {
-    row.lastAck = { id: input.ack, at: Date.now(), status: input.ackStatus || 'accepted' };
-    row.command = null;
+  if (input.ack && (row.command?.id === input.ack || row.lastAck?.id === input.ack)) {
+    row.lastAck = {
+      id: input.ack,
+      at: Date.now(),
+      status: input.ackStatus || 'accepted',
+      error: input.ackError || null,
+    };
+    if (row.command?.id === input.ack) row.command = null;
   }
   writeJson(file, row);
   return { command: row.command };
@@ -217,6 +223,7 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
       canReload: !!shared && !w.remote && !w.wsl,
       commandPending: !!w.command,
       lastAck: w.lastAck,
+      companionVersion: w.companionVersion,
       layers: matching[0]?.layers || [],
       cwd: w.workspace,
     });
@@ -246,9 +253,14 @@ function requestReload(codexHome, bridgeHome, { id } = {}) {
   }
   return {
     count: targets.length,
+    targets: targets.map((client) => ({
+      id: client.editorId,
+      name: client.name,
+      workspace: client.workspace,
+    })),
     message: targets.length
-      ? '已向 ' + targets.length + ' 个共用配置的编辑器窗口发送重载请求。'
-      : '没有已连接且确认共用配置的编辑器窗口。',
+      ? '已向 ' + targets.length + ' 个共用配置的编辑器窗口发送重载请求，尚不代表重载完成。'
+      : '未向任何编辑器窗口发送重载：请先接入伴随扩展，并在客户端列表确认配置目录。',
   };
 }
 function clientStatus(codexHome, bridgeHome) {

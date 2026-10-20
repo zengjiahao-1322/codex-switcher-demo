@@ -1,0 +1,33 @@
+name: Real editor window reload
+on:
+  push:
+    branches: ['verify/editor-reload-*']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-15, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+      - run: npm install --ignore-scripts
+      - run: npm install --global @openai/codex@0.163.0
+      - name: Locate the official runtime
+        shell: bash
+        run: CODEX_NPM_ROOT="$(npm root -g)" node scripts/ci-setup.cjs
+      - name: Prepare real VS Code integration checks
+        run: npm install --prefix .build-cache/editor-check --no-package-lock --ignore-scripts @vscode/test-electron@2.5.2
+      - run: node scripts/verify-editor-reload.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: editor-reload-${{ matrix.os }}
+          path: verification/editor-reload.json
+          retention-days: 7

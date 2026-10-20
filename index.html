@@ -591,8 +591,11 @@
           </div>
           <label class="check"
             ><input type="checkbox" id="reload-editors" checked />
-            同时重载已连接、共用此配置的编辑器窗口</label
+            同时重载已连接、共用此配置的编辑器窗口（会中断 Codex 任务）</label
           >
+          <p class="note">
+            多个窗口共用配置时都会受影响。正在运行任务时，建议等任务结束再切换；已保存的聊天记录不会被切换器删除。
+          </p>
           <div id="status" role="status"></div>
           <details id="client-details" class="technical">
             <summary>影响范围与其他客户端</summary>
