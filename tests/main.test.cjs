@@ -181,7 +181,8 @@ test(
     ]);
     assert.deepEqual((await api('models', { id: 'chatonly' })).models, ['m', 'm-large']);
     // 未检测直接切换：自动检测 → 转换模式。
-    const sw = await api('switch', { id: 'chatonly', model: 'm' });
+    await assert.rejects(api('switch', { id: 'chatonly', model: 'm' }), /请先选择本次/);
+    const sw = await api('switch', { id: 'chatonly', model: 'm', threadFollow: 'off' });
     assert.equal(sw.mode, 'adapter');
     assert.match(sw.message, /配置已应用/);
     assert.equal((await api('state')).effect.status, 'restart_required');
@@ -214,12 +215,12 @@ test(
     await assert.rejects(api('providerUpdate', { id: 'official', name: 'x' }), /不能编辑/);
     // 关闭开机自启后再次切换不会擅自重新开启。
     await api('autostart', { enabled: false });
-    await api('switch', { id: 'chatonly', model: 'm' });
+    await api('switch', { id: 'chatonly', model: 'm', threadFollow: 'off' });
     assert.equal(fs.readdirSync(dirs.startup).length, 0);
     // 配置里指定了“其他可选模型”时，Codex 下拉只显示 默认模型 + 这些；说明标明来自哪个配置。
     if (tpl) {
       await api('providerUpdate', { id: 'chatonly', models: 'picked-1, picked-2' });
-      await api('switch', { id: 'chatonly', model: 'm' });
+      await api('switch', { id: 'chatonly', model: 'm', threadFollow: 'off' });
       const cat = JSON.parse(fs.readFileSync(config().model_catalog_json, 'utf8')).models;
       assert.deepEqual(
         cat.map((x) => x.slug),
@@ -236,12 +237,15 @@ test(
       baseUrl: up.url + '/rejected',
       apiKey: 'changed-key',
     });
-    await assert.rejects(api('switch', { id: 'chatonly', model: 'm' }), /检测未通过/);
+    await assert.rejects(
+      api('switch', { id: 'chatonly', model: 'm', threadFollow: 'off' }),
+      /检测未通过/,
+    );
     assert.equal(fs.readFileSync(path.join(dirs.codex, 'config.toml'), 'utf8'), beforeRejected);
     await api('providerUpdate', { id: 'chatonly', baseUrl: up.url, apiKey: 'hermes-key' });
     // 切到官方（指定官方模型），保留 hermes_bridge 定义，凭据文件不变。
     const authBefore = fs.readFileSync(path.join(dirs.codex, 'auth.json'), 'utf8');
-    const o = await api('switch', { id: 'official', model: 'official-2' });
+    const o = await api('switch', { id: 'official', model: 'official-2', threadFollow: 'off' });
     assert.equal(o.mode, 'official');
     assert.match(o.message, /完整退出/);
     assert.equal(config().model, 'official-2');
@@ -265,7 +269,7 @@ test(
     assert.match((await api('importHermes', {})).message, /已导入 1 个/);
     s = await api('state');
     assert.equal(s.providers.length, 2);
-    assert.match((await api('restore', {})).message, /已是官方/);
+    assert.match((await api('restore', { threadFollow: 'off' })).message, /已是官方/);
   },
 );
 test(

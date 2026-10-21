@@ -694,11 +694,7 @@ function createService({
     switch: ({ id, model, autostart: wantAutostart, threadFollow: requestedFollow }) =>
       exclusive(async () => {
         const follow = require('../config/thread-follow.cjs');
-        // CLI/MCP 原有入口默认只应用配置；旧对话跟随必须显式选择或已有偏好。
-        const mode = follow.selectedMode(
-          bridgeHome,
-          requestedFollow ?? (follow.mode(bridgeHome) === 'ask' ? 'off' : undefined),
-        );
+        const mode = follow.selectedMode(bridgeHome, requestedFollow);
         const previousProvider = follow.provider(codexHome);
         if (id === OFFICIAL) {
           const c = readConfig();
@@ -735,10 +731,7 @@ function createService({
     restore: ({ threadFollow: requestedFollow } = {}) =>
       exclusive(async () => {
         const follow = require('../config/thread-follow.cjs');
-        const mode = follow.selectedMode(
-          bridgeHome,
-          requestedFollow ?? (follow.mode(bridgeHome) === 'ask' ? 'off' : undefined),
-        );
+        const mode = follow.selectedMode(bridgeHome, requestedFollow);
         const previousProvider = follow.provider(codexHome);
         const r = core.restoreOfficial(codexHome, bridgeHome);
         fs.rmSync(currentPath, { force: true });

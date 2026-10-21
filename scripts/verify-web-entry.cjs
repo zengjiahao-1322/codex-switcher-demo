@@ -59,6 +59,7 @@ async function start(token) {
           startedAt: new Date().toISOString(),
           elapsedMs: 1250,
           configurationApplied: true,
+          threadFollow: 'all',
           threads: { updated: 3, skipped: 0, failed: 0 },
           steps: [{ id: 'apply', label: '保存并应用目标配置', status: 'done', durationMs: 250 }],
           editorReload: {
@@ -85,6 +86,8 @@ async function start(token) {
   port = server.address().port;
 }
 async function loaded(page, url) {
+  // 启动器会打开页面；先离开旧文档，避免仅更换 hash 被浏览器当成页内跳转。
+  await page.goto('about:blank');
   await page.goto(url);
   await page.waitForFunction(() => document.getElementById('provider').options.length > 0);
   assert.ok((await page.locator('#summary').innerText()).includes('fixture-api'));
@@ -169,7 +172,7 @@ async function loaded(page, url) {
     await page.locator('#switch-progress').waitFor({ state: 'visible' });
     await page.locator('#switch-progress-title').click();
     assert.ok((await page.locator('#switch-steps').innerText()).includes('0.3 秒'));
-    assert.ok((await page.locator('#switch-windows').innerText()).includes('已核对 3 条旧对话'));
+    assert.ok((await page.locator('#switch-windows').innerText()).includes('已同步 3 条'));
     assert.ok((await page.locator('#switch-windows').innerText()).includes('尚未验证实际请求'));
     assert.ok((await page.locator('#switch-windows').innerText()).includes('等待扩展重新连接'));
     fixtureJob = {

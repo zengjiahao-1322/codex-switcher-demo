@@ -37,6 +37,12 @@ const accessText = {
 const describe = (p) =>
   `${p.inUse ? '▶ ' : '  '}${p.name}｜${accessText[p.access?.mode] || '未检测'}｜默认模型 ${p.model || '（无）'}${p.local ? '｜本机代理' : ''}${p.id === OFFICIAL ? '' : `｜id ${p.id}`}`;
 const str = { type: 'string' };
+const threadFollow = {
+  type: 'string',
+  enum: ['off', 'matching', 'all'],
+  description:
+    '旧对话是否跟随：off 保留原设置，matching 按原 provider 标识筛选，all 全部未归档用户对话。',
+};
 const TOOLS = [
   {
     name: 'list_api_configs',
@@ -80,12 +86,13 @@ const TOOLS = [
   {
     name: 'switch_api_config',
     description:
-      '把 Codex 切换到指定 API 配置与模型（未检测过会先自动检测，失败则不切换）。配置写入后请完整重启桌面端以载入账号和模型列表，已有对话沿用原设置。config 为“官方”时切回 Codex 官方登录。',
+      '把 Codex 切换到指定 API 配置与模型（未检测过会先检测）。threadFollow 选择旧对话跟随范围；未指定时采用已保存偏好，尚未选择时要求用户选择。配置写入后请完整重启客户端。config 为“官方”时切回官方登录。',
     inputSchema: {
       type: 'object',
       properties: {
         config: str,
         model: { type: 'string', description: '可选，默认用该配置的默认模型' },
+        threadFollow,
       },
       required: ['config'],
       additionalProperties: false,
@@ -97,7 +104,7 @@ const TOOLS = [
       '切回 Codex 官方登录（ChatGPT 账号）。可指定官方模型。配置写入后请完整重启桌面端。',
     inputSchema: {
       type: 'object',
-      properties: { model: { type: 'string' } },
+      properties: { model: { type: 'string' }, threadFollow },
       additionalProperties: false,
     },
   },
@@ -153,10 +160,22 @@ async function call(name, args = {}) {
     }
     case 'switch_api_config': {
       const p = await findConfig(args.config);
-      return (await svc.actions.switch({ id: p.id, model: args.model || p.model })).message;
+      return (
+        await svc.actions.switch({
+          id: p.id,
+          model: args.model || p.model,
+          threadFollow: args.threadFollow,
+        })
+      ).message;
     }
     case 'switch_to_official':
-      return (await svc.actions.switch({ id: OFFICIAL, model: args.model })).message;
+      return (
+        await svc.actions.switch({
+          id: OFFICIAL,
+          model: args.model,
+          threadFollow: args.threadFollow,
+        })
+      ).message;
     case 'delete_api_config': {
       const p = await findConfig(args.config);
       return `「${p.name}」` + (await svc.actions.providerRemove({ id: p.id })).message;

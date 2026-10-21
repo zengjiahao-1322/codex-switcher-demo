@@ -134,7 +134,7 @@ test(
     assert.match(r.text, /▶ Codex 官方/);
     assert.match(r.text, /RespAPI/);
     assert.equal(r.text.includes('SECRET-KEY'), false);
-    r = await tool('switch_api_config', { config: 'RespAPI' });
+    r = await tool('switch_api_config', { config: 'RespAPI', threadFollow: 'off' });
     assert.equal(r.isError, false, r.text);
     assert.match(r.text, /已切换到「RespAPI」（直连/);
     const c = toml.parse(fs.readFileSync(path.join(codex, 'config.toml'), 'utf8'));
@@ -145,7 +145,7 @@ test(
     r = await tool('delete_api_config', { config: 'RespAPI' });
     assert.equal(r.isError, true);
     assert.match(r.text, /正在被 Codex 使用/);
-    r = await tool('switch_api_config', { config: '官方' });
+    r = await tool('switch_api_config', { config: '官方', threadFollow: 'off' });
     assert.match(r.text, /官方登录（模型 gpt-official）/);
     r = await tool('switch_api_config', { config: '不存在的' });
     assert.equal(r.isError, true);
