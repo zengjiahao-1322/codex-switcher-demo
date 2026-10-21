@@ -881,6 +881,8 @@ test('后台进程在锁交接和排队状态写入后才收到开始消息，�
     id: 'missing-fixture',
     reloadEditors: false,
   });
+  // 正式后台有意 unref；测试宿主需要持有引用，等子进程终态后再结束事件循环。
+  f.children[0].child.ref();
   await f.children[0].closed;
   assert.equal(started, true);
   assert.equal(op.switchJob(f.bridgeHome).status, 'error');
