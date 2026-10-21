@@ -73,7 +73,10 @@ function ownsOldService(pid, entry) {
     if (!found || path.basename(found.exe).toLowerCase() !== 'node.exe') return false;
     command = found.command;
   }
-  return entry ? command.includes(entry) : /[\\/]main\.cjs(?:\s|"|$)/.test(command);
+  // macOS 的 ps 可能把 /private、符号链接或临时目录显示成另一种等价路径；
+  // 已确认 Node 可执行文件后，按主入口文件名核对，避免合法旧后台被误拒绝。
+  const main = entry ? path.basename(entry) : 'main.cjs';
+  return command.includes(main) && /(?:^|[\\/])main\.cjs(?:\s|"|$)/.test(command);
 }
 // 只复用相同构建；更新应用不能继续打开仍在内存中的旧后台和旧页面。
 async function existing() {
