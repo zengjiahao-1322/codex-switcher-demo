@@ -527,6 +527,7 @@ function createService({
         codexHome,
         bridgeHome,
         id,
+        accounts,
         clients: require('./client-status.cjs').clientStatus(codexHome, bridgeHome),
       }),
     exportContext: ({ id }) =>
@@ -551,7 +552,7 @@ function createService({
     // 额度属于账号级只读操作，不持有修改全局配置时使用的 exclusive 锁。
     accountQuota: async ({ id } = {}) => {
       const ids = id ? [id] : accounts.status().items.map((a) => a.id);
-      return { items: await Promise.all(ids.map((id) => accounts.quota(id))) };
+      return { items: await Promise.all(ids.map((accountId) => accounts.quota(accountId))) };
     },
     accountLogin: ({ id } = {}) =>
       exclusive(async () => {

@@ -140,11 +140,44 @@ test('switch waits for desktop exit, preserves refreshed outgoing credentials, a
   );
 });
 
-function loginFixture(f, { cancel = false, loginUser = 'new-user', failPrepare = false } = {}) {
+function loginFixture(
+  f,
+  { cancel = false, loginUser = 'new-user', failPrepare = false, earlyCompletion = false, failLogin = false } = {},
+) {
   const fake = path.join(f.root, 'fake-app-server.cjs');
   fs.writeFileSync(
     fake,
-    `const fs=require('fs'),path=require('path'),rl=require('readline');const send=x=>process.stdout.write(JSON.stringify(x)+'\\n');rl.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.method==='account/read'){const file=path.join(process.env.CODEX_HOME,'auth.json');if(${failPrepare}){send({id:m.id,error:{code:401,message:'fixture rejected'}});return}const auth=JSON.parse(fs.readFileSync(file));auth.tokens.refresh_token+='-prepared';fs.writeFileSync(file,JSON.stringify(auth));send({id:m.id,result:{account:{type:'chatgpt',email:'fixture@example.test'}}});return}if(m.method==='initialize')send({id:m.id,result:{}});if(m.method==='account/login/start'){send({id:m.id,result:{type:'chatgpt',loginId:'fixture-login',authUrl:'https://auth.openai.com/fixture-login'}});${cancel ? '' : `setTimeout(()=>{fs.writeFileSync(path.join(process.env.CODEX_HOME,'auth.json'),${JSON.stringify(JSON.stringify(auth(loginUser)))});send({method:'account/login/completed',params:{loginId:'fixture-login',success:true,error:null}})},50);`}}if(m.method==='account/login/cancel'){send({id:m.id,result:{status:'canceled'}});send({method:'account/login/completed',params:{loginId:'fixture-login',success:false,error:'cancelled'}})}});`,
+    `const fs = require('fs'), path = require('path'), rl = require('readline');
+const send = x => process.stdout.write(JSON.stringify(x) + '\\n');
+const complete = (loginId, success, error = null) =>
+  send({ method: 'account/login/completed', params: { loginId, success, error } });
+rl.createInterface({ input: process.stdin }).on('line', line => {
+  const m = JSON.parse(line);
+  if (m.method === 'account/read') {
+    const file = path.join(process.env.CODEX_HOME, 'auth.json');
+    if (${failPrepare}) { send({ id: m.id, error: { code: 401, message: 'fixture rejected' } }); return; }
+    const auth = JSON.parse(fs.readFileSync(file));
+    auth.tokens.refresh_token += '-prepared';
+    fs.writeFileSync(file, JSON.stringify(auth));
+    send({ id: m.id, result: { account: { type: 'chatgpt', email: 'fixture@example.test' } } });
+    return;
+  }
+  if (m.method === 'initialize') send({ id: m.id, result: {} });
+  if (m.method === 'account/login/start') {
+    const finish = () => {
+      fs.writeFileSync(path.join(process.env.CODEX_HOME, 'auth.json'), ${JSON.stringify(JSON.stringify(auth(loginUser)))});
+      complete('fixture-login', ${!failLogin}, ${failLogin ? JSON.stringify('callback timed out code=SECRET https://auth.openai.com/?token=PRIVATE') : 'null'});
+      if (${earlyCompletion}) complete('fixture-login', false, 'late failure');
+    };
+    if (${earlyCompletion}) { complete('previous-login', false, 'old cancellation'); finish(); }
+    send({ id: m.id, result: { type: 'chatgpt', loginId: 'fixture-login', authUrl: 'https://auth.openai.com/fixture-login' } });
+    if (!${cancel} && !${earlyCompletion}) setTimeout(finish, 50);
+  }
+  if (m.method === 'account/login/cancel') {
+    send({ id: m.id, result: { status: 'canceled' } });
+    complete('fixture-login', false, 'cancelled');
+  }
+});`,
   );
   return createAccounts({
     ...f,
@@ -166,7 +199,8 @@ test('当前账号访问令牌过期时，先向官方服务刷新而非直接�
   assert.match(saved.tokens.refresh_token, /-prepared$/);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json'))), expired);
   const rejected = loginFixture(f, { failPrepare: true });
-  await assert.rejects(rejected.prepare(id), /官方登录已失效/);
+  await assert.rejects(rejected.prepare(id), (error) =>
+    error.kind === 'auth_invalid' && /官方登录已失效/.test(error.message));
   const unavailable = createAccounts({
     ...f,
     codexExe: process.execPath,
@@ -180,7 +214,16 @@ test('当前账号访问令牌过期时，先向官方服务刷新而非直接�
         options,
       ),
   });
-  await assert.rejects(unavailable.prepare(id), /尚未确认登录失效/);
+  await assert.rejects(unavailable.prepare(id), (error) =>
+    error.kind === 'network_error' && /尚未确认登录失效/.test(error.message));
+  const missing = createAccounts({
+    ...f,
+    codexExe: () => {
+      throw Object.assign(Error('fixture runtime missing'), { code: 'CODEX_NOT_FOUND' });
+    },
+  });
+  await assert.rejects(missing.prepare(id), (error) =>
+    error.kind === 'runtime_error' && /程序不可用/.test(error.message));
 });
 
 test('相同模型切换官方账号仍会停止旧插件后端', async (t) => {
@@ -241,6 +284,93 @@ test('canceling an official login leaves saved and active accounts intact', asyn
   assert.equal(a.status().items.length, 1);
 });
 
+test('登录完成通知早于 start 响应时仍保存账号，忽略旧取消和成功后的失败', async (t) => {
+  const f = configured(t),
+    a = loginFixture(f, { earlyCompletion: true }),
+    before = fs.readFileSync(path.join(f.codexHome, 'auth.json'), 'utf8');
+  await a.startLogin();
+  const s = await waitLogin(a);
+  assert.equal(s.login.status, 'done');
+  assert.equal(s.items.length, 2);
+  assert.equal(s.items.filter((row) => row.email === 'new-user@example.test').length, 1);
+  assert.equal(fs.readFileSync(path.join(f.codexHome, 'auth.json'), 'utf8'), before);
+});
+
+test('登录失败保留具体原因和已落盘凭证，重试使用独立目录', async (t) => {
+  const f = configured(t),
+    a = loginFixture(f, { failLogin: true }),
+    before = fs.readFileSync(path.join(f.codexHome, 'auth.json'), 'utf8');
+  for (let count = 1; count <= 2; count++) {
+    await a.startLogin();
+    const s = await waitLogin(a);
+    assert.equal(s.login.status, 'error');
+    assert.match(s.login.message, /callback timed out/);
+    assert.doesNotMatch(s.login.message, /SECRET|PRIVATE/);
+    assert.equal(s.items.length, 1);
+    const loginRoot = path.join(f.bridgeHome, 'accounts', 'login'),
+      attempts = fs.readdirSync(loginRoot);
+    assert.equal(attempts.length, count);
+    for (const attempt of attempts) {
+      const saved = JSON.parse(fs.readFileSync(path.join(loginRoot, attempt, 'auth.json')));
+      assert.equal(identity(saved).email, 'new-user@example.test');
+    }
+  }
+  assert.equal(fs.readFileSync(path.join(f.codexHome, 'auth.json'), 'utf8'), before);
+});
+
+test('不同单账号请求共用两个额度名额，排队请求合并，失败后释放名额', async () => {
+  const { createQuotaReader } = require('./quota-reader.cjs'),
+    ids = ['slow', 'fast', 'failed', 'queued'],
+    gates = new Map(),
+    started = [],
+    cache = new Map();
+  let active = 0,
+    peak = 0;
+  for (const id of ids) {
+    let resolve, reject;
+    const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+    gates.set(id, { promise, resolve, reject });
+  }
+  const reader = createQuotaReader({
+    root: 'fixture',
+    load: () => ids.map((id) => ({ id })),
+    authFile: (id) => path.join('fixture', id, 'auth.json'),
+    captureCurrent: () => {},
+    readJson: (file, fallback) => cache.get(file) || fallback,
+    writeJson: (file, value) => cache.set(file, value),
+    openSession: (home) => {
+      const id = path.basename(home);
+      started.push(id);
+      peak = Math.max(peak, ++active);
+      return {
+        ready: async () => {},
+        rpc: async (method) => method === 'account/read'
+          ? { account: { type: 'chatgpt' } }
+          : gates.get(id).promise,
+        close: async () => { active--; },
+      };
+    },
+  });
+  const requests = ids.map((id) => reader.quota(id)),
+    response = { rateLimits: { primary: { usedPercent: 25 } } };
+  assert.equal(reader.quota('queued'), requests[3]);
+  assert.deepEqual(started, ['slow', 'fast']);
+  gates.get('fast').resolve(response);
+  assert.equal((await requests[1]).status, 'ok');
+  await new Promise(setImmediate);
+  assert.deepEqual(started, ['slow', 'fast', 'failed']);
+  gates.get('failed').reject(Object.assign(Error('fixture network failure'), { reason: 'network' }));
+  assert.equal((await requests[2]).errorKind, 'network_error');
+  await new Promise(setImmediate);
+  assert.deepEqual(started, ids);
+  gates.get('queued').resolve(response);
+  gates.get('slow').resolve(response);
+  await Promise.all(requests);
+  await new Promise(setImmediate);
+  assert.equal(peak, 2);
+  assert.equal(active, 0);
+});
+
 test('missing runtime leaves login retryable and reports the real quota failure', async (t) => {
   const f = configured(t),
     a = createAccounts({
@@ -256,6 +386,7 @@ test('missing runtime leaves login retryable and reports the real quota failure'
   const id = a.status().items[0].id,
     result = await a.quota(id);
   assert.equal(result.error, 'fixture runtime missing');
+  assert.equal(result.errorKind, 'runtime_error');
   assert.equal(result.status, 'error');
 });
 

@@ -29,12 +29,37 @@ Mac 包按芯片拆分，只携带一套 Node.js，避免原通用包同时下�
 ## 能做什么
 
 - **统一应用**：官方账号和 API 使用同一入口。桌面版重启，已连接且共用此目录的插件窗口重载；只安装插件也可添加账号、读取额度和应用配置。
-- **官方多账号**：通过 OpenAI 官方授权页添加账号，在列表中切换；添加账号不会自动启用。额度按账号独立查询，批量刷新逐个返回结果，不锁定顶部来源选择器。查询失败时保留并标注上次成功数据。
+- **官方多账号**：通过 OpenAI 官方授权页添加账号，在列表中切换；添加账号不会自动启用。额度按账号独立查询，批量刷新逐个返回结果，不锁定顶部来源选择器。查询失败时隐藏旧额度数字，显示失败原因和上次成功时间。
 - **API 配置**：Responses、Chat Completions、Anthropic Messages；支持直连检测和受限的本机协议转换。检测和实际使用会产生供应商费用。
 - **编辑器窗口**：安装随包提供的伴随扩展后，识别本机配置归属，仅向已确认共用配置的窗口发送重载请求。独立目录、WSL、SSH、容器环境不自动切换。
 - **旧会话诊断**：搜索本机会话、查看模型/供应商/账号差异和关联错误，导出可见对话给新会话继续。
 
 切换来源会中断目标客户端的运行任务，请先保存工作。统一应用会同步未归档旧对话的来源和模型，保留各对话原有速度；它不会迁移云端 ChatGPT 对话。额度是 Codex 的服务端额度，不代表 ChatGPT 网页聊天次数或 API 余额。
+
+## 当前架构
+
+```mermaid
+flowchart LR
+  UI[浏览器界面\nindex.html + app.js] --> S[本地 HTTP 服务\nmain.cjs + server.cjs]
+  S --> H[业务编排\nservice.cjs]
+  H --> C[配置切换\ncore.cjs + switch-state.cjs]
+  H --> A[官方账号与额度\naccounts.cjs]
+  C --> HOME[(Codex home\nconfig.toml / auth.json)]
+  A --> COPY[(账号副本\nbridgeHome/accounts/<id>)]
+  A --> RPC[独立 Codex app-server\n登录验证 / 额度 RPC]
+  H --> T[旧会话同步\nthread-routing.cjs]
+  H --> R[客户端发现与重载\nclient-status.cjs]
+  R --> D[Codex 桌面端]
+  R --> E[VS Code 等官方扩展]
+  E --> X[伴随扩展\nvscode-companion]
+  H --> G[诊断\ndiagnostics.cjs]
+  G --> HOME
+  G --> A
+```
+
+核心关系是：浏览器只调用本机业务服务；业务服务分别管理当前 Codex 配置、官方账号副本和客户端重载。额度查询启动独立的 Codex app-server，但读取的仍是对应账号的同一份官方登录凭证，不会另造一套额度账号凭证。
+
+这次凭证状态修复也位于两处：`diagnostics.cjs` 用官方 `account/read(refreshToken=true)` 验证 access token 到期后 session 是否仍可续期；`app.js` 在额度请求失败时只显示失败原因和上次成功时间，不再把缓存额度数字显示成当前额度。多账号额度刷新限制为两个并发，后端同时保留 `auth_invalid`、`network_error`、`runtime_error` 等结构化状态。官方 app-server 会话和额度读取已分别放在 `official-session.cjs`、`quota-reader.cjs`，账号门面仍由 `accounts.cjs` 提供。完整的分层说明见 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
 来源下方提供“检测 API”，检测不修改配置、不应用来源、不重启。切换器不提供独立加速功能，也不额外生成标准／Fast 模型；已有的 Codex 速度设置保留，Chat Completions 转换继续传递请求中的服务档位参数。
 
@@ -56,7 +81,7 @@ Mac 包按芯片拆分，只携带一套 Node.js，避免原通用包同时下�
 - `BRIDGE_HOME` 可指定独立数据目录；每个 Codex home 应使用自己的数据目录。
 - 官方授权信息由官方 Codex 写入，工具保存登录副本供切换使用，不要求提供邮箱密码。
 - 应用保存的官方账号时使用 Codex 的 `file` 凭据存储，避免系统钥匙串中的另一账号覆盖选择；不删除原钥匙串条目。
-- macOS 的 `keyring` / `auto` 配置会尝试读取对应 Codex home 的 `Codex Auth` 钥匙串条目；读取失败会提示。官方登录与额度子进程继承显式代理，未设置时采用系统手动 HTTP / SOCKS 代理；PAC 脚本不自动解析。
+- macOS 的 `keyring` / `auto` 配置会尝试读取对应 Codex home 的 `Codex Auth` 钥匙串条目；读取失败会提示。Windows 和 macOS 的官方登录与额度子进程继承显式代理，未设置时采用已启用的系统手动 HTTP / SOCKS 代理；PAC 脚本不自动解析。
 - 首次修改前保留配置快照，不修改 Codex 的程序文件。
 - 仅监听 `127.0.0.1`。这是基础 Demo，未进行正式安全审计。
 

@@ -10,6 +10,8 @@
 !/core.cjs
 !/desktop-account.cjs
 !/diagnostics.cjs
+!/official-session.cjs
+!/quota-reader.cjs
 !/editor-integration.cjs
 !/index.html
 !/install-deps.cjs
@@ -36,6 +38,7 @@
 !/package.json
 !/LICENSE
 !/README.md
+!/ARCHITECTURE.md
 !/CHANGELOG.md
 !/.gitignore
 !/.gitattributes

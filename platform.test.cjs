@@ -5,6 +5,34 @@ const { test } = require('node:test'),
   path = require('node:path'),
   os = require('node:os'),
   cp = require('node:child_process');
+test('Windows 手动系统代理支持统一地址、按协议地址和关闭状态', () => {
+  const { windowsProxyEnv } = require('./platform.cjs');
+  assert.deepEqual(windowsProxyEnv({ enabled: 0, server: '127.0.0.1:7897' }), {});
+  assert.deepEqual(windowsProxyEnv({ enabled: 1, server: '127.0.0.1:7897' }), {
+    HTTP_PROXY: 'http://127.0.0.1:7897',
+    HTTPS_PROXY: 'http://127.0.0.1:7897',
+  });
+  assert.deepEqual(windowsProxyEnv({ enabled: 1, server: 'http=host:80;https=host:81;socks=host:82' }), {
+    HTTP_PROXY: 'http://host:80',
+    HTTPS_PROXY: 'http://host:81',
+    ALL_PROXY: 'socks5h://host:82',
+  });
+});
+test('显式代理环境变量优先，不读取 Windows 系统代理', (t) => {
+  const previous = process.env.HTTPS_PROXY;
+  process.env.HTTPS_PROXY = 'http://explicit-proxy.example:1234';
+  try {
+    const read = t.mock.method(cp, 'execFileSync', () => {
+      throw Error('不应读取系统代理');
+    });
+    const env = require('./platform.cjs').codexEnv('fixture-home');
+    assert.equal(env.HTTPS_PROXY, process.env.HTTPS_PROXY);
+    assert.equal(read.mock.callCount(), 0);
+  } finally {
+    if (previous === undefined) delete process.env.HTTPS_PROXY;
+    else process.env.HTTPS_PROXY = previous;
+  }
+});
 test('窗口回报只推进对应重载编号，区分接收、重载和失败', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-ack-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

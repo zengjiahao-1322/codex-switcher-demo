@@ -286,7 +286,16 @@ function quotaNode(q) {
     note('额度尚未读取');
     return box;
   }
-  if (q.status === 'error') note(q.error, 'quota-error');
+  if (q.status === 'error') {
+    // 失败时不再把旧 buckets 当成当前额度展示，避免“凭证失效但额度正常”的误解。
+    note(q.error || '本次额度读取失败', 'quota-error');
+    if (q.checkedAt)
+      note(
+        '上次成功读取：' + new Date(q.checkedAt).toLocaleString('zh-CN'),
+        'quota-time',
+      );
+    return box;
+  }
   const duration = (n) =>
     n == null
       ? '额度窗口'
@@ -427,15 +436,13 @@ function renderAccounts() {
     const info = document.createElement('div');
     info.className = 'account-info';
     info.append(document.createTextNode(a.label), tag(a.plan));
-    if (a.current)
+    if (a.current && state?.current.official)
       info.append(
         tag(
           a.pendingLogin
             ? '登录已更新 · 待应用'
-            : state?.current.official
-              ? '当前配置'
-              : '已保留登录',
-          state?.current.official ? 'done' : 'muted',
+            : '正在使用',
+          a.pendingLogin ? 'muted' : 'done',
         ),
       );
     const email = document.createElement('small');

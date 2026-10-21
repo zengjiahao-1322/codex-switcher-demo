@@ -65,6 +65,46 @@ test('specific diagnosis distinguishes missing provider, official identity and c
   assert.equal(listThreads(f.home, { query: 'official' }).items.length, 1);
 });
 
+test('过期 access token 先用官方 session 验证，不直接提示重新登录', async (t) => {
+  const f = fixture(t);
+  fs.writeFileSync(path.join(f.home, 'config.toml'), 'model="gpt-test"\n');
+  const token = (payload) =>
+    [
+      Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url'),
+      Buffer.from(JSON.stringify(payload)).toString('base64url'),
+      'fixture',
+    ].join('.');
+  writeJson(path.join(f.home, 'auth.json'), {
+    tokens: {
+      access_token: token({ exp: 1, sub: 'user-1', 'https://api.openai.com/auth': { chatgpt_user_id: 'user-1' } }),
+      id_token: token({ email: 'fixture@example.test', sub: 'user-1' }),
+      account_id: 'account-1',
+    },
+  });
+  let calls = 0;
+  const result = await diagnose({
+    codexHome: f.home,
+    bridgeHome: f.bridge,
+    accounts: { prepare: async (id) => { calls++; assert.equal(typeof id, 'string'); } },
+  });
+  assert.equal(calls, 1);
+  assert.ok(result.findings.some((x) => /官方登录仍可用/.test(x.title)));
+  assert.equal(result.actions.some((x) => x.type === 'reauth'), false);
+  // 判断只依赖错误类型，网络文案里含“重新登录”也不能误判。
+  for (const kind of ['network_error', 'runtime_error', 'service_error', 'auth_invalid']) {
+    const failure = await diagnose({
+      codexHome: f.home,
+      bridgeHome: f.bridge,
+      accounts: {
+        prepare: async () => {
+          throw Object.assign(Error('提示里包含重新登录，但类型决定处理方式'), { kind });
+        },
+      },
+    });
+    assert.equal(failure.actions.some((x) => x.type === 'reauth'), kind === 'auth_invalid');
+  }
+});
+
 test('editor reload failure stays visible after the request was acknowledged', (t) => {
   const f = fixture(t);
   const clients = require('./client-status.cjs');

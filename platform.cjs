@@ -62,6 +62,21 @@ function isCodexDesktop(exe = '') {
   );
 }
 let proxyCache;
+function windowsProxyEnv(settings) {
+  if (settings.enabled !== 1 || !settings.server) return {};
+  const entries = Object.fromEntries(settings.server.split(';').map((entry) => {
+    const at = entry.indexOf('=');
+    return at < 0
+      ? ['all', entry.trim()]
+      : [entry.slice(0, at).trim(), entry.slice(at + 1).trim()];
+  }));
+  const proxy = (value) => value.includes('://') ? value : 'http://' + value;
+  const env = {};
+  if (entries.http || entries.all) env.HTTP_PROXY = proxy(entries.http || entries.all);
+  if (entries.https || entries.all) env.HTTPS_PROXY = proxy(entries.https || entries.all);
+  if (entries.socks) env.ALL_PROXY = 'socks5h://' + entries.socks;
+  return env;
+}
 function codexEnv(home) {
   // Finder 启动的应用通常没有终端 PATH 和代理变量。补入随包 Node 路径，
   // 并在没有显式代理时采用 macOS 系统的手动 HTTP / SOCKS 代理。
@@ -70,6 +85,24 @@ function codexEnv(home) {
     CODEX_HOME: home,
     PATH: path.dirname(process.execPath) + path.delimiter + (process.env.PATH || ''),
   };
+  const hasExplicitProxy = ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy']
+    .some((key) => env[key]);
+  if (process.platform === 'win32' && !hasExplicitProxy) {
+    // Windows 桌面启动通常没有代理环境变量，但系统代理可能已经开启。
+    if (!proxyCache || Date.now() - proxyCache.at > 60000) {
+      let values = {};
+      try {
+        values = JSON.parse(cp.execFileSync('powershell.exe', [
+          '-NoProfile', '-NonInteractive', '-Command',
+          "$settings = Get-ItemProperty -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'; [pscustomobject]@{enabled=[int]$settings.ProxyEnable;server=[string]$settings.ProxyServer} | ConvertTo-Json -Compress",
+        ], { encoding: 'utf8', timeout: 3000, windowsHide: true }));
+      } catch {}
+      proxyCache = { at: Date.now(), values };
+    }
+    Object.assign(env, windowsProxyEnv(proxyCache.values));
+    if ((env.HTTP_PROXY || env.HTTPS_PROXY || env.ALL_PROXY) && !env.NO_PROXY && !env.no_proxy)
+      env.NO_PROXY = 'localhost,127.0.0.1,::1';
+  }
   if (mac && !env.HTTPS_PROXY && !env.https_proxy && !env.ALL_PROXY && !env.all_proxy) {
     if (!proxyCache || Date.now() - proxyCache.at > 60000) {
       let values = {};
@@ -108,4 +141,5 @@ module.exports = {
   macApps,
   isCodexDesktop,
   codexEnv,
+  windowsProxyEnv,
 };
