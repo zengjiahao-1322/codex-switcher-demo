@@ -33,11 +33,22 @@ function auth(user, refresh = 'refresh-' + user, account = 'workspace-' + user) 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-accounts-')),
     codexHome = path.join(root, 'codex'),
-    bridgeHome = path.join(root, 'bridge');
+    bridgeHome = path.join(root, 'bridge'),
+    children = [];
   fs.mkdirSync(codexHome);
   fs.mkdirSync(bridgeHome);
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  return { root, codexHome, bridgeHome };
+  t.after(async () => {
+    // 登录终态先于进程回收；Windows 必须等子进程退出，才能删除它的工作目录。
+    await Promise.all(
+      children.map(async ({ child, closed }) => {
+        if (child.exitCode === null && child.signalCode === null) child.kill();
+        await closed;
+      }),
+    );
+    assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  return { root, codexHome, bridgeHome, children };
 }
 function configured(t) {
   const f = fixture(t);
@@ -188,7 +199,12 @@ rl.createInterface({ input: process.stdin }).on('line', line => {
   return createAccounts({
     ...f,
     codexExe: process.execPath,
-    spawnProcess: (_exe, args, options) => spawn(process.execPath, [fake, ...args], options),
+    spawnProcess: (_exe, args, options) => {
+      const child = spawn(process.execPath, [fake, ...args], options),
+        closed = new Promise((resolve) => child.once('close', resolve));
+      f.children.push({ child, closed });
+      return child;
+    },
   });
 }
 
