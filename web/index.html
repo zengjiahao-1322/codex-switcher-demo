@@ -148,6 +148,64 @@
     .hint[hidden] {
       display: none;
     }
+    #protection-notice {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .follow-label {
+      margin-top: 18px;
+    }
+    #thread-follow {
+      margin-bottom: 6px;
+    }
+    .follow-note {
+      margin: 0 0 6px;
+      font-size: 13px;
+    }
+    #threads-resume {
+      margin-top: 10px;
+    }
+    #threads-resume[hidden] {
+      display: none;
+    }
+    #follow-dialog {
+      width: min(460px, calc(100vw - 32px));
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px 24px;
+      color: var(--ink);
+    }
+    #follow-dialog::backdrop {
+      background: rgba(28, 40, 34, 0.35);
+    }
+    #follow-dialog h3 {
+      font-size: 17px;
+      margin: 0 0 6px;
+    }
+    #follow-dialog p {
+      margin: 0 0 16px;
+    }
+    #follow-dialog .choices {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    #follow-dialog .choices button {
+      text-align: left;
+      font-weight: 600;
+    }
+    #follow-dialog .choices small {
+      display: block;
+      font-weight: 400;
+      font-size: 13px;
+      line-height: 1.5;
+      color: inherit;
+      opacity: 0.8;
+    }
+    #follow-dialog .dialog-actions {
+      justify-content: flex-end;
+      margin-top: 14px;
+    }
     .check {
       display: flex;
       gap: 8px;
@@ -589,6 +647,7 @@
     <div id="session-notice" class="hint warn" role="alert" hidden>
       本机会话已失效，请从桌面快捷方式重新打开切换器。直接输入网址无法取得操作权限。
     </div>
+    <div id="protection-notice" class="hint warn" role="alert" hidden></div>
     <div id="effect-notice" class="hint" role="status" hidden></div>
     <div id="quota-notice" class="hint warn" role="status" hidden></div>
     <div id="usage-notice" class="hint warn" role="note" hidden></div>
@@ -615,6 +674,16 @@
             ><input type="checkbox" id="reload-editors" checked />
             同时重载已连接、共用此配置的编辑器窗口（会中断 Codex 任务）</label
           >
+          <label for="thread-follow" class="follow-label">旧对话跟随新来源</label
+          ><select id="thread-follow">
+            <option value="ask">每次切换前询问</option>
+            <option value="matching">只带走正在用原来源的旧对话</option>
+            <option value="all">全部旧对话都跟随</option>
+            <option value="off">旧对话保持原来源</option>
+          </select>
+          <p class="note follow-note">
+            跟随后，在旧对话里继续聊天会把整段历史发给新来源；不跟随的旧对话仍使用原来的账号或 API。
+          </p>
           <p class="note">
             <span id="editor-reload-hint">正在确认编辑器连接…</span>
             <a href="#client-details" id="editor-connection">查看与接入</a>
@@ -627,6 +696,7 @@
             <summary id="switch-progress-title">切换进度</summary>
             <div id="switch-steps"></div>
             <div id="switch-windows"></div>
+            <button type="button" id="threads-resume" hidden></button>
             <small class="note">窗口反馈表示重载进度，实际模型请求仍由客户端和上游处理。</small>
           </details>
           <details id="client-details" class="technical">
@@ -768,5 +838,29 @@
       <footer>本机 API 与官方账号切换工具 · Demo <span id="app-version"></span></footer>
     </div>
   </main>
+  <dialog id="follow-dialog" aria-labelledby="follow-title">
+    <form method="dialog">
+      <h3 id="follow-title">旧对话要跟着切换吗？</h3>
+      <p>
+        Codex 的每个旧对话都记着自己使用的账号或
+        API。跟随后，在旧对话里继续聊天时，整段历史会发给新来源。
+      </p>
+      <div class="choices">
+        <button value="matching" class="primary">
+          只带走正在用原来源的旧对话<small>用其他来源的旧对话保持不变</small>
+        </button>
+        <button value="all">
+          全部旧对话都跟随<small>包括原本属于其他账号或 API 的对话</small>
+        </button>
+        <button value="off">旧对话保持原来源<small>只有新对话使用新来源</small></button>
+      </div>
+      <label class="check"
+        ><input type="checkbox" id="follow-remember" /> 记住这个选择，以后切换不再询问</label
+      >
+      <div class="actions dialog-actions">
+        <button value="cancel">取消切换</button>
+      </div>
+    </form>
+  </dialog>
   <script src="/app.js"></script>
 </html>

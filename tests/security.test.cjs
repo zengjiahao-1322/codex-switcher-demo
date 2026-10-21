@@ -4,69 +4,15 @@ const test = require('node:test'),
   fs = require('node:fs'),
   os = require('node:os'),
   path = require('node:path'),
-  vm = require('node:vm'),
   cp = require('node:child_process');
+const { runPage } = require('./fake-page.cjs');
 
 const tmp = (name) => fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-security-' + name + '-'));
-
-// 任意属性、调用都返回自身的假元素，只记录页面实际写入的属性，供断言读取。
-function element() {
-  const props = {};
-  const self = new Proxy(function () {}, {
-    get: (_, key) => {
-      if (key === 'then') return undefined;
-      if (key === Symbol.toPrimitive) return () => '';
-      if (key === Symbol.iterator) return () => [][Symbol.iterator]();
-      return key in props ? props[key] : self;
-    },
-    set: (_, key, value) => {
-      props[key] = value;
-      return true;
-    },
-    apply: () => self,
-    construct: () => self,
-  });
-  return self;
-}
-
-// 在假页面里执行真实的 web/app.js，返回页面发出的请求和页面元素。
-async function runPage({ hash, respond }) {
-  const elements = new Map(),
-    requests = [],
-    history = [];
-  const byId = (id) => {
-    if (!elements.has(id)) elements.set(id, element());
-    return elements.get(id);
-  };
-  const document = element();
-  document.getElementById = byId;
-  const context = {
-    document,
-    location: { hash, pathname: '/', search: '' },
-    history: { replaceState: (_, __, url) => history.push(url) },
-    fetch: async (url, options = {}) => {
-      requests.push({ url, method: options.method || 'GET', headers: options.headers || {} });
-      const { status, body = {} } = respond(url, options);
-      return { status, ok: status < 300, json: async () => body, text: async () => '' };
-    },
-    console,
-    URL,
-    setTimeout,
-    clearTimeout,
-    setInterval: () => 0,
-    clearInterval: () => {},
-    queueMicrotask,
-  };
-  context.window = context;
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'web', 'app.js'), 'utf8'), context);
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  return { requests, history, byId };
-}
 
 test('#1 页面用启动网址里的令牌换取会话，并立即从地址栏去掉', async () => {
   const page = await runPage({
     hash: '#launch-token',
-    respond: (url) => (url === '/api/session' ? { status: 204 } : { status: 500 }),
+    respond: (route) => ({ status: route === 'session' ? 204 : 500 }),
   });
   assert.deepEqual(page.history, ['/']);
   const [first, second] = page.requests;
@@ -80,6 +26,7 @@ test('#1 页面用启动网址里的令牌换取会话，并立即从地址栏�
 test('#1 会话无效时显示重新打开的提示，不再访问主页重取凭证', async () => {
   const page = await runPage({ hash: '', respond: () => ({ status: 401 }) });
   assert.equal(page.byId('session-notice').hidden, false);
+  assert.equal(page.workspace.hidden, true);
   assert.equal(page.byId('summary').textContent, '未连接本机会话');
   assert.equal(page.requests.length, 1, '会话失效后不应继续发请求');
   assert.equal(
@@ -109,8 +56,11 @@ test('#2 伴随扩展心跳上报的非官方路径不会被保存', () => {
     planted = fakeCodex(tmp('planted'));
   const extension = tmp('extension');
   const target =
-    (process.platform === 'win32' ? 'windows-' : process.platform === 'darwin' ? 'macos-' : 'linux-') +
-    (process.arch === 'arm64' ? 'aarch64' : 'x86_64');
+    (process.platform === 'win32'
+      ? 'windows-'
+      : process.platform === 'darwin'
+        ? 'macos-'
+        : 'linux-') + (process.arch === 'arm64' ? 'aarch64' : 'x86_64');
   fs.mkdirSync(path.join(extension, 'bin', target), { recursive: true });
   fakeCodex(path.join(extension, 'bin', target));
   require('../src/clients/client-status.cjs').heartbeat(bridge, {
@@ -147,7 +97,11 @@ test('#2 未经确认的自定义路径被拒绝，确认后只认这一个文�
   });
   assert.equal(fs.existsSync(path.join(bridge, 'settings.json')), false);
 
-  await service.actions.setEnvironment({ home: codexHome, codexExe: planted, allowUntrusted: true });
+  await service.actions.setEnvironment({
+    home: codexHome,
+    codexExe: planted,
+    allowUntrusted: true,
+  });
   assert.equal(findCodex({ dataHome: bridge }), fs.realpathSync(planted));
 
   // 设置文件被改成另一个未确认的程序时，不能沿用之前的确认。
@@ -158,6 +112,71 @@ test('#2 未经确认的自定义路径被拒绝，确认后只认这一个文�
     JSON.stringify({ ...settings, codexExe: fakeCodex(tmp('swapped')) }),
   );
   assert.throws(() => findCodex({ dataHome: bridge }), { code: 'untrusted_codex' });
+});
+
+// 页面状态来自真实 service；clients 会探测本机进程，这里固定为空。
+function pageBackend(options = {}, routes = {}) {
+  const root = tmp('page');
+  fs.mkdirSync(path.join(root, 'codex'));
+  fs.writeFileSync(path.join(root, 'codex', 'config.toml'), 'model="gpt-5"\n');
+  const { createService } = require('../src/server/service.cjs');
+  const service = createService({
+    codexHome: path.join(root, 'codex'),
+    bridgeHome: path.join(root, 'bridge'),
+    ...options,
+  });
+  return async (route, body) => {
+    if (routes[route]) return routes[route](body);
+    if (route === 'state') return { body: await service.state() };
+    if (route === 'accounts') return { body: { items: [], switchJob: null } };
+    if (route === 'clients')
+      return { body: { home: '', clients: [], auxiliary: [], editors: [], connectedEditors: 0 } };
+    return { body: { message: route + ' ok' } };
+  };
+}
+const untrustedFirst = (body) =>
+  body.allowUntrusted
+    ? { body: { message: '已保存' } }
+    : { status: 400, body: { code: 'untrusted_codex', error: '该程序不在自动识别的安装目录中' } };
+
+async function saveEnvironment(answer) {
+  const prompts = [];
+  const page = await runPage({
+    respond: pageBackend({}, { setEnvironment: untrustedFirst }),
+    confirm: (text) => (prompts.push(text), answer),
+  });
+  page.byId('config-home').value = 'C:\\codex-home';
+  page.byId('runtime-path').value = ' D:\\tools\\codex.exe ';
+  await page.byId('environment-save').onclick();
+  return { page, prompts };
+}
+
+test('#2 自定义程序不在官方目录时，先让用户确认再保存', async () => {
+  const { page, prompts } = await saveEnvironment(true);
+  assert.equal(prompts.length, 1);
+  assert.ok(prompts[0].includes('D:\\tools\\codex.exe'));
+  const saves = page.calls('setEnvironment');
+  assert.equal(saves.length, 2);
+  assert.equal(saves[0].body.allowUntrusted, undefined);
+  assert.equal(saves[1].body.allowUntrusted, true);
+});
+
+test('#2 用户不确认时不保存程序路径', async () => {
+  const { page } = await saveEnvironment(false);
+  assert.equal(page.calls('setEnvironment').length, 1);
+  assert.equal(page.byId('status').textContent, '未保存：程序路径未确认。');
+});
+
+test('#3 数据目录权限未收紧时页面明确提示', async () => {
+  const failed = await runPage({
+    respond: pageBackend({
+      dataDirProtection: { ok: false, path: 'D:\\switcher', error: 'D:\\switcher：拒绝访问' },
+    }),
+  });
+  assert.equal(failed.byId('protection-notice').hidden, false);
+  assert.ok(failed.byId('protection-notice').textContent.includes('D:\\switcher：拒绝访问'));
+  const ok = await runPage({ respond: pageBackend() });
+  assert.equal(ok.byId('protection-notice').hidden, true);
 });
 
 test(
@@ -171,27 +190,23 @@ test(
     cp.execFileSync('icacls.exe', [file, '/grant', '*S-1-1-0:R'], { stdio: 'pipe' });
     const result = require('../src/platform/data-protection.cjs').protectDataDirs([dir]);
     assert.deepEqual(result, { ok: true, path: dir });
+    // 与 privateAcl 一致：从 PowerShell 7 启动时继承的 PSModulePath 会让 5.1 找不到 Get-Acl。
+    const ps = (command, extra = {}) => {
+      const env = { ...process.env, ...extra };
+      delete env.PSModulePath;
+      return cp
+        .execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
+          env,
+          encoding: 'utf8',
+        })
+        .trim();
+    };
     const sids = (target) =>
-      cp
-        .execFileSync(
-          'powershell.exe',
-          [
-            '-NoProfile',
-            '-NonInteractive',
-            '-Command',
-            '(Get-Acl -LiteralPath $env:T).Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }',
-          ],
-          { env: { ...process.env, T: target }, encoding: 'utf8' },
-        )
-        .trim()
-        .split(/\r?\n/);
-    const me = cp
-      .execFileSync(
-        'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-Command', '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value'],
-        { encoding: 'utf8' },
-      )
-      .trim();
+      ps(
+        '(Get-Acl -LiteralPath $env:T).Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }',
+        { T: target },
+      ).split(/\r?\n/);
+    const me = ps('[Security.Principal.WindowsIdentity]::GetCurrent().User.Value');
     for (const target of [dir, file])
       assert.deepEqual([...new Set(sids(target))].sort(), [me, 'S-1-5-18'].sort(), target);
   },

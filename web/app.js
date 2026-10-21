@@ -43,7 +43,8 @@ async function api(route, data) {
     throw Error(SESSION_LOST);
   }
   const j = await r.json();
-  if (!r.ok) throw Error(j.error || '请求失败');
+  // 结构化 code 用于需要用户确认后重发的请求（未识别的程序、旧对话去向）。
+  if (!r.ok) throw Object.assign(Error(j.error || '请求失败'), { code: j.code });
   return j;
 }
 const status = (s) => {
@@ -548,13 +549,26 @@ function renderSwitchProgress() {
     $('switch-steps').append(line);
   }
   $('switch-windows').replaceChildren();
+  const threads = job.threads;
   if (job.configurationApplied) {
     const line = document.createElement('p');
     line.textContent =
       '配置已保存' +
-      (job.threadRouting ? ' · 已核对 ' + job.threadRouting.count + ' 条旧对话' : '');
+      (job.threadFollow === 'off'
+        ? ' · 旧对话保持原来源'
+        : threads
+          ? ' · 旧对话：已同步 ' +
+            threads.updated +
+            ' 条，跳过 ' +
+            threads.skipped +
+            ' 条' +
+            (threads.failed ? '，' + threads.failed + ' 条未完成' : '')
+          : '');
     $('switch-windows').append(line);
   }
+  const resumable = job.status === 'error' && threads?.failed > 0;
+  $('threads-resume').hidden = !resumable;
+  if (resumable) $('threads-resume').textContent = '继续同步剩余 ' + threads.failed + ' 条旧对话';
   if (job.desktopRequested) {
     const line = document.createElement('p');
     line.textContent = job.desktopStarted
@@ -905,6 +919,13 @@ async function refresh() {
   renderAccounts();
   $('usage-notice').hidden = !state.usage?.notice;
   $('usage-notice').textContent = state.usage?.notice || '';
+  const protection = state.dataDirProtection;
+  $('protection-notice').hidden = protection.ok;
+  $('protection-notice').textContent = protection.ok
+    ? ''
+    : '未能限制数据目录的访问权限，本机其他用户可能读到保存的登录凭证。建议把切换器放在你自己的用户目录下再启动。\n' +
+      protection.error;
+  if (document.activeElement !== $('thread-follow')) $('thread-follow').value = state.threadFollow;
   if (state.notice) providerStatus(state.notice);
 }
 
@@ -973,8 +994,45 @@ function detectApi() {
   });
 }
 $('probe').onclick = detectApi;
+// 旧对话跟随设为“每次询问”时，后台返回 409；用户选定后带上本次选择重发。
+function askThreadFollow() {
+  const dialog = $('follow-dialog');
+  $('follow-remember').checked = false;
+  dialog.returnValue = '';
+  dialog.showModal();
+  return new Promise((resolve) => {
+    dialog.onclose = () =>
+      resolve(['off', 'matching', 'all'].includes(dialog.returnValue) ? dialog.returnValue : null);
+  });
+}
+async function switchTo(route, input) {
+  try {
+    return await api(route, input);
+  } catch (e) {
+    if (e.code !== 'thread_follow_required') throw e;
+    const mode = await askThreadFollow();
+    if (!mode) return null;
+    if ($('follow-remember').checked) {
+      await api('setThreadFollow', { mode });
+      $('thread-follow').value = mode;
+    }
+    return api(route, { ...input, threadFollow: mode });
+  }
+}
+async function startSwitch(route, input) {
+  const r = await switchTo(route, input);
+  if (!r) {
+    status('已取消切换，配置未修改。');
+    return;
+  }
+  status(r.message);
+  accountData.switchJob = { status: 'queued' };
+  watchAccounts();
+  await refreshAccounts();
+}
 $('switch').onclick = () =>
   busy($('switch'), async () => {
+    const reloadEditors = $('reload-editors').checked;
     if (officialTarget()) {
       const a = selectedAccount();
       if (!a) {
@@ -983,28 +1041,28 @@ $('switch').onclick = () =>
         return;
       }
       status('正在准备应用账号…');
-      const r = await api('accountSwitch', {
-        id: a.id,
-        reloadEditors: $('reload-editors').checked,
-      });
-      status(r.message);
-      accountData.switchJob = { status: 'queued' };
-      watchAccounts();
-      await refreshAccounts();
+      await startSwitch('accountSwitch', { id: a.id, reloadEditors });
     } else {
-      const id = $('provider').value,
-        model = $('model').value.trim();
       status('正在准备应用 API…');
-      const r = await api('desktopSwitch', {
-        id,
-        model,
-        reloadEditors: $('reload-editors').checked,
+      await startSwitch('desktopSwitch', {
+        id: $('provider').value,
+        model: $('model').value.trim(),
+        reloadEditors,
       });
-      status(r.message);
-      accountData.switchJob = { status: 'queued' };
-      watchAccounts();
-      await refreshAccounts();
     }
+  });
+$('thread-follow').onchange = () =>
+  busy($('thread-follow'), async () => {
+    const r = await api('setThreadFollow', { mode: $('thread-follow').value });
+    status(r.message);
+  });
+$('threads-resume').onclick = () =>
+  busy($('threads-resume'), async () => {
+    const r = await api('resumeThreadSync', {});
+    status(r.message);
+    accountData.switchJob = { status: 'queued' };
+    watchAccounts();
+    await refreshAccounts();
   });
 $('autostart').onchange = () =>
   busy($('autostart'), async () => {
@@ -1242,10 +1300,25 @@ $('client-details').ontoggle = () => {
 $('clients-refresh').onclick = refreshClients;
 $('environment-save').onclick = () =>
   busy($('environment-save'), async () => {
-    const r = await api('setEnvironment', {
-      home: $('config-home').value,
-      codexExe: $('runtime-path').value,
-    });
+    const input = { home: $('config-home').value, codexExe: $('runtime-path').value };
+    let r;
+    try {
+      r = await api('setEnvironment', input);
+    } catch (e) {
+      if (e.code !== 'untrusted_codex') throw e;
+      // 切换器会以当前用户身份运行这个程序，只在用户确认来源后才保存。
+      if (
+        !confirm(
+          '这个程序不在 Codex 官方安装目录或官方编辑器扩展目录中：\n' +
+            input.codexExe.trim() +
+            '\n\n登录、读取额度和同步旧对话时，切换器都会运行它。只有确认它来自 OpenAI 时才继续。',
+        )
+      ) {
+        status('未保存：程序路径未确认。');
+        return;
+      }
+      r = await api('setEnvironment', { ...input, allowUntrusted: true });
+    }
     lastClients = null;
     modelCache.clear();
     await refreshAccounts();
