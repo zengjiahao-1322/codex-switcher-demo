@@ -8,13 +8,13 @@
 
 账号、额度、配置应用、旧对话同步、后台切换任务、步骤耗时和窗口重载协议共用实现；平台层只负责运行程序发现、凭证存储、进程读取与退出、应用启动。不能因为没有桌面版就停用账号或切换功能。
 
-| 安装情况 | 账号登录与额度 | 应用配置 | 客户端更新 |
-| --- | --- | --- | --- |
-| 仅官方 Codex 编辑器扩展 | 使用扩展自带的官方 app-server | 共用切换任务 | 只停止共用目录的插件后端，再由伴随扩展重载对应窗口；不启动桌面版 |
-| 仅 Codex 桌面版 | 使用桌面版自带的官方 app-server | 共用切换任务 | 重启目标桌面端并确认新进程 |
-| 桌面版与编辑器同时使用 | 优先用户指定或伴随扩展上报的运行程序，也可自动发现 | 共用切换任务 | 分别处理共用目录的桌面与插件，独立目录不跟随 |
+| 安装情况                                                          | 账号登录与额度                                     | 应用配置     | 客户端更新                                                       |
+| ----------------------------------------------------------------- | -------------------------------------------------- | ------------ | ---------------------------------------------------------------- |
+| 仅官方 Codex 编辑器扩展（VS Code、Insiders、Cursor、Windsurf 等） | 使用当前编辑器安装的官方 app-server                | 共用切换任务 | 只停止共用目录的插件后端，再由伴随扩展重载对应窗口；不启动桌面版 |
+| 仅 Codex 桌面版                                                   | 使用桌面版自带的官方 app-server                    | 共用切换任务 | 重启目标桌面端并确认新进程                                       |
+| 桌面版与编辑器同时使用                                            | 优先用户指定或伴随扩展上报的运行程序，也可自动发现 | 共用切换任务 | 分别处理共用目录的桌面与插件，独立目录不跟随                     |
 
-`src/platform/runtime.cjs` 独立发现官方运行程序，不通过桌面应用启动才能登录。伴随扩展只负责窗口通信与重载，不承担账号登录或额度 RPC；未接入时可取消“同时重载”，应用后手动重载窗口。远程和 WSL 配置另行处理。
+`src/platform/runtime.cjs` 独立发现当前编辑器渠道安装的官方运行程序，不通过桌面应用启动才能登录。伴随扩展会从编辑器扩展清单识别 OpenAI 的 Codex/ChatGPT 扩展，不依赖单一扩展 ID；只负责窗口通信与重载，不承担账号登录或额度 RPC。未接入时可取消“同时重载”，应用后手动重载窗口。远程和 WSL 配置另行处理。
 
 `src/clients/desktop-account.cjs` 的 `runSwitch()` 统一生成步骤及耗时，`web/app.js` 统一渲染；没有按系统拆分的旧版切换页面。`src/platform/build-info.cjs` 为运行代码生成一次构建标识，新入口只复用同构建后台，避免新包连接旧后台继续显示旧页面。页面底部显示版本和构建标识，便于核对实际运行版本。
 
@@ -92,14 +92,14 @@ flowchart LR
 
 ## 代码入口
 
-| 层 | 文件 | 责任 |
-| --- | --- | --- |
-| 启动 | `main.cjs`、`src/server/server.cjs` | 启动本地服务、页面会话和 API 路由 |
-| 业务 | `src/server/service.cjs` | 把页面操作编排成切换、账号、额度、诊断任务 |
-| 配置 | `src/config/core.cjs`、`src/config/switch-state.cjs` | 原子写入配置、快照、切换状态和恢复 |
-| 官方账号 | `src/accounts/accounts.cjs` | 登录副本、账号切换和对外账号接口 |
-| 官方会话 | `src/accounts/official-session.cjs` | 独立 app-server 生命周期、JSON-RPC 和错误分类 |
-| 额度读取 | `src/accounts/quota-reader.cjs` | 额度 RPC、统一两个并发、账号级请求合并、额度缓存和结构化错误 |
-| 客户端 | `src/clients/client-status.cjs`、`vscode-companion/` | 发现窗口、确认配置归属、请求重载和记录结果 |
-| 会话诊断 | `src/diagnostics/diagnostics.cjs`、`src/diagnostics/thread-routing.cjs` | 旧会话错误证据、来源同步和可见上下文导出 |
-| 页面 | `web/index.html`、`web/app.js` | 来源选择、账号列表、额度和客户端状态展示 |
+| 层       | 文件                                                                    | 责任                                                         |
+| -------- | ----------------------------------------------------------------------- | ------------------------------------------------------------ |
+| 启动     | `main.cjs`、`src/server/server.cjs`                                     | 启动本地服务、页面会话和 API 路由                            |
+| 业务     | `src/server/service.cjs`                                                | 把页面操作编排成切换、账号、额度、诊断任务                   |
+| 配置     | `src/config/core.cjs`、`src/config/switch-state.cjs`                    | 原子写入配置、快照、切换状态和恢复                           |
+| 官方账号 | `src/accounts/accounts.cjs`                                             | 登录副本、账号切换和对外账号接口                             |
+| 官方会话 | `src/accounts/official-session.cjs`                                     | 独立 app-server 生命周期、JSON-RPC 和错误分类                |
+| 额度读取 | `src/accounts/quota-reader.cjs`                                         | 额度 RPC、统一两个并发、账号级请求合并、额度缓存和结构化错误 |
+| 客户端   | `src/clients/client-status.cjs`、`vscode-companion/`                    | 发现窗口、确认配置归属、请求重载和记录结果                   |
+| 会话诊断 | `src/diagnostics/diagnostics.cjs`、`src/diagnostics/thread-routing.cjs` | 旧会话错误证据、来源同步和可见上下文导出                     |
+| 页面     | `web/index.html`、`web/app.js`                                          | 来源选择、账号列表、额度和客户端状态展示                     |

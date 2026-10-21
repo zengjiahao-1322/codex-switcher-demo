@@ -30,6 +30,17 @@ function extensionBinary(dir, platform = process.platform, arch = process.arch) 
       .find(exists) || null
   );
 }
+function isCodexExtension(dir) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+    const text = [pkg.name, pkg.displayName, pkg.description].filter(Boolean).join(' ');
+    return (
+      String(pkg.publisher || '').toLowerCase() === 'openai' && /(?:codex|chatgpt)/i.test(text)
+    );
+  } catch {
+    return path.basename(dir).startsWith('openai.chatgpt-');
+  }
+}
 function findCodex(options = {}) {
   // 查找顺序：显式环境变量、用户选择、伴随扩展上报、桌面版、官方扩展、CLI。
   // IDE 独立安装也包含完整的官方 app-server，不需要另装 Codex.app。
@@ -103,7 +114,7 @@ function findCodex(options = {}) {
     if (!fs.existsSync(root)) continue;
     const dirs = fs
       .readdirSync(root, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && e.name.startsWith('openai.chatgpt-'))
+      .filter((e) => e.isDirectory() && isCodexExtension(path.join(root, e.name)))
       .map((e) => path.join(root, e.name));
     dirs.sort((a, b) =>
       path.basename(b).localeCompare(path.basename(a), undefined, { numeric: true }),

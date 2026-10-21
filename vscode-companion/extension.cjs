@@ -52,9 +52,16 @@ function activate(context) {
     const wsl = !!vscode.workspace
       .getConfiguration('chatgpt')
       .get('runCodexInWindowsSubsystemForLinux', false);
-    // 直接上报 VS Code 解析到的官方扩展目录，支持自定义 extensions-dir，
-    // 也避免切换器猜错当前编辑器实际使用的扩展版本。
-    const extensionPath = vscode.extensions.getExtension('openai.chatgpt')?.extensionPath || null;
+    // 在 VS Code、Insiders、Cursor、Windsurf 中寻找当前安装的官方 Codex 扩展；
+    // 不把扩展 ID 写死为一个版本，避免不同编辑器渠道改名后无法发现运行程序。
+    const codexExtension = vscode.extensions.all.find((extension) => {
+      const pkg = extension.packageJSON || {},
+        text = [pkg.name, pkg.displayName, pkg.description].filter(Boolean).join(' ');
+      return (
+        String(pkg.publisher || '').toLowerCase() === 'openai' && /(?:codex|chatgpt)/i.test(text)
+      );
+    });
+    const extensionPath = codexExtension?.extensionPath || null;
     const configured = vscode.workspace.getConfiguration('chatgpt').get('cliExecutable', null);
     const bin =
         process.platform === 'darwin'
@@ -78,6 +85,7 @@ function activate(context) {
       reloadProtocol: 2,
       pid: process.pid,
       name: vscode.env.appName,
+      editorKind: vscode.env.appName || '编辑器',
       workspace: folders.map((f) => f.uri.fsPath).join(' | '),
       windowKey: process.env.VSCODE_IPC_HOOK_CLI || null,
       home:
@@ -85,6 +93,8 @@ function activate(context) {
           ? null
           : path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex')),
       extensionPath: remote || wsl ? null : extensionPath,
+      extensionId: codexExtension?.id || null,
+      extensionName: codexExtension?.packageJSON?.displayName || null,
       codexExe: !remote && !wsl && candidate && fs.existsSync(candidate) ? candidate : null,
       remote,
       wsl,

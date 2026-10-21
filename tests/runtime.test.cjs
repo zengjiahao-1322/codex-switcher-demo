@@ -22,7 +22,7 @@ test('IDE-only lookup selects the native extension in VS Code, Insiders and Curs
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   for (const platform of ['darwin', 'win32'])
     for (const arch of ['arm64', 'x64'])
-      for (const editor of ['.vscode', '.vscode-insiders', '.cursor']) {
+      for (const editor of ['.vscode', '.vscode-insiders', '.cursor', '.windsurf']) {
         const home = path.join(root, platform, arch, editor),
           dir = path.join(home, editor, 'extensions', 'openai.chatgpt-26.1007.21434'),
           cpu = arch === 'arm64' ? 'aarch64' : 'x86_64',
@@ -45,4 +45,33 @@ test('IDE-only lookup selects the native extension in VS Code, Insiders and Curs
           fs.realpathSync(file),
         );
       }
+});
+
+test('IDE-only lookup accepts an OpenAI Codex extension whose package id differs by editor channel', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-extension-channel-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const extension = path.join(root, '.windsurf', 'extensions', 'openai.codex-1.0.0'),
+    cpu = process.arch === 'arm64' ? 'aarch64' : 'x86_64',
+    binary = path.join(
+      extension,
+      'bin',
+      (process.platform === 'darwin' ? 'macos-' : 'windows-') + cpu,
+      process.platform === 'win32' ? 'codex.exe' : 'codex',
+    );
+  fs.mkdirSync(path.dirname(binary), { recursive: true });
+  fs.writeFileSync(
+    path.join(extension, 'package.json'),
+    JSON.stringify({ name: 'codex', displayName: 'Codex', publisher: 'openai' }),
+  );
+  fs.writeFileSync(binary, 'fixture');
+  assert.equal(
+    require('../src/platform/runtime.cjs').findCodex({
+      platform: process.platform,
+      arch: process.arch,
+      home: root,
+      env: {},
+      appPaths: [],
+    }),
+    fs.realpathSync(binary),
+  );
 });

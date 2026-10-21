@@ -10,12 +10,12 @@
 
 需要先安装 Codex 桌面版或 OpenAI 官方 Codex 编辑器扩展，任选一种。安装包自带 Node.js 和运行依赖，无需另外安装开发环境。
 
-| 平台 | 下载 | 启动 |
-| --- | --- | --- |
-| Windows x64 | [Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-windows-x64.zip) | 完整解压，双击文件夹中的 `Start.cmd`；可运行 `install.cmd` 创建快捷方式 |
-| Mac Apple Silicon（M 系列） | [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-arm64.zip) | 解压并运行 `Install.command`，或打开 `Codex Switcher.app` |
-| Mac Intel | [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-x64.zip) | 同上 |
-| 编辑器伴随扩展 | [通用 VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-companion.vsix) | 在编辑器扩展菜单选择“从 VSIX 安装”，或通过切换器接入 |
+| 平台                        | 下载                                                                                                                               | 启动                                                                    |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Windows x64                 | [Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-windows-x64.zip)   | 完整解压，双击文件夹中的 `Start.cmd`；可运行 `install.cmd` 创建快捷方式 |
+| Mac Apple Silicon（M 系列） | [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-arm64.zip) | 解压并运行 `Install.command`，或打开 `Codex Switcher.app`               |
+| Mac Intel                   | [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-x64.zip)   | 同上                                                                    |
+| 编辑器伴随扩展              | [通用 VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-companion.vsix)         | 在编辑器扩展菜单选择“从 VSIX 安装”，或通过切换器接入                    |
 
 不要只取出启动脚本，运行时需要保留完整目录。Windows 安装版默认安装到当前用户目录，无需管理员权限。
 
@@ -26,7 +26,7 @@ Mac 应用使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或公证
 ## 基本使用
 
 1. **添加来源**：通过官方授权页添加账号，或填写自定义 API 的地址、密钥和模型。添加账号不会立即启用它，也不需要把邮箱密码交给本工具。
-2. **接入编辑器**：如需切换已打开的 VS Code 窗口，先在“影响范围与其他客户端”接入伴随扩展。各窗口状态栏应显示“Codex Switcher · 已连接”。
+2. **接入编辑器**：如需切换已打开的 VS Code、VS Code Insiders、Cursor 或 Windsurf 窗口，先在“影响范围与其他客户端”接入伴随扩展。各窗口状态栏应显示“Codex Switcher · 已连接”。同一台电脑上的多个编辑器和多个窗口会分别登记，只有共用当前 CODEX_HOME 的窗口会一起重载。
 3. **应用来源**：选择账号或 API，点击“应用”。工具先完成检查，再更新配置、同步需要更新的旧对话设置，并重新打开目标桌面端或请求编辑器重载。
 4. **查看结果**：切换区显示每一步耗时和逐窗口重载状态。额度可按账号单独刷新，批量刷新也分别显示结果。
 
@@ -57,12 +57,12 @@ Mac 应用使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或公证
 
 ## 配置与数据位置
 
-| 内容 | 默认位置 |
-| --- | --- |
-| Codex 配置与登录 | `~/.codex`，尊重 `CODEX_HOME`；可在界面指定管理目录 |
-| Windows 解压版账号数据 | 工具目录的 `private/` |
-| Windows 安装版账号数据 | `%LOCALAPPDATA%/CodexApiSwitcher/private/` |
-| Mac 账号数据 | `~/Library/Application Support/CodexApiSwitcher/` |
+| 内容                   | 默认位置                                            |
+| ---------------------- | --------------------------------------------------- |
+| Codex 配置与登录       | `~/.codex`，尊重 `CODEX_HOME`；可在界面指定管理目录 |
+| Windows 解压版账号数据 | 工具目录的 `private/`                               |
+| Windows 安装版账号数据 | `%LOCALAPPDATA%/CodexApiSwitcher/private/`          |
+| Mac 账号数据           | `~/Library/Application Support/CodexApiSwitcher/`   |
 
 `BRIDGE_HOME` 可指定工具数据目录，`BRIDGE_CODEX_HOME` 可强制指定管理的 Codex 目录，`CODEX_EXE` 可指定官方运行时。首次修改前保留配置快照，不修改 Codex 程序文件。发布包不包含个人账号、API 密钥、聊天记录或测试数据。
 
@@ -72,7 +72,7 @@ Mac 应用使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或公证
 
 Mac 还检查系统 Bash 安装脚本、首次与重复安装、数据保留、签名完整性和 LaunchServices 启动。编译目标为 macOS 12+，实际 CI 运行系统为 macOS 15；macOS 12 没有实机结果。CI 使用隔离配置和合成数据，不代替使用者 Mac 上的首次 Gatekeeper 授权、个人账号登录与真实额度验收。
 
-VS Code 已进行多窗口验证。Cursor、Windsurf、Insiders 提供接入路径，尚未逐款完成同样的 GUI 验收。本项目为基础 Demo，仅监听本机地址，未进行正式安全审计。
+VS Code 已进行多窗口 GUI 验证；Insiders、Cursor、Windsurf 使用同一伴随扩展协议，并已加入运行程序发现、窗口归属和重载路径的回归覆盖，仍建议在实际编辑器版本上做一次人工验收。本项目为基础 Demo，仅监听本机地址，未进行正式安全审计。
 
 ## 开发与文档
 
