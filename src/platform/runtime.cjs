@@ -35,7 +35,9 @@ function isCodexExtension(dir) {
     const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
     const text = [pkg.name, pkg.displayName, pkg.description].filter(Boolean).join(' ');
     return (
-      String(pkg.publisher || '').toLowerCase() === 'openai' && /(?:codex|chatgpt)/i.test(text)
+      (String(pkg.publisher || '').toLowerCase() === 'openai' ||
+        /^openai\./i.test(pkg.name || '')) &&
+      /(?:codex|chatgpt)/i.test(text)
     );
   } catch {
     return path.basename(dir).startsWith('openai.chatgpt-');

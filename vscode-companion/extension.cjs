@@ -58,7 +58,9 @@ function activate(context) {
       const pkg = extension.packageJSON || {},
         text = [pkg.name, pkg.displayName, pkg.description].filter(Boolean).join(' ');
       return (
-        String(pkg.publisher || '').toLowerCase() === 'openai' && /(?:codex|chatgpt)/i.test(text)
+        (String(pkg.publisher || '').toLowerCase() === 'openai' ||
+          /^openai\./i.test(pkg.name || '')) &&
+        /(?:codex|chatgpt)/i.test(text)
       );
     });
     const extensionPath = codexExtension?.extensionPath || null;
