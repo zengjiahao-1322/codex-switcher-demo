@@ -112,18 +112,10 @@ async function existing() {
   }
   if (!verified || !ownsOldService(r.pid, oldRuntime?.entry))
     throw Error('无法确认旧切换器后台归属，请先关闭旧切换器再启动新版；配置尚未修改。');
-  process.kill(r.pid, 'SIGTERM');
-  const until = Date.now() + 5000;
-  while (Date.now() < until) {
-    try {
-      process.kill(r.pid, 0);
-    } catch (error) {
-      if (error.code === 'ESRCH') return null;
-      throw error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw Error('旧切换器后台尚未退出，请关闭旧切换器后重试。');
+  // 更新包接管旧后台时也使用统一的退出策略：先给服务清理机会，
+  // 但不能因为旧进程卡住而让新版本永远打不开。
+  await require('../platform/process-stop.cjs').stopProcesses([r.pid]);
+  return null;
 }
 (async () => {
   const prior = await existing();
