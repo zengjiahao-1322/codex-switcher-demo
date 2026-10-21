@@ -16,7 +16,7 @@ const canonical = (p) => {
 };
 const sameHome = (a, b) => !!a && !!b && canonical(a) === canonical(b);
 const isDesktop = (p) => require('../platform/platform.cjs').isCodexDesktop(p.exe || '');
-let cached;
+let cached, scanning;
 function scan({ force = false } = {}) {
   if (!force && cached && Date.now() - cached.at < 2500) return cached.value;
   const value =
@@ -32,6 +32,42 @@ function scan({ force = false } = {}) {
         );
   cached = { at: Date.now(), value };
   return value;
+}
+async function scanAsync({ force = false } = {}) {
+  if (!force && cached && Date.now() - cached.at < 2500) return cached.value;
+  if (scanning) return scanning;
+  if (process.platform === 'darwin') return scan({ force });
+  // PowerShell 扫描在独立进程里执行，等待它时允许账号 RPC 继续收发。
+  const env = { ...process.env };
+  delete env.PSModulePath;
+  scanning = new Promise((resolve, reject) => {
+    require('node:child_process').execFile(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        fs.readFileSync(path.join(PROJECT_ROOT, 'platform/windows/process-context.ps1'), 'utf8'),
+      ],
+      { encoding: 'utf8', windowsHide: true, env },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(Error(stderr.trim() || '无法读取 Codex 进程归属。'));
+          return;
+        }
+        try {
+          const value = JSON.parse(stdout);
+          cached = { at: Date.now(), value };
+          resolve(value);
+        } catch (error) {
+          reject(error);
+        }
+      },
+    );
+  }).finally(() => {
+    scanning = null;
+  });
+  return scanning;
 }
 function ancestryOf(p, all) {
   const found = [],
@@ -324,8 +360,8 @@ function reloadResults(bridgeHome, targets) {
     return { ...target, status, error: ack?.error || null };
   });
 }
-function clientStatus(codexHome, bridgeHome) {
-  return snapshot(codexHome, bridgeHome);
+function clientStatus(codexHome, bridgeHome, options) {
+  return snapshot(codexHome, bridgeHome, options);
 }
 async function stopEditorBackends(codexHome, bridgeHome) {
   // 旧后端持有登录、运行中的回合和会话写锁。停止共用配置的 Codex 子进程，保留编辑器窗口，
@@ -375,6 +411,7 @@ function desktopTargets(exe, codexHome, { inventory = scan({ force: true }) } = 
   return [...allowed];
 }
 module.exports = {
+  scanAsync,
   reloadResults,
   clientStatus,
   snapshot,

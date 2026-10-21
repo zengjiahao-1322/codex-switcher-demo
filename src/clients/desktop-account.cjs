@@ -50,9 +50,14 @@ function desktopInfo() {
 }
 function stopDesktop(exe, codexHome) {
   if (process.platform === 'darwin') return stopMacDesktop(exe, codexHome);
-  const targetIds = codexHome
-    ? require('./client-status.cjs').desktopTargets(exe, codexHome)
-    : null;
+  const clients = require('./client-status.cjs'),
+    inventory = codexHome ? clients.scan({ force: true }) : null,
+    targetIds = inventory ? clients.desktopTargets(exe, codexHome, { inventory }) : null,
+    backendIds = inventory
+      ? inventory.ancestry
+          .filter((p) => /^codex\.exe$/i.test(p.name) && targetIds.includes(p.parentPid))
+          .map((p) => p.pid)
+      : null;
   powershell(
     `
  $restricted=$env:SWITCHER_DESKTOP_IDS -ne '*';$allowed=@($env:SWITCHER_DESKTOP_IDS.Split(',') | Where-Object {$_ -and $_ -ne '*'} | ForEach-Object {[int]$_});
@@ -60,22 +65,34 @@ function stopDesktop(exe, codexHome) {
  $candidates=if($restricted){if($allowed.Count){Get-Process -Id $allowed -ErrorAction SilentlyContinue}}else{Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($env:SWITCHER_DESKTOP_EXE)) -ErrorAction SilentlyContinue};
  $p=@($candidates | Where-Object {$_.Path -eq $env:SWITCHER_DESKTOP_EXE});
  $desktopIds=@($p | Select-Object -ExpandProperty Id);
- $backendIds=@(Get-CimInstance Win32_Process -Filter "Name = 'codex.exe'" | Where-Object {$_.ParentProcessId -in $desktopIds} | Select-Object -ExpandProperty ProcessId);
+ # 归属检查已经取得同一份进程树，不再为桌面后端启动第二次 CIM 查询。
+ $backendIds=if($env:SWITCHER_BACKEND_IDS -eq '*'){@(Get-CimInstance Win32_Process -Filter "Name = 'codex.exe'" | Where-Object {$_.ParentProcessId -in $desktopIds} | Select-Object -ExpandProperty ProcessId)}else{@($env:SWITCHER_BACKEND_IDS.Split(',') | Where-Object {$_} | ForEach-Object {[int]$_})};
+ $tracked=@($p);
+ if($backendIds.Count){$tracked+=@(Get-Process -Id $backendIds -ErrorAction SilentlyContinue)};
+ $tracked=@($tracked | Sort-Object Id -Unique);
  foreach($item in $p){if($item.MainWindowHandle -ne 0){[void]$item.CloseMainWindow()}};
- for($i=0;$i -lt 20;$i++){
-   if(-not ($desktopIds.Count+$backendIds.Count)){break};
-   $waiting=@(Get-Process -Id @($desktopIds+$backendIds) -ErrorAction SilentlyContinue | Where-Object {-not $_.HasExited});
-   if(-not $waiting.Count){break};Start-Sleep -Milliseconds 100
+ # 等待已确认进程的退出信号；所有进程共用原有两秒保存时限，不反复枚举进程。
+ $waiting=[Diagnostics.Stopwatch]::StartNew();
+ foreach($item in $tracked){
+   $remaining=2000-[int]$waiting.ElapsedMilliseconds;
+   if(-not $item.HasExited -and $remaining -gt 0){[void]$item.WaitForExit($remaining)}
  };
- $targetIds=@($desktopIds+$backendIds);
- if($targetIds.Count){
-   Get-Process -Id $targetIds -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue;
- }
+ $tracked | Where-Object {-not $_.HasExited} | Stop-Process -Force -ErrorAction SilentlyContinue;
+ # 强制停止返回后仍等待真实退出，不把停止命令返回当作已结束。
+ $forced=[Diagnostics.Stopwatch]::StartNew();
+ foreach($item in $tracked){
+   $remaining=1000-[int]$forced.ElapsedMilliseconds;
+   if(-not $item.HasExited -and $remaining -gt 0){[void]$item.WaitForExit($remaining)}
+ };
  # Windows 可能在父进程释放句柄前保留已退出的 PID，不能把已退出对象误报为仍在运行。
- $remaining=if($targetIds.Count){@(Get-Process -Id $targetIds -ErrorAction SilentlyContinue | Where-Object {-not $_.HasExited})}else{@()};
+ $remaining=@($tracked | Where-Object {-not $_.HasExited});
  if($remaining.Count){throw 'Codex 桌面端仍在运行，请关闭桌面端后重试。'}
  `,
-    { SWITCHER_DESKTOP_EXE: exe, SWITCHER_DESKTOP_IDS: targetIds ? targetIds.join(',') : '*' },
+    {
+      SWITCHER_DESKTOP_EXE: exe,
+      SWITCHER_DESKTOP_IDS: targetIds ? targetIds.join(',') : '*',
+      SWITCHER_BACKEND_IDS: backendIds ? backendIds.join(',') : '*',
+    },
   );
 }
 function openWindowsDesktop() {
@@ -151,7 +168,12 @@ async function runSwitch(
     open = openDesktop,
     accounts = createAccounts(job),
     syncThreads = require('../diagnostics/thread-routing.cjs').synchronizeThreads,
-    clients = () => require('./client-status.cjs').clientStatus(job.codexHome, job.bridgeHome),
+    clients = async () => {
+      const status = require('./client-status.cjs');
+      return status.clientStatus(job.codexHome, job.bridgeHome, {
+        inventory: await status.scanAsync(),
+      });
+    },
   } = {},
 ) {
   // desktopExe 为 null 表示只有 IDE / CLI：应用配置并请求匹配窗口重载，
@@ -206,25 +228,32 @@ async function runSwitch(
     // 后台切换进程是新实例，先读取实际凭据存储，避免漏存 Mac 钥匙串账号。
     await step('prepare', api ? '检查 API 和准备模型' : '准备账号登录', async () => {
       await accounts.syncCurrent({ force: true });
-      if (api) prepared = await require('../server/service.cjs').createService(job).prepareApi(job);
-      else await accounts.prepare(job.id);
-      // 没有重载通道时不能先停止插件后端，否则 Codex 面板只能等用户手动恢复。
-      if (job.reloadEditors !== false) {
-        const detected = clients().clients;
-        if (detected.some((c) => c.kind === 'ide' && !c.confirmed && (!c.home || c.shared)))
-          throw Error(
-            '无法确认部分 Codex 插件后端的配置目录，尚未切换。请展开“影响范围与其他客户端”查看进程读取错误。',
+      const checks = await Promise.allSettled([
+        api
+          ? require('../server/service.cjs').createService(job).prepareApi(job)
+          : accounts.prepare(job.id),
+        (async () => {
+          // 进程归属检查与登录校验互不依赖；全部通过后才允许关闭和写入。
+          if (job.reloadEditors === false) return;
+          const detected = (await clients()).clients;
+          if (detected.some((c) => c.kind === 'ide' && !c.confirmed && (!c.home || c.shared)))
+            throw Error(
+              '无法确认部分 Codex 插件后端的配置目录，尚未切换。请展开“影响范围与其他客户端”查看进程读取错误。',
+            );
+          const missing = detected.filter(
+            (c) => c.kind === 'ide' && c.confirmed && c.shared && !c.editorId,
           );
-        const missing = detected.filter(
-          (c) => c.kind === 'ide' && c.confirmed && c.shared && !c.editorId,
-        );
-        if (missing.length)
-          throw Error(
-            '检测到 ' +
-              missing.length +
-              ' 个共用配置的 Codex 插件后端尚未接入伴随扩展。请先在“影响范围与其他客户端”接入编辑器；配置尚未修改，客户端未关闭。若要稍后手动重载，可取消“同时重载”。',
-          );
-      }
+          if (missing.length)
+            throw Error(
+              '检测到 ' +
+                missing.length +
+                ' 个共用配置的 Codex 插件后端尚未接入伴随扩展。请先在“影响范围与其他客户端”接入编辑器；配置尚未修改，客户端未关闭。若要稍后手动重载，可取消“同时重载”。',
+            );
+        })(),
+      ]);
+      if (api && checks[0].status === 'fulfilled') prepared = checks[0].value;
+      // 失败时也等另一项收尾，避免释放切换锁后仍有旧校验在更新凭证。
+      for (const check of checks) if (check.status === 'rejected') throw check.reason;
     });
     currentStatus = 'switching';
     if (desktop) await step('stop', '关闭目标桌面端', () => stop(job.desktopExe, job.codexHome));
@@ -385,7 +414,7 @@ function scheduleSwitch(job) {
   writeJson(file, job);
   const worker = cp.spawn(process.execPath, [__filename, file], {
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     windowsHide: true,
   });
   worker.unref();
@@ -399,17 +428,23 @@ function scheduleSwitch(job) {
     status: 'queued',
     message,
   });
+  // 父进程完成锁交接和排队状态写入后再放行，不靠固定延迟避免状态覆盖。
+  worker.send({ type: 'start' });
   return { message };
 }
 if (require.main === module) {
   const job = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-  setTimeout(
-    () =>
-      runSwitch(job).catch(() => {
-        process.exitCode = 1;
-      }),
-    1500,
-  );
+  const start = () => {
+    runSwitch(job).catch(() => {
+      process.exitCode = 1;
+    });
+  };
+  if (process.send)
+    process.once('message', (message) => {
+      process.disconnect();
+      if (message.type === 'start') start();
+    });
+  else start();
 }
 module.exports = {
   scheduleSwitch,

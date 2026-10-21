@@ -178,6 +178,14 @@ test(
         [shell.pid],
       );
       assert.equal(rows[0].context.ok, true);
+      const asynchronous = (
+        await require('../src/clients/client-status.cjs').scanAsync({ force: true })
+      ).processes.filter((p) => [shell.pid, renderer].includes(p.pid));
+      assert.deepEqual(
+        asynchronous.map((p) => p.pid),
+        [shell.pid],
+      );
+      assert.equal(asynchronous[0].context.home, rows[0].context.home);
     } finally {
       if (renderer) {
         try {

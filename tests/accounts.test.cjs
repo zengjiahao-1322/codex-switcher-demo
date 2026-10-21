@@ -760,6 +760,134 @@ test('a second service cannot mutate configuration throughout background prepara
   assert.equal(a.status().items.find((x) => x.id === bob.id).label, 'allowed');
 });
 
+test('准备阶段并行检查登录和编辑器，两项都通过后才关闭桌面', async (t) => {
+  const f = configured(t),
+    a = createAccounts(f),
+    id = a.status().items[0].id;
+  const started = [];
+  let finishAuth,
+    finishEditors,
+    stopped = false;
+  const authReady = new Promise((resolve) => {
+    finishAuth = resolve;
+  });
+  const editorsReady = new Promise((resolve) => {
+    finishEditors = resolve;
+  });
+  t.after(() => {
+    finishAuth();
+    finishEditors({ clients: [] });
+  });
+  const task = runSwitch(
+    { ...f, id, model: 'official', desktopExe: 'fixture-desktop.exe' },
+    {
+      accounts: {
+        ...a,
+        prepare: async () => {
+          started.push('auth');
+          await authReady;
+        },
+      },
+      clients: async () => {
+        started.push('editors');
+        return editorsReady;
+      },
+      stop: async () => {
+        stopped = true;
+      },
+      open: async () => ({ pid: 1 }),
+      syncThreads: async () => ({ count: 0 }),
+    },
+  );
+  await new Promise(setImmediate);
+  assert.deepEqual(started, ['auth', 'editors']);
+  finishAuth();
+  await new Promise(setImmediate);
+  assert.equal(stopped, false);
+  finishEditors({ clients: [] });
+  await task;
+  assert.equal(stopped, true);
+});
+
+test('并行检查失败后等待另一项收尾，期间保留切换锁且不修改配置', async (t) => {
+  const f = configured(t),
+    a = createAccounts(f),
+    id = a.status().items[0].id;
+  const before = fs.readFileSync(path.join(f.codexHome, 'auth.json'), 'utf8');
+  const op = require('../src/config/switch-state.cjs');
+  let finishAuth,
+    finished = false;
+  const authReady = new Promise((resolve) => {
+    finishAuth = resolve;
+  });
+  t.after(() => finishAuth());
+  op.acquire(f.bridgeHome);
+  const task = runSwitch(
+    { ...f, id, desktopExe: 'fixture-desktop.exe' },
+    {
+      accounts: {
+        ...a,
+        prepare: async () => {
+          await authReady;
+          finished = true;
+        },
+      },
+      clients: async () => {
+        throw Error('fixture editor check failed');
+      },
+      stop: async () => assert.fail('校验失败不能关闭桌面'),
+    },
+  );
+  const rejected = assert.rejects(task, /fixture editor check failed/);
+  await new Promise(setImmediate);
+  assert.equal(a.status().switchJob.status, 'preparing');
+  assert.equal(fs.existsSync(path.join(f.bridgeHome, 'operation.lock')), true);
+  assert.equal(finished, false);
+  finishAuth();
+  await rejected;
+  assert.equal(finished, true);
+  assert.equal(fs.existsSync(path.join(f.bridgeHome, 'operation.lock')), false);
+  assert.equal(fs.readFileSync(path.join(f.codexHome, 'auth.json'), 'utf8'), before);
+});
+
+test('后台进程在锁交接和排队状态写入后才收到开始消息，终态不被排队状态覆盖', async (t) => {
+  const f = configured(t),
+    cp = require('node:child_process'),
+    op = require('../src/config/switch-state.cjs');
+  const clients = require('../src/clients/client-status.cjs');
+  t.mock.method(clients, 'clientStatus', () => ({
+    clients: [{ kind: 'editor', confirmed: true, shared: true }],
+  }));
+  let started = false;
+  t.mock.method(cp, 'spawn', (...args) => {
+    const child = spawn(...args),
+      closed = new Promise((resolve) => child.once('close', resolve));
+    f.children.push({ child, closed });
+    const send = child.send.bind(child);
+    child.send = (message, ...rest) => {
+      const queued = JSON.parse(fs.readFileSync(path.join(f.bridgeHome, 'account-switch.json')));
+      const owner = JSON.parse(fs.readFileSync(path.join(f.bridgeHome, 'operation.lock')));
+      assert.equal(queued.status, 'queued');
+      assert.equal(queued.pid, child.pid);
+      assert.equal(owner.pid, child.pid);
+      started = true;
+      return send(message, ...rest);
+    };
+    return child;
+  });
+  op.acquire(f.bridgeHome);
+  require('../src/clients/desktop-account.cjs').scheduleSwitch({
+    ...f,
+    id: 'missing-fixture',
+    reloadEditors: false,
+  });
+  await f.children[0].closed;
+  assert.equal(started, true);
+  assert.equal(op.switchJob(f.bridgeHome).status, 'error');
+  assert.match(op.switchJob(f.bridgeHome).message, /账号不存在/);
+  assert.equal(fs.existsSync(path.join(f.bridgeHome, 'operation.lock')), false);
+});
+
 test('API desktop switch prepares before closing, applies after closing, and allows retry after reopen failure', async (t) => {
   const f = configured(t),
     http = require('node:http'),
