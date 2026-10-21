@@ -1,5 +1,7 @@
 'use strict';
 
+const cp = require('node:child_process');
+
 // 调用方先确认配置归属；这里只停止传入的 PID，不扩展到整个编辑器或其他窗口。
 async function stopProcesses(ids) {
   const signal = (pid, name) => {
@@ -12,6 +14,16 @@ async function stopProcesses(ids) {
   const alive = (pid) => {
     try {
       process.kill(pid, 0);
+      if (process.platform === 'darwin') {
+        // 父进程尚未回收的 zombie 已没有可执行代码，不应阻塞新配置接管。
+        const state = cp
+          .execFileSync('/bin/ps', ['-o', 'state=', '-p', String(pid)], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+          })
+          .trim();
+        if (state.startsWith('Z')) return false;
+      }
       return true;
     } catch (error) {
       if (error.code === 'ESRCH') return false;
