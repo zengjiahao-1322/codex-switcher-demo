@@ -1,149 +1,97 @@
-# Codex Switcher Demo
+# Codex Switcher
 
-为 Codex 管理官方账号和自定义 API 的本机工具，支持 Windows 和 macOS。当前版本：**0.1.3 Demo**。
+管理 Codex 官方账号和自定义 API 的本机工具，支持 Windows 与 macOS。
 
-[下载 Windows / macOS 版本](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest)
+**0.1.3 Demo · 2026-10-21 替换构建**。版本号不变，旧压缩包不会自动更新，请重新下载。
 
-[Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-windows-x64.zip) · [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-arm64.zip) · [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-x64.zip)
+[查看发布说明与全部下载](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/tag/v0.1.3)
 
-## 下载即用
+## 下载和安装
 
-先安装 [Codex 桌面版](https://developers.openai.com/codex/app/)或 OpenAI 官方 Codex 编辑器扩展，任选一种。本工具随包携带 Node.js 和依赖，不需要另外安装 Node、npm 或 Python。
+需要先安装 Codex 桌面版或 OpenAI 官方 Codex 编辑器扩展，任选一种。安装包自带 Node.js 和运行依赖，无需另外安装开发环境。
 
-| 系统 | 下载文件 | 启动方式 |
+| 平台 | 下载 | 启动 |
 | --- | --- | --- |
-| Windows 10/11 x64 | `codex-switcher-windows-x64.zip` | 完整解压，双击 `Codex Switcher/Start.cmd` |
-| macOS 12+，Apple Silicon（M 系列） | `codex-switcher-macos-arm64.zip` | 解压并运行 `Install.command`，或打开同包 `.app` |
-| macOS 12+，Intel | `codex-switcher-macos-x64.zip` | 解压并运行 `Install.command`，或打开同包 `.app` |
+| Windows x64 | [Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-windows-x64.zip) | 完整解压，双击文件夹中的 `Start.cmd`；可运行 `install.cmd` 创建快捷方式 |
+| Mac Apple Silicon（M 系列） | [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-arm64.zip) | 解压并运行 `Install.command`，或打开 `Codex Switcher.app` |
+| Mac Intel | [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-x64.zip) | 同上 |
+| 编辑器伴随扩展 | [通用 VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-companion.vsix) | 在编辑器扩展菜单选择“从 VSIX 安装”，或通过切换器接入 |
 
-Windows 可选双击 `install.cmd`，安装到当前用户目录并创建桌面及开始菜单快捷方式，不需要管理员权限。直接运行解压版时，不要只取出启动脚本，整个文件夹需要保留。
+不要只取出启动脚本，运行时需要保留完整目录。Windows 安装版默认安装到当前用户目录，无需管理员权限。
 
-服务运行后，也可直接访问 `http://127.0.0.1:47831/` 或 `http://localhost:47831/`，支持新标签页、刷新和浏览器书签。网页自动建立本机会话，后台重启后自动恢复访问；服务未运行时仍需先启动程序。
+Mac 应用使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或公证。首次打开可能需要在“系统设置 → 隐私与安全性”中手动允许。应用没有 Dock 图标，启动后打开本机网页界面。
 
-macOS Demo 使用 ad-hoc 签名校验应用完整性，尚无 Apple Developer ID 签名和公证。首次打开可能需要在“系统设置 → 隐私与安全性”中手动允许；本项目不自动关闭 Gatekeeper。应用默认没有 Dock 图标，启动后会打开浏览器中的本机界面。
+服务启动后，使用它打开的浏览器地址；默认地址为 `http://127.0.0.1:47831/`。如果端口被占用，请使用启动时实际打开的地址。关闭浏览器标签页不会停止后台服务。
 
-安装包不携带发布者的账号、API 密钥、聊天记录或测试数据。首次使用需要添加自己的官方登录或 API 配置。
+## 基本使用
 
-Mac 包按芯片拆分，只携带一套 Node.js，避免原通用包同时下载两套运行时。运行时占主要体积；应用代码和依赖压缩后约 0.3 MiB。
+1. **添加来源**：通过官方授权页添加账号，或填写自定义 API 的地址、密钥和模型。添加账号不会立即启用它，也不需要把邮箱密码交给本工具。
+2. **接入编辑器**：如需切换已打开的 VS Code 窗口，先在“影响范围与其他客户端”接入伴随扩展。各窗口状态栏应显示“Codex Switcher · 已连接”。
+3. **应用来源**：选择账号或 API，点击“应用”。工具先完成检查，再更新配置、同步需要更新的旧对话设置，并重新打开目标桌面端或请求编辑器重载。
+4. **查看结果**：切换区显示每一步耗时和逐窗口重载状态。额度可按账号单独刷新，批量刷新也分别显示结果。
 
-## 能做什么
+切换或重载会中断目标客户端正在执行的任务，请先保存工作并等任务结束。已保存的消息和工具记录保留；运行中的任务及未落盘状态不能保证恢复。
 
-- **统一应用**：官方账号和 API 使用同一入口。桌面版重启，已连接且共用此目录的插件窗口重载；只安装插件也可添加账号、读取额度和应用配置。
-- **官方多账号**：通过 OpenAI 官方授权页添加账号，在列表中切换；添加账号不会自动启用。额度按账号独立查询，批量刷新逐个返回结果，不锁定顶部来源选择器。查询失败时隐藏旧额度数字，显示失败原因和上次成功时间。
-- **API 配置**：Responses、Chat Completions、Anthropic Messages；支持直连检测和受限的本机协议转换。检测和实际使用会产生供应商费用。
-- **编辑器窗口**：安装随包提供的伴随扩展后，识别本机配置归属，仅向已确认共用配置的窗口发送重载请求。独立目录、WSL、SSH、容器环境不自动切换。
-- **旧会话诊断**：搜索本机会话、查看模型/供应商/账号差异和关联错误，导出可见对话给新会话继续。
+## 功能和边界
 
-切换来源会中断目标客户端的运行任务，请先保存工作。统一应用会同步未归档旧对话的来源和模型，保留各对话原有速度；它不会迁移云端 ChatGPT 对话。额度是 Codex 的服务端额度，不代表 ChatGPT 网页聊天次数或 API 余额。
+- **官方多账号**：保存官方登录副本、切换账号、查看 Codex 服务端额度。额度查询失败时显示原因与上次成功时间，不把缓存数字当作当前额度。
+- **自定义 API**：支持 Responses 检测，以及受限的 Chat Completions／Anthropic Messages 本机转换。检测和实际使用可能产生上游费用；转换模式需要后台持续运行，不保证支持全部 Codex 特性，例如内置网页搜索。
+- **多窗口切换**：重载已经连接、可确认共用当前配置目录的编辑器窗口；独立目录不跟随。SSH、WSL、容器等远程环境不自动切换。
+- **旧对话跟随**：通过官方接口更新未归档用户对话的供应商与模型，保留各对话速度设置并核对持久结果。不会迁移 ChatGPT 网页的云端聊天。
+- **诊断与导出**：查看本机会话的来源差异和关联错误，导出可见上下文供新会话继续。
 
-## 当前架构
+“桌面进程已启动”和“扩展已重载”分别表示进程、扩展已恢复，不等于已经通过一次真实模型请求确认额度来源。切换速度受账号服务、客户端退出和历史规模影响，不承诺每次都低于 10 秒。
 
-```text
-src/                 后端源码，按账号、配置、客户端、诊断、服务和系统适配分层
-web/                 浏览器页面与交互
-tests/               正式回归测试，本地与 CI 使用同一目录
-scripts/             开发、验证、命令行和打包工具
-platform/windows/    Windows 安装、卸载和进程读取脚本
-platform/macos/      Mac 启动器、安装器和原生进程助手源码
-vscode-companion/    可独立安装的编辑器伴随扩展
-docs/                架构说明与发布说明
-main.cjs             稳定启动入口，兼容既有快捷方式
-mcp-server.cjs       既有 MCP 配置的稳定入口；其他命令行与安装入口也只做转发
-```
+切换器不提供独立 Fast 开关，也不生成额外的标准／Fast 模型；已有的 Codex 速度设置会保留。
 
-本轮 0.1.3 替换构建包含账号登录、额度状态、多窗口重载和切换速度优化。请以 [Release 页](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/tag/v0.1.3) 的构建日期和更新说明区分旧下载；版本号保持不变，已有旧压缩包不会自动更新。
+## 更新现有安装
 
-```mermaid
-flowchart LR
-  UI[浏览器界面\nindex.html + app.js] --> S[本地 HTTP 服务\nmain.cjs + server.cjs]
-  S --> H[业务编排\nservice.cjs]
-  H --> C[配置切换\ncore.cjs + switch-state.cjs]
-  H --> A[官方账号与额度\naccounts.cjs]
-  C --> HOME[(Codex home\nconfig.toml / auth.json)]
-  A --> COPY[(账号副本\nbridgeHome/accounts/<id>)]
-  A --> RPC[独立 Codex app-server\n登录验证 / 额度 RPC]
-  H --> T[旧会话同步\nthread-routing.cjs]
-  H --> R[客户端发现与重载\nclient-status.cjs]
-  R --> D[Codex 桌面端]
-  R --> E[VS Code 等官方扩展]
-  E --> X[伴随扩展\nvscode-companion]
-  H --> G[诊断\ndiagnostics.cjs]
-  G --> HOME
-  G --> A
-```
+本次替换了同名 `v0.1.3` 下载文件，请以 Release 中的 **2026-10-21** 构建说明区分旧包。
 
-核心关系是：浏览器只调用本机业务服务；业务服务分别管理当前 Codex 配置、官方账号副本和客户端重载。额度查询启动独立的 Codex app-server，但读取的仍是对应账号的同一份官方登录凭证，不会另造一套额度账号凭证。
+- **Windows 安装版**：完整解压新包后运行 `install.cmd`，安装器会停止所管理的旧后台并保留安装目录下的 `private/`。
+- **Windows 解压版**：保留原目录下的 `private/`，停止旧切换器后台后更新程序文件。直接在另一个空目录启动会使用那里的新数据目录。
+- **Mac**：运行新包的 `Install.command`，默认安装到 `~/Applications/`；账号数据单独保存在 Application Support 中。
+- **编辑器**：旧 0.1.3 用户也应通过切换器重新接入伴随扩展，或安装本次 VSIX。已有窗口可能需先手动执行一次“重载窗口”激活新代码。
 
-这次凭证状态修复也位于两处：`src/diagnostics/diagnostics.cjs` 用官方 `account/read(refreshToken=true)` 验证 access token 到期后 session 是否仍可续期；`web/app.js` 在额度请求失败时只显示失败原因和上次成功时间，不再把缓存额度数字显示成当前额度。多账号额度刷新限制为两个并发，后端同时保留 `auth_invalid`、`network_error`、`runtime_error` 等结构化状态。官方 app-server 会话和额度读取已分别放在 `src/accounts/official-session.cjs`、`src/accounts/quota-reader.cjs`，账号门面仍由 `src/accounts/accounts.cjs` 提供。完整的分层说明见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+使用自定义 `BRIDGE_HOME`／`CODEX_HOME` 的用户应继续沿用原目录。只更新切换器程序不需要切换账号；点击“应用”才会触发目标客户端的重启或重载。
 
-来源下方提供“检测 API”，检测不修改配置、不应用来源、不重启。切换器不提供独立加速功能，也不额外生成标准／Fast 模型；已有的 Codex 速度设置保留，Chat Completions 转换继续传递请求中的服务档位参数。
+## 配置与数据位置
 
-## VS Code / Cursor / Windsurf / Insiders
+| 内容 | 默认位置 |
+| --- | --- |
+| Codex 配置与登录 | `~/.codex`，尊重 `CODEX_HOME`；可在界面指定管理目录 |
+| Windows 解压版账号数据 | 工具目录的 `private/` |
+| Windows 安装版账号数据 | `%LOCALAPPDATA%/CodexApiSwitcher/private/` |
+| Mac 账号数据 | `~/Library/Application Support/CodexApiSwitcher/` |
 
-在切换器的“影响范围与其他客户端”点击“接入 VS Code / Cursor”，或下载伴随扩展 VSIX，在编辑器的扩展菜单中选择“从 VSIX 安装”。还需安装 OpenAI 官方 Codex 扩展。重载只会发送给已经连接且可确认配置归属的本机窗口。
+`BRIDGE_HOME` 可指定工具数据目录，`BRIDGE_CODEX_HOME` 可强制指定管理的 Codex 目录，`CODEX_EXE` 可指定官方运行时。首次修改前保留配置快照，不修改 Codex 程序文件。发布包不包含个人账号、API 密钥、聊天记录或测试数据。
 
-更新切换器后，也需要重新接入最新版伴随扩展。每个窗口的状态栏应显示“Codex Switcher · 已连接”；已有窗口可能需要先手动重载一次才能启用新扩展。客户端列表会显示扩展版本、配置归属，以及请求待接收、已接收或重载失败等状态。
+## 兼容性与验证
 
-也可单独下载 [0.1.3 伴随扩展 VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-companion.vsix)，在各编辑器选择“从 VSIX 安装”，无需为了更新扩展重新下载 Node 运行时。
+发布流水线在 **Windows、macOS 15 Apple Silicon 和 macOS 15 Intel** 上运行回归、浏览器、安装包和真实 VS Code 多窗口检查；三平台的六项检查全部通过才上传下载文件。查看[本次发布验证](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39583255448)。
 
-多个窗口共用 `CODEX_HOME` 时，一次切换会更新默认配置和未归档旧对话的供应商、模型。通过官方会话接口保存并冷启动核对后，再重新打开桌面端、请求编辑器窗口重载；原消息、工具记录和项目目录保留。重载会中断正在执行的任务，请等任务结束再切换，或使用独立配置目录。无法同步的会话会报告失败，不会把部分切换显示为完成；未落盘内容和正在执行的任务不保证自动恢复。
+Mac 还检查系统 Bash 安装脚本、首次与重复安装、数据保留、签名完整性和 LaunchServices 启动。编译目标为 macOS 12+，实际 CI 运行系统为 macOS 15；macOS 12 没有实机结果。CI 使用隔离配置和合成数据，不代替使用者 Mac 上的首次 Gatekeeper 授权、个人账号登录与真实额度验收。
 
-## 数据与配置
+VS Code 已进行多窗口验证。Cursor、Windsurf、Insiders 提供接入路径，尚未逐款完成同样的 GUI 验收。本项目为基础 Demo，仅监听本机地址，未进行正式安全审计。
 
-- 默认 Codex 配置目录为 `~/.codex`，尊重 `CODEX_HOME`；“影响范围与其他客户端”可选择实际配置目录、填写自定义程序路径，选择会保存。`BRIDGE_CODEX_HOME` 仍可强制指定管理目录。
-- Windows 数据存放在工具目录的 `private/`；安装版在 `%LOCALAPPDATA%/CodexApiSwitcher/private/`。
-- macOS 数据存放在 `~/Library/Application Support/CodexApiSwitcher/`，更新 `.app` 不会清空账号。
-- `BRIDGE_HOME` 可指定独立数据目录；每个 Codex home 应使用自己的数据目录。
-- 官方授权信息由官方 Codex 写入，工具保存登录副本供切换使用，不要求提供邮箱密码。
-- 应用保存的官方账号时使用 Codex 的 `file` 凭据存储，避免系统钥匙串中的另一账号覆盖选择；不删除原钥匙串条目。
-- macOS 的 `keyring` / `auto` 配置会尝试读取对应 Codex home 的 `Codex Auth` 钥匙串条目；读取失败会提示。Windows 和 macOS 的官方登录与额度子进程继承显式代理，未设置时采用已启用的系统手动 HTTP / SOCKS 代理；PAC 脚本不自动解析。
-- 首次修改前保留配置快照，不修改 Codex 的程序文件。
-- 仅监听 `127.0.0.1`。这是基础 Demo，未进行正式安全审计。
+## 开发与文档
 
-macOS 如将 Codex 放在非标准目录，可设置 `CODEX_DESKTOP_APP` 指向 `.app`；`CODEX_EXE` 可指定内置或独立 CLI 的可执行文件。用户自行设置的启动参数、项目配置和系统凭据存储可能影响实际配置，界面会尽可能展示可核对信息。
-
-## 验证范围
-
-Windows 已在开发机实测真实官方扩展启动、指定窗口重载及独立配置隔离。两个真实官方账号与 API 的切换、后端进程重启、短消息回复、重启后继续人工验证会话均已通过。没有对全部历史会话作恢复保证。
-
-GitHub Actions 会在 Windows 与 macOS 上安装固定版本的官方 Codex，运行回归检查、构建发行包，再从发行包解压启动服务，验证客户端列表和伴随扩展下载。macOS 原生进程助手也在 macOS 上编译并读取真实进程验证。CI 不使用任何个人账号；macOS 的 Finder 首次授权、真实账号切换和日常桌面交互仍需真实 Mac 用户验收。
-
-[本次功能修复验证](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/runs/39418411775)覆盖 Windows、macOS 15 Apple Silicon 与 Intel 的回归检查、真实浏览器普通 API 检测与独立额度刷新、打包解压启动，以及真实 VS Code 多窗口重载。VS Code 检查使用安装的伴随扩展和官方 Codex 后端，确认两个共享配置窗口重载，独立配置窗口不受影响；测试使用合成数据，不证明执行中任务能自动恢复。Cursor、Windsurf、Insiders 的接入路径已支持，尚未逐款完成同样的 GUI 验收。
-
-macOS CI 另覆盖系统 Bash 安装脚本、首次与重复安装、数据保留、ad-hoc 签名完整性和 LaunchServices 启动。尚未完成浏览器下载后的 Gatekeeper 首次授权、个人账号完整登录与真实额度的真机验收。原生助手最低编译目标为 macOS 12，但实际执行系统为 macOS 15，macOS 12 尚无实机结果。
-
-## 开发与发布
-
-多窗口修复按扩展宿主进程关联同一 VS Code 实例的窗口；账号变化不再因模型未变而跳过后端停止；访问令牌过期先尝试官方刷新，网络异常不直接要求重新登录。验证覆盖普通安装扩展后的同实例双窗口，但不代替使用者 Mac 上的官方 Codex 面板验收。
-
-0.1.3 已于 2026-10-20 修订，替换原版本下载文件，包含切换进度、步骤耗时、逐窗口重载回报和低额度提醒。低额度提醒仅使用十分钟内成功读取、尚未重置的订阅窗口，阈值为 20%；备用账号按钮只改变选中项，仍需手动应用。窗口“扩展已重载”需使用本次修订的伴随扩展，旧扩展最多回报“已接收”；它不证明实际模型请求已切换。
-
-本版同时修复空闲桌面与 IDE 并存时跳过桌面重启的问题，重开后等待同目录的新主进程。自动重载所需的连接状态显示在勾选框旁；已确认共用目录的 Codex 插件未接入伴随扩展时，应用前会提示先接入，也可取消“同时重载”后自行重载。伴随扩展首次安装或更新后，已有窗口可能需手动重载一次才能激活，之后的来源切换由它接收重载请求。已安装旧 0.1.3 的用户也需重新接入伴随扩展，才能使用新增的重载完成回报。编辑器检查走完整后台切换接口，使用真实 VS Code、伴随扩展和测试扩展启动的官方 Codex 后端，并覆盖同步失败后的真实后端恢复；没有把它表述为 Mac 官方 Codex 面板的实机验收。
-
-需要 Node.js 22.22+。安装依赖后运行：
+推荐使用与发行包一致的 **Node.js 22.22.0**：
 
 ```sh
 npm install --ignore-scripts
-npm test
+node scripts/test-all.cjs
+node main.cjs
 ```
 
-本次涉及的源码按 `.prettierrc.json` 统一缩进、换行，并在账号并发、程序发现、配置归属等关键流程添加中文注释。后续修改可运行 `npx prettier --write <文件>`；格式化工具不打入运行包。
+后端在 `src/`，页面在 `web/`，正式测试在 `tests/`，系统脚本在 `platform/`，伴随扩展在 `vscode-companion/`。根目录的启动与安装入口保留兼容。
 
-需要安装官方 Codex CLI、桌面应用或官方编辑器扩展；非标准安装可设置 `CODEX_EXE`。macOS 测试原生进程助手前执行 `clang -O2 -mmacosx-version-min=12.0 platform/macos/mac-process-context.c -o bin/mac-process-context`（先创建 `bin/`）。
-
-```sh
-node scripts/build-release.cjs win32
-# 在 macOS 上按芯片构建（不传 --arch 时仍可生成开发用通用包）
-node scripts/build-release.cjs darwin --arch=arm64
-node scripts/build-release.cjs darwin --arch=x64
-```
-
-打包文件由 `release-files.json` 明确列出；`private/`、本机运行时、验证目录和研究记录不会提交。发布 `v*` 标签后，CI 仅在 Windows 与两种 Mac 芯片的检查通过时创建 GitHub Release，附带各平台压缩包及 SHA-256。Mac 还会实际执行系统 Bash 安装脚本、验证安装后签名，并通过 LaunchServices 启动应用。发布前另外启动真实 VS Code 的三个隔离窗口，验证伴随扩展安装、共享目录窗口重载和独立目录隔离；该检查同时在 Windows、Mac M 系列和 Mac Intel 执行。测试编辑器不会放入发行包。
-
-主分支验证统一由 `.github/workflows/release.yml` 调度；编辑器检查复用 `editor-reload-validation.yml`。临时 Mac 测试分支 `verify/macos-*`（包含安装器测试分支）统一由 `macos-validation.yml` 验证，不再维护重复的安装包专用流程。
+- [架构与切换流程](docs/ARCHITECTURE.md)
+- [发布说明](docs/RELEASE.md)
+- [更新记录](CHANGELOG.md)
 
 ## 卸载
 
-Windows 安装版运行 `platform/windows/uninstall.ps1`，按提示处理使用中的配置。macOS 先在界面关闭自启动、切回需要保留的来源并关闭服务，然后移除应用；用户数据目录单独保留，避免误删账号和历史。本工具不会卸载 Codex 或官方扩展。
+Windows 安装版运行 `uninstall.ps1`。Mac 先关闭自启动和切换器后台，再移除应用；用户数据目录单独保留。本工具不会卸载 Codex 或官方扩展。
 
-MIT License。独立第三方 Demo，与 OpenAI 无隶属关系。
+MIT License。独立第三方工具，与 OpenAI 无隶属关系。
