@@ -56,17 +56,23 @@ function stopDesktop(exe, codexHome) {
   powershell(
     `
  $restricted=$env:SWITCHER_DESKTOP_IDS -ne '*';$allowed=@($env:SWITCHER_DESKTOP_IDS.Split(',') | Where-Object {$_ -and $_ -ne '*'} | ForEach-Object {[int]$_});
- $p=@(Get-Process | Where-Object {$_.Path -eq $env:SWITCHER_DESKTOP_EXE -and (-not $restricted -or $_.Id -in $allowed)});
+ # 只查询目标 PID 或同名进程，不重复打开整张系统进程表读取路径。
+ $candidates=if($restricted){if($allowed.Count){Get-Process -Id $allowed -ErrorAction SilentlyContinue}}else{Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($env:SWITCHER_DESKTOP_EXE)) -ErrorAction SilentlyContinue};
+ $p=@($candidates | Where-Object {$_.Path -eq $env:SWITCHER_DESKTOP_EXE});
  $desktopIds=@($p | Select-Object -ExpandProperty Id);
  $backendIds=@(Get-CimInstance Win32_Process -Filter "Name = 'codex.exe'" | Where-Object {$_.ParentProcessId -in $desktopIds} | Select-Object -ExpandProperty ProcessId);
  foreach($item in $p){if($item.MainWindowHandle -ne 0){[void]$item.CloseMainWindow()}};
  for($i=0;$i -lt 20;$i++){
    if(-not ($desktopIds.Count+$backendIds.Count)){break};
-   $waiting=@(Get-Process -Id @($desktopIds+$backendIds) -ErrorAction SilentlyContinue);
+   $waiting=@(Get-Process -Id @($desktopIds+$backendIds) -ErrorAction SilentlyContinue | Where-Object {-not $_.HasExited});
    if(-not $waiting.Count){break};Start-Sleep -Milliseconds 100
  };
- Get-Process | Where-Object {($_.Path -eq $env:SWITCHER_DESKTOP_EXE -and (-not $restricted -or $_.Id -in $allowed)) -or $_.Id -in $backendIds} | Stop-Process -Force -ErrorAction SilentlyContinue;
- $remaining=@(Get-Process | Where-Object {($_.Path -eq $env:SWITCHER_DESKTOP_EXE -and (-not $restricted -or $_.Id -in $allowed)) -or $_.Id -in $backendIds});
+ $targetIds=@($desktopIds+$backendIds);
+ if($targetIds.Count){
+   Get-Process -Id $targetIds -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue;
+ }
+ # Windows 可能在父进程释放句柄前保留已退出的 PID，不能把已退出对象误报为仍在运行。
+ $remaining=if($targetIds.Count){@(Get-Process -Id $targetIds -ErrorAction SilentlyContinue | Where-Object {-not $_.HasExited})}else{@()};
  if($remaining.Count){throw 'Codex 桌面端仍在运行，请关闭桌面端后重试。'}
  `,
     { SWITCHER_DESKTOP_EXE: exe, SWITCHER_DESKTOP_IDS: targetIds ? targetIds.join(',') : '*' },

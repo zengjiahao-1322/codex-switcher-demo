@@ -113,6 +113,40 @@ test(
 );
 
 test(
+  'Windows 关闭共享桌面后确认真实退出，保留同路径的独立配置实例',
+  { skip: process.platform !== 'win32' },
+  async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-stop-'));
+    const app = path.join(root, 'OpenAI.Codex_test', 'app'),
+      home = path.join(root, 'shared');
+    fs.mkdirSync(app, { recursive: true });
+    fs.mkdirSync(home);
+    const exe = path.join(app, 'Codex.exe');
+    fs.copyFileSync(process.execPath, exe);
+    const children = [home, path.join(root, 'independent')].map((codexHome) => {
+      const child = cp.spawn(exe, ['-e', 'setTimeout(()=>{},60000)'], {
+        env: { ...process.env, CODEX_HOME: codexHome },
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      return { child, closed: new Promise((resolve) => child.once('close', resolve)) };
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      require('../src/clients/desktop-account.cjs').stopDesktop(exe, home);
+      await children[0].closed;
+      assert.notEqual(children[0].child.exitCode, null);
+      assert.doesNotThrow(() => process.kill(children[1].child.pid, 0));
+    } finally {
+      for (const { child } of children) child.kill();
+      await Promise.all(children.map(({ closed }) => closed));
+      assert.equal(path.dirname(root), os.tmpdir());
+      await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  },
+);
+
+test(
   'Windows 桌面可执行文件名为 Codex.exe 时不把渲染子进程当成另一客户端',
   { skip: process.platform !== 'win32' },
   async () => {

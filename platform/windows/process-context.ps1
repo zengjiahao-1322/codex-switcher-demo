@@ -40,15 +40,17 @@ public class SwitcherProcessContext {
 }
 '@
 $all = @(Get-CimInstance Win32_Process | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CreationDate)
+# 父进程按 PID 查一次；避免为每个系统进程重新遍历整张表。
+$byId = @{}
+foreach ($item in $all) { $byId[[int]$item.ProcessId] = $item }
 $targets = @($all | Where-Object {
  $candidate = $_
  # 空闲桌面也要参与切换；同路径的渲染子进程由主进程统一关闭。
  $desktopShell = ($candidate.Name -ieq 'ChatGPT.exe' -or $candidate.Name -ieq 'Codex.exe') -and
    $candidate.ExecutablePath -match 'OpenAI[.\\/]Codex[^\\/]*[\\/]app[\\/]'
  $nativeBackend = $candidate.Name -ieq 'codex.exe' -and -not $desktopShell
- $sameExecutableParent = @($all | Where-Object {
-   $_.ProcessId -eq $candidate.ParentProcessId -and $_.ExecutablePath -eq $candidate.ExecutablePath
- }).Count -gt 0
+ $parent = $byId[[int]$candidate.ParentProcessId]
+ $sameExecutableParent = $null -ne $parent -and $parent.ExecutablePath -eq $candidate.ExecutablePath
  $nativeBackend -or ($desktopShell -and -not $sameExecutableParent)
 } | ForEach-Object {
  $context = [SwitcherProcessContext]::ReadContext([int]$_.ProcessId)
