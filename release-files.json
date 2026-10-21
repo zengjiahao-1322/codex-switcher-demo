@@ -1,11 +1,13 @@
 [
- "accounts.cjs", "adapter.cjs", "app.js", "autostart.cjs", "cli.cjs", "client-status.cjs",
- "compatibility.cjs", "core.cjs", "desktop-account.cjs", "diagnostics.cjs", "editor-integration.cjs",
- "index.html", "install-deps.cjs", "main.cjs", "mcp-server.cjs", "platform.cjs", "probe.cjs",
- "providers.cjs", "runtime.cjs", "server.cjs", "service.cjs", "switch-state.cjs", "thread-routing.cjs", "zip.cjs",
- "official-session.cjs", "quota-reader.cjs",
- "mac-processes.cjs", "process-context.ps1", "Start.cmd", "launch-hidden.vbs", "install.cmd",
- "install.ps1", "uninstall.ps1", "package.json", "LICENSE", "README.md", "CHANGELOG.md",
+ "src/paths.cjs", "src/server/main.cjs", "docs/ARCHITECTURE.md",
+ "mcp-server.cjs", "cli.cjs", "install.ps1", "uninstall.ps1",
+ "src/accounts/accounts.cjs", "src/server/adapter.cjs", "web/app.js", "src/clients/autostart.cjs", "scripts/cli.cjs", "src/clients/client-status.cjs",
+ "src/platform/compatibility.cjs", "src/config/core.cjs", "src/clients/desktop-account.cjs", "src/diagnostics/diagnostics.cjs", "src/clients/editor-integration.cjs",
+ "web/index.html", "scripts/install-deps.cjs", "main.cjs", "src/server/mcp-server.cjs", "src/platform/platform.cjs", "src/server/probe.cjs",
+ "src/config/providers.cjs", "src/platform/runtime.cjs", "src/server/server.cjs", "src/server/service.cjs", "src/config/switch-state.cjs", "src/diagnostics/thread-routing.cjs", "src/shared/zip.cjs",
+ "src/accounts/official-session.cjs", "src/accounts/quota-reader.cjs",
+ "src/platform/mac-processes.cjs", "platform/windows/process-context.ps1", "Start.cmd", "launch-hidden.vbs", "install.cmd",
+ "platform/windows/install.ps1", "platform/windows/uninstall.ps1", "package.json", "LICENSE", "README.md", "CHANGELOG.md",
  "vscode-companion/package.json", "vscode-companion/extension.cjs", "vscode-companion/extension.vsixmanifest",
  "vscode-companion/content-types.xml"
 ]

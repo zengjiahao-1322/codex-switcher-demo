@@ -1,0 +1,48 @@
+const test = require('node:test'),
+  assert = require('node:assert/strict'),
+  fs = require('node:fs'),
+  os = require('node:os'),
+  path = require('node:path');
+test('discovers newest installed codex binary without pinning version hash', () => {
+  const { findCodex } = require('../src/platform/runtime.cjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-runtime-'));
+  try {
+    for (const n of ['old', 'new']) {
+      fs.mkdirSync(path.join(root, n));
+      fs.writeFileSync(path.join(root, n, 'codex.exe'), 'test fixture');
+    }
+    fs.utimesSync(path.join(root, 'old', 'codex.exe'), new Date(1000), new Date(1000));
+    assert.equal(findCodex(root), path.join(root, 'new', 'codex.exe'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+test('IDE-only lookup selects the native extension in VS Code, Insiders and Cursor without CODEX_EXE', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-ide-only-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const platform of ['darwin', 'win32'])
+    for (const arch of ['arm64', 'x64'])
+      for (const editor of ['.vscode', '.vscode-insiders', '.cursor']) {
+        const home = path.join(root, platform, arch, editor),
+          dir = path.join(home, editor, 'extensions', 'openai.chatgpt-26.1007.21434'),
+          cpu = arch === 'arm64' ? 'aarch64' : 'x86_64',
+          file = path.join(
+            dir,
+            'bin',
+            (platform === 'darwin' ? 'macos-' : 'windows-') + cpu,
+            platform === 'win32' ? 'codex.exe' : 'codex',
+          );
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, 'runtime fixture');
+        assert.equal(
+          require('../src/platform/runtime.cjs').findCodex({
+            platform,
+            arch,
+            home,
+            env: {},
+            appPaths: [],
+          }),
+          fs.realpathSync(file),
+        );
+      }
+});

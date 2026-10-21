@@ -28,7 +28,7 @@ if (process.platform === 'darwin') {
     '-Wall',
     '-Wextra',
     '-mmacosx-version-min=12.0',
-    'mac-process-context.c',
+    'platform/macos/mac-process-context.c',
     '-o',
     'bin/mac-process-context',
   ]);

@@ -1,0 +1,258 @@
+'use strict';
+const { PROJECT_ROOT } = require('../src/paths.cjs');
+
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const toml = require('smol-toml');
+const root = path.join(PROJECT_ROOT, '.core-tests');
+fs.mkdirSync(root, { recursive: true });
+const core = () => require('../src/config/core.cjs');
+test('restore selects first snapshot but retains later unrelated edits across repeated switches', (t) => {
+  const dir = fixture(t),
+    codex = path.join(dir, 'codex'),
+    bridge = path.join(dir, 'bridge');
+  fs.mkdirSync(codex);
+  const file = path.join(codex, 'config.toml');
+  fs.writeFileSync(file, 'model="official"\n# original\n');
+  core().applySwitch(codex, provider, 'first', bridge);
+  fs.appendFileSync(file, '\n[mcp_servers.later]\ncommand="preserve"\n');
+  core().applySwitch(codex, provider, 'second', bridge);
+  const r = core().restoreOfficial(codex, bridge);
+  const p = toml.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(p.model, 'official');
+  assert.equal(p.model_provider, undefined);
+  assert.equal(p.mcp_servers.later.command, 'preserve');
+  assert.equal(p.model_providers.hermes_bridge.base_url, provider.baseUrl);
+  assert.equal(r.model, 'official');
+});
+test('concurrent external edit aborts instead of overwriting it', (t) => {
+  const dir = fixture(t),
+    codex = path.join(dir, 'codex'),
+    bridge = path.join(dir, 'bridge');
+  fs.mkdirSync(codex);
+  const file = path.join(codex, 'config.toml');
+  fs.writeFileSync(file, 'model="original"\n');
+  const rename = fs.renameSync;
+  fs.renameSync = function (a, b) {
+    const result = rename(a, b);
+    if (b === path.join(bridge, 'original-config.toml'))
+      fs.writeFileSync(file, 'model="external"\n');
+    return result;
+  };
+  try {
+    assert.throws(() => core().applySwitch(codex, provider, 'new', bridge), /concurrent/i);
+    assert.equal(toml.parse(fs.readFileSync(file, 'utf8')).model, 'external');
+  } finally {
+    fs.renameSync = rename;
+  }
+});
+test('bridge transaction lock refuses overlapping writer', (t) => {
+  const dir = fixture(t),
+    codex = path.join(dir, 'codex'),
+    bridge = path.join(dir, 'bridge');
+  fs.mkdirSync(codex);
+  fs.mkdirSync(bridge);
+  fs.writeFileSync(path.join(codex, 'config.toml'), 'model="a"\n');
+  fs.writeFileSync(path.join(codex, '.hermes-bridge.lock'), 'held');
+  assert.throws(() => core().applySwitch(codex, provider, 'new', bridge), /locked/i);
+  assert.equal(fs.readFileSync(path.join(codex, 'config.toml'), 'utf8'), 'model="a"\n');
+});
+test('restore detects edit during temporary file write', (t) => {
+  const dir = fixture(t),
+    codex = path.join(dir, 'codex'),
+    bridge = path.join(dir, 'bridge');
+  fs.mkdirSync(codex);
+  const file = path.join(codex, 'config.toml');
+  fs.writeFileSync(file, 'model="original"\n');
+  core().applySwitch(codex, provider, 'new', bridge);
+  const sync = fs.fsyncSync;
+  fs.fsyncSync = function (fd) {
+    sync(fd);
+    fs.writeFileSync(file, 'model="external"\n');
+  };
+  try {
+    assert.throws(() => core().restoreOfficial(codex, bridge), /concurrent/i);
+    assert.equal(toml.parse(fs.readFileSync(file, 'utf8')).model, 'external');
+  } finally {
+    fs.fsyncSync = sync;
+  }
+});
+test('discover redacts malformed YAML parser diagnostics', (t) => {
+  const home = fixture(t);
+  fs.writeFileSync(path.join(home, 'config.yaml'), 'api_key: "fixture-secret');
+  assert.throws(
+    () => core().discoverProviders(home),
+    (e) => !e.message.includes('fixture-secret'),
+  );
+});
+const provider = {
+  id: 'p',
+  name: 'Fixture',
+  baseUrl: 'http://localhost:9000/exact/v1',
+  apiKey: 'fixture-secret',
+  apiMode: 'responses',
+};
+test('prepare rejects invalid inputs with sanitized errors', () => {
+  for (const [text, p, m] of [
+    ['broken = "fixture-secret', provider, 'x'],
+    ['', { ...provider, baseUrl: 'file:///bad' }, 'x'],
+    ['', { ...provider, apiKey: '' }, 'x'],
+    ['', provider, ''],
+  ])
+    assert.throws(
+      () => core().prepareConfig(text, p, m),
+      (e) => !e.message.includes('fixture-secret'),
+    );
+});
+test('prepare preserves unrelated TOML text and replaces bridge exactly once', () => {
+  const original =
+    '# keep\r\nmodel = "old" # selection\r\nmodel_provider="openai"\r\nnotes="""\r\n[model_providers.hermes_bridge]\r\nmodel = "not a setting"\r\n"""\r\n[mcp_servers.x]\r\ncommand = "keep me" # exact\r\n[model_providers.hermes_bridge]\r\nname="outdated"\r\nbase_url="http://old"\r\n';
+  const result = core().prepareConfig(original, provider, 'new');
+  const p = toml.parse(result);
+  assert.equal(p.model, 'new');
+  assert.equal(p.model_provider, 'hermes_bridge');
+  assert.deepEqual(
+    { ...p.model_providers.hermes_bridge },
+    {
+      name: 'Fixture',
+      base_url: provider.baseUrl,
+      wire_api: 'responses',
+      experimental_bearer_token: provider.apiKey,
+      requires_openai_auth: false,
+    },
+  );
+  assert.ok(result.includes('[mcp_servers.x]\r\ncommand = "keep me" # exact\r\n'));
+  assert.equal(p.notes, toml.parse(original).notes);
+  assert.equal(core().prepareConfig(result, provider, 'new'), result);
+});
+function fixture(t) {
+  const dir = fs.mkdtempSync(path.join(root, 'case-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+test('apply makes private backup and config while leaving OAuth unchanged', (t) => {
+  const dir = fixture(t),
+    codex = path.join(dir, 'codex'),
+    bridge = path.join(dir, 'bridge');
+  fs.mkdirSync(codex);
+  const original = 'model="official"\n[mcp_servers.keep]\ncommand="yes"\n';
+  fs.writeFileSync(path.join(codex, 'config.toml'), original);
+  fs.writeFileSync(path.join(codex, 'auth.json'), 'oauth-fixture');
+  const result = core().applySwitch(codex, provider, 'new', bridge);
+  assert.equal(toml.parse(fs.readFileSync(path.join(codex, 'config.toml'), 'utf8')).model, 'new');
+  assert.equal(fs.readFileSync(path.join(codex, 'auth.json'), 'utf8'), 'oauth-fixture');
+  assert.equal(fs.readFileSync(result.backupPath, 'utf8'), original);
+  assert.equal(JSON.stringify(result).includes(provider.apiKey), false);
+  if (process.platform === 'win32') {
+    const cp = require('child_process');
+    for (const file of [path.join(codex, 'config.toml'), result.backupPath]) {
+      const script =
+        '$a=Get-Acl -LiteralPath $env:ACL_TARGET; [pscustomobject]@{protected=$a.AreAccessRulesProtected;sids=@($a.Access | ForEach-Object {$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value})} | ConvertTo-Json -Compress';
+      const env = { ...process.env, ACL_TARGET: file };
+      delete env.PSModulePath;
+      const a = JSON.parse(
+        cp.execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
+          env,
+          encoding: 'utf8',
+        }),
+      );
+      assert.equal(a.protected, true);
+      assert.equal(a.sids.length, 2);
+      assert.ok(a.sids.includes('S-1-5-18'));
+    }
+  }
+});
+test('discover resolves home env and current provider without leaking public keys', (t) => {
+  const home = fixture(t);
+  fs.writeFileSync(path.join(home, '.env'), 'API_SECRET="fixture-secret"\n');
+  fs.writeFileSync(
+    path.join(home, 'config.yaml'),
+    'providers:\n  p:\n    name: Local\n    base_url: http://localhost:9000/v1\n    api_key: ${API_SECRET}\n    api_mode: responses\n    model: old\n    models:\n      old: {}\n      new: {}\nmodel:\n  provider: p\n  default: new\n',
+  );
+  const p = core().discoverProviders(home);
+  assert.deepEqual(p, [
+    {
+      id: 'p',
+      name: 'Local',
+      active: true,
+      baseUrl: 'http://localhost:9000/v1',
+      model: 'new',
+      models: ['old', 'new'],
+      apiMode: 'responses',
+      apiKey: 'fixture-secret',
+    },
+  ]);
+  assert.equal(JSON.stringify(core().publicProviders(p)).includes('fixture-secret'), false);
+  assert.equal('apiKey' in core().publicProviders(p)[0], false);
+});
+
+test('snapshot refreshes from official state on each new switch, so later official model choices survive restore', (t) => {
+  const dir = fixture(t),
+    codex = path.join(dir, 'codex'),
+    bridge = path.join(dir, 'bridge');
+  fs.mkdirSync(codex);
+  const file = path.join(codex, 'config.toml');
+  fs.writeFileSync(file, 'model="old-official"\n');
+  core().applySwitch(codex, provider, 'a', bridge);
+  core().restoreOfficial(codex, bridge);
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('old-official', 'new-official'));
+  core().applySwitch(codex, provider, 'b', bridge);
+  core().restoreOfficial(codex, bridge);
+  assert.equal(toml.parse(fs.readFileSync(file, 'utf8')).model, 'new-official');
+});
+test('restore while not bridged changes nothing; restore without snapshot explains in Chinese', (t) => {
+  const dir = fixture(t),
+    codex = path.join(dir, 'codex'),
+    bridge = path.join(dir, 'bridge');
+  fs.mkdirSync(codex);
+  const file = path.join(codex, 'config.toml');
+  fs.writeFileSync(file, 'model="mine"\n');
+  const before = fs.readFileSync(file, 'utf8');
+  const r = core().restoreOfficial(codex, bridge);
+  assert.equal(r.alreadyOfficial, true);
+  assert.equal(fs.readFileSync(file, 'utf8'), before);
+  fs.writeFileSync(
+    file,
+    'model="x"\nmodel_provider="hermes_bridge"\n[model_providers.hermes_bridge]\nname="b"\nbase_url="http://127.0.0.1:1/v1"\n',
+  );
+  assert.throws(() => core().restoreOfficial(codex, bridge), /快照/);
+});
+test('model_catalog_json is managed with the selection: set on switch, restored to the original value on restore', (t) => {
+  const dir = fixture(t),
+    codex = path.join(dir, 'codex'),
+    bridge = path.join(dir, 'bridge');
+  fs.mkdirSync(codex);
+  const file = path.join(codex, 'config.toml');
+  fs.writeFileSync(file, 'model = "o"\nmodel_catalog_json = "C:/mine.json"\n');
+  core().applySwitch(codex, provider, 'm', bridge, 'C:/gen.json');
+  assert.equal(toml.parse(fs.readFileSync(file, 'utf8')).model_catalog_json, 'C:/gen.json');
+  core().restoreOfficial(codex, bridge);
+  assert.equal(toml.parse(fs.readFileSync(file, 'utf8')).model_catalog_json, 'C:/mine.json');
+  core().applySwitch(codex, provider, 'm', bridge);
+  assert.equal(toml.parse(fs.readFileSync(file, 'utf8')).model_catalog_json, undefined);
+  core().applyOfficial(codex, 'o2');
+  assert.equal(toml.parse(fs.readFileSync(file, 'utf8')).model_catalog_json, undefined);
+});
+test('cleanupBridge removes the switcher provider and its own catalog only when Codex is not using it', (t) => {
+  const dir = fixture(t),
+    codex = path.join(dir, 'codex'),
+    bridge = path.join(dir, 'bridge');
+  fs.mkdirSync(codex);
+  const file = path.join(codex, 'config.toml');
+  fs.writeFileSync(file, 'model = "o"\n[mcp_servers.keep]\ncommand = "x"\n');
+  const own = path.join(bridge, 'model-catalog.json');
+  core().applySwitch(codex, provider, 'm', bridge, own);
+  assert.throws(() => core().cleanupBridge(codex, own), /切回官方/);
+  core().restoreOfficial(codex, bridge);
+  const c = toml.parse(fs.readFileSync(file, 'utf8'));
+  assert.ok(c.model_providers.hermes_bridge);
+  assert.equal(core().cleanupBridge(codex, own).changed, true);
+  const after = toml.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(after.model_providers?.hermes_bridge, undefined);
+  assert.equal(after.model, 'o');
+  assert.equal(after.mcp_servers.keep.command, 'x');
+  assert.equal(fs.readFileSync(file, 'utf8').includes('fixture-secret'), false);
+  assert.equal(core().cleanupBridge(codex, own).changed, false);
+});

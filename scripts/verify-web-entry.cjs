@@ -9,8 +9,8 @@ try {
 } catch {
   ({ chromium } = require('../.build-cache/browser-check/node_modules/playwright'));
 }
-const { createServer } = require('../server.cjs');
-const { createService } = require('../service.cjs');
+const { createServer } = require('../src/server/server.cjs');
+const { createService } = require('../src/server/service.cjs');
 
 // 验证真实页面；仅使用独立本机配置，不触碰用户账号和正在执行的任务。
 const root = fs.mkdtempSync(
@@ -25,7 +25,7 @@ fs.writeFileSync(
   'model="fixture-api"\nmodel_provider="hermes_bridge"\n',
 );
 const service = createService({ codexHome: home, bridgeHome: bridge });
-const providerId = require('../providers.cjs').add(bridge, {
+const providerId = require('../src/config/providers.cjs').add(bridge, {
   name: 'Web entry fixture',
   baseUrl: 'http://127.0.0.1:1/v1',
   apiMode: 'responses',

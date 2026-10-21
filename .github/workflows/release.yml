@@ -36,7 +36,7 @@ jobs:
       - name: Locate native test runtime
         shell: bash
         run: CODEX_NPM_ROOT="$(npm root -g)" node scripts/ci-setup.cjs
-      - run: node test-all.cjs
+      - run: node scripts/test-all.cjs
       # 同一批浏览器回归同时覆盖 Windows 和两种 Mac 架构。
       - name: Prepare an isolated test browser
         run: |
@@ -89,7 +89,7 @@ jobs:
           # 用户要求替换同一版本时，更新现有下载；只有本次全部检查通过才会执行。
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
-            gh release edit "$GITHUB_REF_NAME" --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file RELEASE.md --latest
+            gh release edit "$GITHUB_REF_NAME" --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file docs/RELEASE.md --latest
           else
-            gh release create "$GITHUB_REF_NAME" artifacts/* --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file RELEASE.md --latest
+            gh release create "$GITHUB_REF_NAME" artifacts/* --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file docs/RELEASE.md --latest
           fi

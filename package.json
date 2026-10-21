@@ -14,7 +14,7 @@
   "main": "main.cjs",
   "scripts": {
     "start": "node main.cjs",
-    "test": "node test-all.cjs"
+    "test": "node scripts/test-all.cjs"
   },
   "dependencies": {
     "smol-toml": "1.9.1",

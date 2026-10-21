@@ -127,10 +127,10 @@ const freePort = () =>
         { env, stdio: 'pipe', windowsHide: true, timeout: 60000 },
       );
       for (const file of [
-        'platform.cjs',
-        'process-context.ps1',
-        'diagnostics.cjs',
-        'editor-integration.cjs',
+        'src/platform/platform.cjs',
+        'platform/windows/process-context.ps1',
+        'src/diagnostics/diagnostics.cjs',
+        'src/clients/editor-integration.cjs',
         'vscode-companion/extension.cjs',
         'node_modules/smol-toml/package.json',
       ])

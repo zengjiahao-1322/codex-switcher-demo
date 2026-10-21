@@ -38,6 +38,19 @@ Mac 包按芯片拆分，只携带一套 Node.js，避免原通用包同时下�
 
 ## 当前架构
 
+```text
+src/                 后端源码，按账号、配置、客户端、诊断、服务和系统适配分层
+web/                 浏览器页面与交互
+tests/               正式回归测试，本地与 CI 使用同一目录
+scripts/             开发、验证、命令行和打包工具
+platform/windows/    Windows 安装、卸载和进程读取脚本
+platform/macos/      Mac 启动器、安装器和原生进程助手源码
+vscode-companion/    可独立安装的编辑器伴随扩展
+docs/                架构说明与发布说明
+main.cjs             稳定启动入口，兼容既有快捷方式
+mcp-server.cjs       既有 MCP 配置的稳定入口；其他命令行与安装入口也只做转发
+```
+
 主分支包含账号登录、额度并发和错误分类的最新源码修复。页面在 API 模式下隐藏“已保留登录”标签，官方模式下标注“正在使用”。这些修改尚未更新到现有 `v0.1.3` 下载包；源码更新与正式 Release 分开发布。
 
 ```mermaid
@@ -61,7 +74,7 @@ flowchart LR
 
 核心关系是：浏览器只调用本机业务服务；业务服务分别管理当前 Codex 配置、官方账号副本和客户端重载。额度查询启动独立的 Codex app-server，但读取的仍是对应账号的同一份官方登录凭证，不会另造一套额度账号凭证。
 
-这次凭证状态修复也位于两处：`diagnostics.cjs` 用官方 `account/read(refreshToken=true)` 验证 access token 到期后 session 是否仍可续期；`app.js` 在额度请求失败时只显示失败原因和上次成功时间，不再把缓存额度数字显示成当前额度。多账号额度刷新限制为两个并发，后端同时保留 `auth_invalid`、`network_error`、`runtime_error` 等结构化状态。官方 app-server 会话和额度读取已分别放在 `official-session.cjs`、`quota-reader.cjs`，账号门面仍由 `accounts.cjs` 提供。完整的分层说明见 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
+这次凭证状态修复也位于两处：`src/diagnostics/diagnostics.cjs` 用官方 `account/read(refreshToken=true)` 验证 access token 到期后 session 是否仍可续期；`web/app.js` 在额度请求失败时只显示失败原因和上次成功时间，不再把缓存额度数字显示成当前额度。多账号额度刷新限制为两个并发，后端同时保留 `auth_invalid`、`network_error`、`runtime_error` 等结构化状态。官方 app-server 会话和额度读取已分别放在 `src/accounts/official-session.cjs`、`src/accounts/quota-reader.cjs`，账号门面仍由 `src/accounts/accounts.cjs` 提供。完整的分层说明见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 来源下方提供“检测 API”，检测不修改配置、不应用来源、不重启。切换器不提供独立加速功能，也不额外生成标准／Fast 模型；已有的 Codex 速度设置保留，Chat Completions 转换继续传递请求中的服务档位参数。
 
@@ -116,7 +129,7 @@ npm test
 
 本次涉及的源码按 `.prettierrc.json` 统一缩进、换行，并在账号并发、程序发现、配置归属等关键流程添加中文注释。后续修改可运行 `npx prettier --write <文件>`；格式化工具不打入运行包。
 
-需要安装官方 Codex CLI、桌面应用或官方编辑器扩展；非标准安装可设置 `CODEX_EXE`。macOS 测试原生进程助手前执行 `clang -O2 -mmacosx-version-min=12.0 mac-process-context.c -o bin/mac-process-context`（先创建 `bin/`）。
+需要安装官方 Codex CLI、桌面应用或官方编辑器扩展；非标准安装可设置 `CODEX_EXE`。macOS 测试原生进程助手前执行 `clang -O2 -mmacosx-version-min=12.0 platform/macos/mac-process-context.c -o bin/mac-process-context`（先创建 `bin/`）。
 
 ```sh
 node scripts/build-release.cjs win32
@@ -131,6 +144,6 @@ node scripts/build-release.cjs darwin --arch=x64
 
 ## 卸载
 
-Windows 安装版运行 `uninstall.ps1`，按提示处理使用中的配置。macOS 先在界面关闭自启动、切回需要保留的来源并关闭服务，然后移除应用；用户数据目录单独保留，避免误删账号和历史。本工具不会卸载 Codex 或官方扩展。
+Windows 安装版运行 `platform/windows/uninstall.ps1`，按提示处理使用中的配置。macOS 先在界面关闭自启动、切回需要保留的来源并关闭服务，然后移除应用；用户数据目录单独保留，避免误删账号和历史。本工具不会卸载 Codex 或官方扩展。
 
 MIT License。独立第三方 Demo，与 OpenAI 无隶属关系。

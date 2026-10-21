@@ -117,24 +117,24 @@ async function initializeHome(executable, home) {
       report.editorExecutableName = name;
       editor = path.join(bundle, 'MacOS', name);
       const shim = path.join(bundle, 'Resources', 'app', 'bin', 'code');
-      editorEntry = require('../editor-integration.cjs').cliFor(shim);
+      editorEntry = require('../src/clients/editor-integration.cjs').cliFor(shim);
       assert.equal(editorEntry.exe, editor);
       report.checks.push('actual-Mac-editor-CLI-from-bundle-metadata');
     } else {
-      editorEntry = require('../editor-integration.cjs').cliFor(
+      editorEntry = require('../src/clients/editor-integration.cjs').cliFor(
         path.join(path.dirname(editor), 'bin', 'code.cmd'),
       );
     }
     assert.ok(fs.existsSync(editor), '编辑器入口必须存在：' + editor);
-    const executable = require('../runtime.cjs').findCodex();
+    const executable = require('../src/platform/runtime.cjs').findCodex();
     const selected = path.join(root, 'shared-home');
     const separate = path.join(root, 'separate-home');
     const bridge = path.join(root, 'bridge');
     process.env.BRIDGE_HOME = bridge;
     const extensions = path.join(root, 'installed-extensions');
-    const vsix = require('../editor-integration.cjs').build(project);
+    const vsix = require('../src/clients/editor-integration.cjs').build(project);
     // 普通安装避免扩展开发宿主只允许一个开发窗口，真实覆盖同一实例的多个窗口。
-    const fixtureVsix = require('../zip.cjs').zip(
+    const fixtureVsix = require('../src/shared/zip.cjs').zip(
       [
         {
           name: 'extension/package.json',
@@ -193,14 +193,14 @@ async function initializeHome(executable, home) {
       );
       await initializeHome(executable, home);
     }
-    const service = require('../service.cjs').createService({
+    const service = require('../src/server/service.cjs').createService({
       codexHome: selected,
       bridgeHome: bridge,
       hermesHome: path.join(root, 'no-hermes'),
       projectDir: project,
     });
     const token = crypto.randomBytes(32).toString('hex');
-    server = require('../server.cjs').createServer({
+    server = require('../src/server/server.cjs').createServer({
       token,
       getState: service.state,
       actions: service.actions,
@@ -307,7 +307,7 @@ async function initializeHome(executable, home) {
       });
     });
     await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
-    const providerId = require('../providers.cjs').add(bridge, {
+    const providerId = require('../src/config/providers.cjs').add(bridge, {
       name: 'Editor switch fixture',
       baseUrl: 'http://127.0.0.1:' + upstream.address().port + '/v1',
       apiMode: 'responses',
@@ -337,7 +337,7 @@ async function initializeHome(executable, home) {
     );
     await waitFor(
       () =>
-        require('../client-status.cjs')
+        require('../src/clients/client-status.cjs')
           .reloadResults(bridge, result.targets)
           .every((r) => r.status === 'reloaded'),
       'companion confirms each completed reload',
@@ -382,7 +382,7 @@ async function initializeHome(executable, home) {
       return clients.filter((c) => c.kind === 'editor' && c.canReload).length === 2;
     }, 'reloaded windows reconnect before failure recovery');
     await assert.rejects(
-      require('../desktop-account.cjs').runSwitch(
+      require('../src/clients/desktop-account.cjs').runSwitch(
         {
           codexHome: selected,
           bridgeHome: bridge,
@@ -415,7 +415,7 @@ async function initializeHome(executable, home) {
     );
     await waitFor(
       () =>
-        require('../client-status.cjs')
+        require('../src/clients/client-status.cjs')
           .reloadResults(bridge, failedJob.editorReload.targets)
           .every((r) => r.status === 'reloaded'),
       'recovery reloads are acknowledged',

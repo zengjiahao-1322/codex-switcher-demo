@@ -6,9 +6,9 @@ const os = require('node:os');
 const cp = require('node:child_process');
 const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
-const { findCodex } = require('../runtime.cjs');
-const { createAccounts } = require('../accounts.cjs');
-const { sameHome, configLayers } = require('../client-status.cjs');
+const { findCodex } = require('../src/platform/runtime.cjs');
+const { createAccounts } = require('../src/accounts/accounts.cjs');
+const { sameHome, configLayers } = require('../src/clients/client-status.cjs');
 
 const project = path.resolve(__dirname, '..');
 const reportFile = path.join(project, 'verification', 'macos-validation.json');
@@ -106,7 +106,7 @@ async function validate() {
       assert.equal(context.ok, true, context.error);
       assert.ok(sameHome(context.home, expected));
       assert.equal(context.overrides.model, 'mac-fixture');
-      const discovered = require('../mac-processes.cjs')
+      const discovered = require('../src/platform/mac-processes.cjs')
         .scan()
         .processes.find((row) => row.pid === child.pid);
       assert.ok(discovered?.context.ok, '真实 Codex 进程必须被 ps 与原生助手共同识别');
@@ -127,7 +127,10 @@ async function validate() {
     'model="first-model"\n[profiles.review]\nmodel="profile-model"\n',
   );
   fs.writeFileSync(path.join(alternateHome, 'config.toml'), 'model="second-model"\n');
-  const service = require('../service.cjs').createService({ codexHome: selectedHome, bridgeHome });
+  const service = require('../src/server/service.cjs').createService({
+    codexHome: selectedHome,
+    bridgeHome,
+  });
   assert.equal((await service.state()).current.model, 'first-model');
   assert.equal(
     configLayers(selectedHome, null, 'review').find((row) => row.source === '启动配置档').values
@@ -192,14 +195,14 @@ async function validate() {
           }) + '\n',
         );
       });
-      require('../client-status.cjs').heartbeat(bridgeHome, {
+      require('../src/clients/client-status.cjs').heartbeat(bridgeHome, {
         id: `mac-editor-${label}`,
         pid: child.pid,
         name: 'VS Code fixture',
         home,
       });
     }
-    const clientStatus = require('../client-status.cjs');
+    const clientStatus = require('../src/clients/client-status.cjs');
     const rows = clientStatus.clientStatus(selectedHome, bridgeHome).clients;
     assert.equal(rows.find((row) => row.id === 'editor-mac-editor-shared')?.canReload, true);
     assert.equal(rows.find((row) => row.id === 'editor-mac-editor-separate')?.canReload, false);
@@ -289,7 +292,7 @@ async function validate() {
       tokens: { ...syntheticAuth.tokens, refresh_token: 'fixture-new' },
       last_refresh: '2026-01-02T00:00:00Z',
     };
-    await require('../desktop-account.cjs').runSwitch(
+    await require('../src/clients/desktop-account.cjs').runSwitch(
       {
         codexHome: keychainHome,
         bridgeHome: keychainBridge,
@@ -337,9 +340,9 @@ async function validate() {
     [
       '--test',
       '--test-timeout=120000',
-      'native-quota.test.cjs',
-      'thread-routing.test.cjs',
-      'speed.test.cjs',
+      'tests/native-quota.test.cjs',
+      'tests/thread-routing.test.cjs',
+      'tests/speed.test.cjs',
     ],
     {
       cwd: project,

@@ -6,7 +6,7 @@ const os = require('node:os');
 const cp = require('node:child_process');
 const net = require('node:net');
 const assert = require('node:assert/strict');
-const { findCodex } = require('../runtime.cjs');
+const { findCodex } = require('../src/platform/runtime.cjs');
 
 // 通过 LaunchServices 打开打包后的 .app，覆盖 Finder 双击所用的系统启动入口。
 // 用 --env 指定独立 HOME，避免测试写入运行机的默认账号和配置。

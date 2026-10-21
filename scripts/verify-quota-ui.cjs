@@ -10,8 +10,8 @@ try {
 } catch {
   ({ chromium } = require('../.build-cache/browser-check/node_modules/playwright'));
 }
-const { createServer } = require('../server.cjs');
-const { createService } = require('../service.cjs');
+const { createServer } = require('../src/server/server.cjs');
+const { createService } = require('../src/server/service.cjs');
 
 // 运行发行包使用的同一份 HTML / app.js，验证刷新时的真实 DOM 状态。
 // 此处仅控制测试浏览器，不接触用户桌面或个人账号。
@@ -36,7 +36,7 @@ let officialMode = false,
       path.join(codexHome, 'config.toml'),
       'model="fixture-api"\nmodel_provider="hermes_bridge"\n',
     );
-    const providerId = require('../providers.cjs').add(bridgeHome, {
+    const providerId = require('../src/config/providers.cjs').add(bridgeHome, {
       name: 'UI fixture API',
       baseUrl: 'http://127.0.0.1:1/v1',
       apiMode: 'responses',

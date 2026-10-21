@@ -1,0 +1,39 @@
+const test = require('node:test'),
+  assert = require('node:assert/strict'),
+  http = require('node:http');
+const { probe } = require('../src/server/probe.cjs');
+test('probe rejects chat-shaped success, redirects and incomplete tool output', async () => {
+  let mode = 'chat';
+  const s = http.createServer((req, res) => {
+    req.resume();
+    res.setHeader('Content-Type', 'application/json');
+    if (mode === 'redirect') {
+      res.writeHead(302, { Location: 'http://127.0.0.1:1/stolen' });
+      res.end();
+      return;
+    }
+    res.end(
+      JSON.stringify(
+        mode === 'chat'
+          ? { choices: [{ message: { content: 'ok' } }] }
+          : {
+              object: 'response',
+              status: 'incomplete',
+              output: [{ type: 'function_call', name: 'bridge_ping' }],
+            },
+      ),
+    );
+  });
+  await new Promise((r) => s.listen(0, '127.0.0.1', r));
+  try {
+    for (mode of ['chat', 'redirect', 'incomplete']) {
+      assert.equal(
+        (await probe({ baseUrl: 'http://127.0.0.1:' + s.address().port, apiKey: 'secret' }, 'm'))
+          .ok,
+        false,
+      );
+    }
+  } finally {
+    s.close();
+  }
+});
