@@ -62,6 +62,16 @@ function createServer({ token, getState, actions = {}, adapterToken, handleRespo
       const cookieOk =
         browserToken.length === expectedToken.length &&
         crypto.timingSafeEqual(browserToken, expectedToken);
+      // 只有启动器提供的 Bearer 能建立会话；读取公开页面本身不授予 API 权限。
+      if (url.pathname === '/api/session') {
+        if (req.method !== 'POST') return send(405, { error: 'POST required' });
+        if (!bearerOk) return send(401, { error: '请从桌面快捷方式重新打开切换器。' });
+        res.writeHead(204, {
+          'Set-Cookie': cookieName + '=' + token + '; HttpOnly; SameSite=Strict; Path=/api/',
+        });
+        res.end();
+        return;
+      }
       if (!bearerOk && !cookieOk) return send(401, { error: '本机会话已过期，请刷新页面后重试。' });
       try {
         if (runtime && req.method === 'GET' && url.pathname === '/api/runtime')
@@ -87,16 +97,14 @@ function createServer({ token, getState, actions = {}, adapterToken, handleRespo
         }
         return send(200, result);
       } catch (e) {
-        return send(400, { error: String(e.message).slice(0, 300) });
+        return send(e.status || 400, {
+          error: String(e.message).slice(0, 300),
+          ...(e.code ? { code: e.code } : {}),
+        });
       }
     }
     if (req.method === 'GET' && ['/', '/app.js'].includes(url.pathname)) {
       const file = url.pathname === '/' ? 'web/index.html' : 'web/app.js';
-      if (url.pathname === '/')
-        res.setHeader(
-          'Set-Cookie',
-          cookieName + '=' + token + '; HttpOnly; SameSite=Strict; Path=/api/',
-        );
       res.setHeader(
         'Content-Security-Policy',
         "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",

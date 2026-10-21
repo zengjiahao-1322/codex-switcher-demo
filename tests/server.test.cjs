@@ -40,7 +40,7 @@ test('server rejects unauthenticated API calls and cross-origin mutations', asyn
   }
 });
 
-test('direct page visit establishes a session; stale shortcut tokens do not block it', async () => {
+test('启动器 Bearer 建立 Cookie 会话，公开主页和过期网址不能取得会话', async () => {
   const { createServer } = require('../src/server/server.cjs');
   const s = createServer({ token: 'current-token', getState: () => ({ providers: [] }) });
   await new Promise((resolve) => s.listen(0, '127.0.0.1', resolve));
@@ -48,7 +48,16 @@ test('direct page visit establishes a session; stale shortcut tokens do not bloc
   try {
     const page = await fetch(base + '/');
     await page.text();
-    const session = page.headers.get('set-cookie');
+    assert.equal(page.headers.get('set-cookie'), null);
+    const denied = await fetch(base + '/api/session', { method: 'POST' });
+    assert.equal(denied.status, 401);
+    assert.equal(denied.headers.get('set-cookie'), null);
+    const login = await fetch(base + '/api/session', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer current-token' },
+    });
+    assert.equal(login.status, 204);
+    const session = login.headers.get('set-cookie');
     assert.match(session, /HttpOnly; SameSite=Strict; Path=\/api\//);
     const headers = { Cookie: session.split(';')[0], Authorization: 'Bearer expired-token' };
     assert.equal((await fetch(base + '/api/state', { headers })).status, 200);
