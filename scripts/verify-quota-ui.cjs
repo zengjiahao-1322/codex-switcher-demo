@@ -19,7 +19,8 @@ const root = fs.mkdtempSync(
   path.join(process.env.SWITCHER_VERIFY_HOME || os.tmpdir(), 'switcher-ui-parity-'),
 );
 const report = { platform: process.platform, arch: process.arch, checks: [] };
-const reportFile = path.resolve('verification', 'quota-ui.json');
+const reports = process.env.SWITCHER_REPORT_DIR || path.resolve('verification');
+const reportFile = path.join(reports, 'quota-ui.json');
 let browser;
 let server;
 let releaseSlow;
@@ -135,7 +136,7 @@ let officialMode = false,
     report.checks.push('single-account-refresh-is-independent');
     fs.mkdirSync(path.dirname(reportFile), { recursive: true });
     await page.screenshot({
-      path: path.resolve('verification', 'quota-ui-waiting.png'),
+      path: path.join(reports, 'quota-ui-waiting.png'),
       fullPage: true,
     });
     releaseSlow();

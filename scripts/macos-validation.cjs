@@ -137,7 +137,11 @@ async function validate() {
       .model,
     'profile-model',
   );
-  await service.actions.setEnvironment({ home: alternateHome, codexExe: executable });
+  await service.actions.setEnvironment({
+    home: alternateHome,
+    codexExe: executable,
+    allowUntrusted: true,
+  });
   assert.equal((await service.state()).current.model, 'second-model');
   assert.equal(
     JSON.parse(fs.readFileSync(path.join(bridgeHome, 'settings.json'))).codexHome,
@@ -299,6 +303,7 @@ async function validate() {
         id: account.id,
         desktopExe: 'fixture-desktop',
         reloadEditors: false,
+        threadFollow: 'off',
       },
       {
         accounts: manager,

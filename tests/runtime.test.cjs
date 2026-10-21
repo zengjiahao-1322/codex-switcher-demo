@@ -75,3 +75,24 @@ test('IDE-only lookup accepts an OpenAI Codex extension whose package id differs
     fs.realpathSync(binary),
   );
 });
+
+test('HTTP 上报的非安装路径不能作为自动运行程序，即使文件名为 codex', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-untrusted-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, process.platform === 'win32' ? 'codex.exe' : 'codex');
+  fs.writeFileSync(file, 'fixture');
+  const { findCodex, isTrustedCodex } = require('../src/platform/runtime.cjs');
+  assert.equal(isTrustedCodex(file, { home: root }), false);
+  assert.throws(
+    () =>
+      findCodex({
+        platform: process.platform,
+        env: {},
+        home: root,
+        windowsRoot: path.join(root, 'not-installed'),
+        appPaths: [],
+        hints: [file],
+      }),
+    { code: 'CODEX_NOT_FOUND' },
+  );
+});

@@ -50,7 +50,7 @@ function createServer({ token, getState, actions = {}, adapterToken, handleRespo
     if (url.pathname.startsWith('/api/')) {
       const supplied = Buffer.from(req.headers.authorization || ''),
         expected = Buffer.from('Bearer ' + token);
-      // 浏览器访问主页即建立本机会话；命令行与伴随扩展继续兼容 Bearer 凭证。
+      // 浏览器使用已建立的 Cookie 会话；命令行与伴随扩展使用 Bearer 凭证。
       const cookie = (req.headers.cookie || '')
         .split(';')
         .map((part) => part.trim())
@@ -72,7 +72,8 @@ function createServer({ token, getState, actions = {}, adapterToken, handleRespo
         res.end();
         return;
       }
-      if (!bearerOk && !cookieOk) return send(401, { error: '本机会话已过期，请刷新页面后重试。' });
+      if (!bearerOk && !cookieOk)
+        return send(401, { error: '本机会话已过期，请从桌面快捷方式重新打开切换器。' });
       try {
         if (runtime && req.method === 'GET' && url.pathname === '/api/runtime')
           return send(200, runtime);

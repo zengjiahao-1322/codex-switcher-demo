@@ -147,6 +147,8 @@ function heartbeat(bridgeHome, input) {
   if (!/^[\w-]{8,80}$/.test(id)) throw Error('客户端编号无效');
   const file = path.join(bridgeHome, 'clients', id + '.json'),
     prior = readJson(file, {});
+  const { isTrustedCodex, extensionBinary } = require('../platform/runtime.cjs');
+  const reported = input.extensionPath && extensionBinary(String(input.extensionPath));
   const row = {
     id,
     pid: Number(input.pid),
@@ -154,11 +156,11 @@ function heartbeat(bridgeHome, input) {
     workspace: String(input.workspace || ''),
     home: input.home ? String(input.home) : null,
     windowKey: input.windowKey ? String(input.windowKey) : null,
-    extensionPath: input.extensionPath ? String(input.extensionPath) : null,
+    extensionPath: isTrustedCodex(reported) ? String(input.extensionPath) : null,
     extensionId: input.extensionId ? String(input.extensionId) : null,
     extensionName: input.extensionName ? String(input.extensionName) : null,
     editorKind: input.editorKind ? String(input.editorKind) : null,
-    codexExe: input.codexExe ? String(input.codexExe) : null,
+    codexExe: isTrustedCodex(input.codexExe) ? String(input.codexExe) : null,
     remote: input.remote ? String(input.remote) : null,
     wsl: !!input.wsl,
     companionVersion: input.companionVersion || null,

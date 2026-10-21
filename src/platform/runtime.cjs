@@ -3,6 +3,55 @@ const fs = require('node:fs'),
   path = require('node:path'),
   os = require('node:os'),
   cp = require('node:child_process');
+const within = (file, root) => {
+  const relative = path.relative(fs.realpathSync(root), fs.realpathSync(file));
+  return (
+    relative &&
+    relative !== '..' &&
+    !relative.startsWith('..' + path.sep) &&
+    !path.isAbsolute(relative)
+  );
+};
+function isTrustedCodex(file, options = {}) {
+  if (!file || !exists(file)) return false;
+  const platform = options.platform || process.platform,
+    home = options.home || os.homedir(),
+    env = options.env || process.env;
+  if (path.basename(file).toLowerCase() !== (platform === 'win32' ? 'codex.exe' : 'codex'))
+    return false;
+  const roots = [
+    ...['.vscode', '.vscode-insiders', '.cursor', '.windsurf'].map((name) =>
+      path.join(home, name, 'extensions'),
+    ),
+    ...(options.extensionRoots || []),
+  ];
+  for (const root of roots) {
+    if (!fs.existsSync(root) || !within(file, root)) continue;
+    const parts = path.relative(fs.realpathSync(root), fs.realpathSync(file)).split(path.sep);
+    if (/^openai\.(?:chatgpt|codex)(?:-|$)/i.test(parts[0]) && parts[1] === 'bin') return true;
+  }
+  const installations =
+    platform === 'win32'
+      ? [
+          options.windowsRoot ||
+            path.join(
+              env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'),
+              'OpenAI',
+              'Codex',
+              'bin',
+            ),
+        ]
+      : [
+          ...(options.appPaths || require('./platform.cjs').macApps()).map((app) =>
+            path.join(app, 'Contents', 'Resources'),
+          ),
+          '/opt/homebrew',
+          '/usr/local',
+          path.join(home, '.local', 'bin'),
+          path.join(home, '.npm-global'),
+        ];
+  return installations.some((root) => fs.existsSync(root) && within(file, root));
+}
 const exists = (file) => {
   try {
     return fs.statSync(file).isFile();
@@ -76,8 +125,23 @@ function findCodex(options = {}) {
     const data = options.dataHome || require('./platform.cjs').dataHome();
     try {
       const settings = JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8'));
-      if (settings.codexExe) candidates.push(settings.codexExe);
-    } catch {}
+      if (settings.codexExe) {
+        if (!exists(settings.codexExe))
+          throw Object.assign(Error('已选择的 Codex 程序不存在，请重新选择。'), {
+            code: 'CODEX_NOT_FOUND',
+          });
+        if (
+          !isTrustedCodex(settings.codexExe, options) &&
+          settings.approvedCodexPath !== fs.realpathSync(settings.codexExe)
+        )
+          throw Object.assign(Error('此 Codex 程序需要重新确认后才能使用。'), {
+            code: 'untrusted_codex',
+          });
+        return fs.realpathSync(settings.codexExe);
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
     const clients = path.join(data, 'clients');
     if (fs.existsSync(clients))
       for (const name of fs.readdirSync(clients).filter((n) => n.endsWith('.json'))) {
@@ -85,8 +149,9 @@ function findCodex(options = {}) {
           const c = JSON.parse(fs.readFileSync(path.join(clients, name), 'utf8'));
           // 编辑器关闭后仍可复用已确认存在的安装路径，方便独立打开切换器登录。
           if (!c.remote && !c.wsl) {
-            if (c.codexExe) candidates.push(c.codexExe);
-            if (c.extensionPath) candidates.push(extensionBinary(c.extensionPath, platform, arch));
+            if (isTrustedCodex(c.codexExe, options)) candidates.push(c.codexExe);
+            const extension = c.extensionPath && extensionBinary(c.extensionPath, platform, arch);
+            if (isTrustedCodex(extension, options)) candidates.push(extension);
           }
         } catch {}
       }
@@ -130,7 +195,7 @@ function findCodex(options = {}) {
       path.join(home, '.local', 'bin', 'codex'),
       path.join(home, '.npm-global', 'bin', 'codex'),
     );
-  const found = candidates.filter(Boolean).find(exists);
+  const found = candidates.filter(Boolean).find((file) => isTrustedCodex(file, options));
   if (found) return fs.realpathSync(found);
   if (options.platform === undefined)
     try {
@@ -142,7 +207,7 @@ function findCodex(options = {}) {
         })
         .trim()
         .split(/\r?\n/)[0];
-      if (exists(file)) return fs.realpathSync(file);
+      if (isTrustedCodex(file, options)) return fs.realpathSync(file);
     } catch {}
   throw Object.assign(
     Error(
@@ -151,4 +216,4 @@ function findCodex(options = {}) {
     { code: 'CODEX_NOT_FOUND' },
   );
 }
-module.exports = { findCodex, extensionBinary };
+module.exports = { findCodex, extensionBinary, isTrustedCodex };

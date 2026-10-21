@@ -10,7 +10,7 @@ const fs = require('node:fs'),
   toml = require('smol-toml');
 const core = require('../config/core.cjs'),
   { probe, probeNative, listModels } = require('./probe.cjs'),
-  { findCodex } = require('../platform/runtime.cjs'),
+  { findCodex, isTrustedCodex } = require('../platform/runtime.cjs'),
   autostart = require('../clients/autostart.cjs'),
   store = require('../config/providers.cjs');
 const { createAccounts } = require('../accounts/accounts.cjs'),
@@ -37,6 +37,7 @@ function createService({
   projectDir = PROJECT_ROOT,
   defaultPort = 47831,
   startService,
+  dataDirProtection = { ok: true, path: bridgeHome },
 } = {}) {
   const build = require('../platform/build-info.cjs').buildInfo();
   fs.mkdirSync(bridgeHome, { recursive: true });
@@ -243,6 +244,16 @@ function createService({
     };
     return {
       build,
+      threadFollow: require('../config/thread-follow.cjs').mode(bridgeHome),
+      dataDirProtection,
+      environment: (() => {
+        try {
+          const exe = findCodex({ dataHome: bridgeHome });
+          return { codexTrusted: isTrustedCodex(exe) };
+        } catch (error) {
+          return { codexTrusted: false, error: error.message };
+        }
+      })(),
       providers: [official(c), ...store.list(bridgeHome).map((p) => publicView(p, c))],
       current: {
         name: currentName,
@@ -471,6 +482,31 @@ function createService({
     };
   }
   const actions = {
+    setThreadFollow: ({ mode }) =>
+      exclusive(async () => {
+        const follow = require('../config/thread-follow.cjs');
+        if (!follow.MODES.includes(mode)) throw Error('旧对话跟随模式无效。');
+        const file = path.join(bridgeHome, 'settings.json');
+        require('../accounts/accounts.cjs').writeJson(file, {
+          ...(readJson(file) || {}),
+          threadFollow: mode,
+        });
+        return { mode, message: '已保存旧对话跟随设置。' };
+      }),
+    resumeThreadSync: () =>
+      exclusive(async () => {
+        const previous = operation.switchJob(bridgeHome);
+        if (!previous?.threads?.failed) throw Error('没有待继续的旧对话同步任务。');
+        return scheduleSwitch({
+          id: 'thread-sync',
+          resumeThreads: true,
+          threadFollow: previous.threadFollow,
+          previousProvider: previous.previousProvider,
+          codexHome,
+          bridgeHome,
+          projectDir,
+        });
+      }),
     clients: async () => {
       const status = require('../clients/client-status.cjs').clientStatus(codexHome, bridgeHome);
       let runtime = null;
@@ -498,12 +534,17 @@ function createService({
           throw Error('配置目录不存在，请选择 Codex 实际使用的目录。');
         if (exe && (!fs.existsSync(exe) || !fs.statSync(exe).isFile()))
           throw Error('Codex 程序路径不存在。');
+        if (exe && !isTrustedCodex(exe) && input.allowUntrusted !== true)
+          throw Object.assign(Error('该程序不在自动识别的安装目录中，请确认后再使用。'), {
+            code: 'untrusted_codex',
+          });
         const file = path.join(bridgeHome, 'settings.json'),
           settings = readJson(file) || {};
         require('../accounts/accounts.cjs').writeJson(file, {
           ...settings,
           codexHome: home,
           codexExe: exe || undefined,
+          approvedCodexPath: exe && !isTrustedCodex(exe) ? fs.realpathSync(exe) : undefined,
         });
         codexHome = home;
         accounts = createAccounts({
@@ -543,7 +584,21 @@ function createService({
         if (['starting', 'waiting'].includes(accounts.status().login?.status))
           throw Error('请先完成或取消当前登录');
         provider(input.id);
-        return scheduleSwitch({ ...input, kind: 'api', codexHome, bridgeHome, projectDir });
+        const threadFollow = require('../config/thread-follow.cjs').selectedMode(
+          bridgeHome,
+          input.threadFollow,
+        );
+        return scheduleSwitch({
+          id: input.id,
+          model: input.model,
+          autostart: input.autostart,
+          reloadEditors: input.reloadEditors,
+          threadFollow,
+          kind: 'api',
+          codexHome,
+          bridgeHome,
+          projectDir,
+        });
       }),
     accounts: async () => {
       await accounts.syncCurrent();
@@ -580,18 +635,23 @@ function createService({
         accounts.remove(id);
         return { message: '已移除保存的账号。' };
       }),
-    accountSwitch: ({ id, reloadEditors = true }) =>
+    accountSwitch: ({ id, reloadEditors = true, threadFollow: requestedFollow }) =>
       exclusive(async () => {
         if (['starting', 'waiting'].includes(accounts.status().login?.status))
           throw Error('请先完成或取消当前登录');
         const saved = accounts.status().items.find((a) => a.id === id);
         if (!saved) throw Error('请选择已添加的官方账号');
+        const threadFollow = require('../config/thread-follow.cjs').selectedMode(
+          bridgeHome,
+          requestedFollow,
+        );
         const c = readConfig();
         return scheduleSwitch({
           id,
           codexHome,
           bridgeHome,
           reloadEditors,
+          threadFollow,
           model: officialModel(c),
           catalog: originalCatalog(c),
         });
@@ -631,54 +691,68 @@ function createService({
         return r;
       }),
     // 10 分钟内没有检测过（或检测结果已过期）时自动先检测一次，未通过则不切换。
-    switch: ({ id, model, autostart: wantAutostart }) =>
+    switch: ({ id, model, autostart: wantAutostart, threadFollow: requestedFollow }) =>
       exclusive(async () => {
+        const follow = require('../config/thread-follow.cjs');
+        // CLI/MCP 原有入口默认只应用配置；旧对话跟随必须显式选择或已有偏好。
+        const mode = follow.selectedMode(
+          bridgeHome,
+          requestedFollow ?? (follow.mode(bridgeHome) === 'ask' ? 'off' : undefined),
+        );
+        const previousProvider = follow.provider(codexHome);
         if (id === OFFICIAL) {
           const c = readConfig();
           const m = String(model || officialModel(c) || '').trim() || undefined;
           core.applyOfficial(codexHome, m, originalCatalog(c));
           fs.rmSync(currentPath, { force: true });
-          const threadRouting =
-            await require('../diagnostics/thread-routing.cjs').synchronizeThreads({
-              codexHome,
-              bridgeHome,
-            });
+          const threads = await require('../diagnostics/thread-routing.cjs').synchronizeThreads({
+            codexHome,
+            bridgeHome,
+            mode,
+            previousProvider,
+          });
           operation.recordEffect(codexHome, bridgeHome, 'restart_required', EFFECT);
           return {
             mode: 'official',
-            threadRouting,
+            threads,
             message: `已切换到 Codex 官方登录（${m ? '模型 ' + m : '由 Codex 选择默认模型'}）。${EFFECT}${officialInUse(c) ? '' : OFFICIAL_RESTART}`,
           };
         }
         const prepared = await prepareApi({ id, model, autostart: wantAutostart });
         try {
           const result = prepared.apply();
-          const threadRouting =
-            await require('../diagnostics/thread-routing.cjs').synchronizeThreads({
-              codexHome,
-              bridgeHome,
-            });
-          return { ...result, threadRouting };
+          const threads = await require('../diagnostics/thread-routing.cjs').synchronizeThreads({
+            codexHome,
+            bridgeHome,
+            mode,
+            previousProvider,
+          });
+          return { ...result, threads };
         } finally {
           prepared.cleanup();
         }
       }),
-    restore: () =>
+    restore: ({ threadFollow: requestedFollow } = {}) =>
       exclusive(async () => {
+        const follow = require('../config/thread-follow.cjs');
+        const mode = follow.selectedMode(
+          bridgeHome,
+          requestedFollow ?? (follow.mode(bridgeHome) === 'ask' ? 'off' : undefined),
+        );
+        const previousProvider = follow.provider(codexHome);
         const r = core.restoreOfficial(codexHome, bridgeHome);
         fs.rmSync(currentPath, { force: true });
-        const threadRouting = await require('../diagnostics/thread-routing.cjs').synchronizeThreads(
-          {
-            codexHome,
-            bridgeHome,
-          },
-        );
+        const threads = await require('../diagnostics/thread-routing.cjs').synchronizeThreads({
+          codexHome,
+          bridgeHome,
+          mode,
+          previousProvider,
+        });
         if (!r.alreadyOfficial)
           operation.recordEffect(codexHome, bridgeHome, 'restart_required', EFFECT);
-        if (r.alreadyOfficial)
-          return { threadRouting, message: 'Codex 当前已是官方登录，已同步旧对话来源。' };
+        if (r.alreadyOfficial) return { threads, message: 'Codex 当前已是官方登录。' };
         return {
-          threadRouting,
+          threads,
           message: `已切回 Codex 官方登录（模型 ${r.model}）。${EFFECT}${OFFICIAL_RESTART}`,
         };
       }),

@@ -157,92 +157,129 @@ function openSession(home, bridgeHome, config, onNotification = () => {}) {
   };
 }
 
-async function synchronizeThreads({ codexHome, bridgeHome, onProgress = () => {} }) {
+async function synchronizeThreads({
+  codexHome,
+  bridgeHome,
+  mode = 'all',
+  previousProvider,
+  targetModels,
+  onProgress = () => {},
+}) {
+  const counts = { updated: 0, skipped: 0, failed: 0 };
+  if (mode === 'off') return counts;
   const config = toml.parse(fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8'));
   const provider = config.model_provider || 'openai';
-  let model = config.model;
-  if (!fs.readdirSync(codexHome).some((name) => /^state_\d+\.sqlite$/.test(name)))
-    return { count: 0, provider, model };
+  if (!fs.readdirSync(codexHome).some((name) => /^state_\d+\.sqlite$/.test(name))) return counts;
   let client = openSession(codexHome, bridgeHome, config);
   const initialize = () =>
     client.call('initialize', {
       clientInfo: { name: 'codex-switcher-routing', version: '1' },
       capabilities: { experimentalApi: true },
     });
+  let rows = [];
   try {
     await initialize();
-    // 多窗口的最后一个后端退出后，先由官方运行时正常打开索引和恢复 WAL，
-    // 再做只读查询；直接读取退出中的共享索引可能得到 disk I/O error。
-    let rows = pendingThreads(codexHome, provider, model);
-    if (!rows.length) return { count: 0, provider, model };
-    if (!model) {
-      const { data } = await client.call('model/list', {});
-      model = data.find((item) => item.isDefault)?.model || data[0]?.model;
-      if (!model) throw Error('未找到目标来源的默认模型，旧对话未更新。');
-      // 得到默认模型后重新筛选；官方账号换号无需重复改写已经匹配的会话。
-      rows = pendingThreads(codexHome, provider, model);
-      if (!rows.length) return { count: 0, provider, model };
+    // 先由官方后端恢复 WAL，再读索引；只筛选未归档的用户对话。
+    rows = pendingThreads(codexHome, provider).filter((row) => {
+      if (mode === 'matching' && row.model_provider !== previousProvider) {
+        counts.skipped++;
+        return false;
+      }
+      return true;
+    });
+    if (!rows.length) return counts;
+    let models = targetModels,
+      model = config.model;
+    if (!models?.length && config.model_catalog_json) {
+      const catalog = JSON.parse(
+        fs.readFileSync(path.resolve(codexHome, config.model_catalog_json), 'utf8'),
+      );
+      models = catalog.models.map((item) => item.slug);
     }
-    const processRows = async (phase, action) => {
+    if (!models?.length || !model) {
+      const { data } = await client.call('model/list', {});
+      if (!models?.length) models = data.map((item) => item.model);
+      model ||= data.find((item) => item.isDefault)?.model || data[0]?.model;
+    }
+    if (!model) throw Error('未找到目标来源的默认模型，旧对话未更新。');
+    rows = rows.filter((row) => {
+      row.nextModel = row.model && models.includes(row.model) ? row.model : model;
+      if (row.model_provider === provider && row.model === row.nextModel) {
+        counts.skipped++;
+        return false;
+      }
+      return true;
+    });
+    if (!rows.length) return counts;
+    const processRows = async (batch, phase, action) => {
       let next = 0,
         completed = 0,
         failure;
-      onProgress({ completed, total: rows.length, phase });
-      // 共用一个官方后端、最多四条在途；失败后不派新任务，等在途任务结束再关闭后端。
+      onProgress({ completed, total: batch.length, phase });
+      // 共用一个官方后端、最多四条在途；失败后停止派发，等待在途任务收尾。
       await Promise.all(
-        Array.from({ length: Math.min(4, rows.length) }, async () => {
-          while (!failure && next < rows.length) {
-            const row = rows[next++];
+        Array.from({ length: Math.min(4, batch.length) }, async () => {
+          while (!failure && next < batch.length) {
+            const row = batch[next++];
             try {
               await action(row);
-              onProgress({ completed: ++completed, total: rows.length, phase });
+              onProgress({ completed: ++completed, total: batch.length, phase });
             } catch (error) {
               failure ??= error;
             }
           }
         }),
       );
-      if (failure) throw failure;
+      return failure;
     };
-    await processRows('sync', async (row) => {
+    const failure = await processRows(rows, 'sync', async (row) => {
       row.speed = await savedServiceTier(row.rollout_path);
       let result;
       try {
         result = await client.call('thread/resume', {
           threadId: row.id,
           modelProvider: provider,
-          model,
+          model: row.nextModel,
           ...(row.speed ? { serviceTier: row.speed.tier ?? '' } : {}),
           excludeTurns: true,
         });
       } catch (error) {
         if (/active writer/.test(error.message))
-          throw Error(
-            '旧对话 ' + row.id + ' 仍被客户端占用，请完整退出该配置的 Codex 客户端后重新应用。',
-          );
+          throw Error('旧对话 ' + row.id + ' 仍被客户端占用，请关闭该客户端后继续同步。');
         throw error;
       }
-      if (result.modelProvider !== provider || result.model !== model)
+      if (result.modelProvider !== provider || result.model !== row.nextModel)
         throw Error('旧对话 ' + row.id + ' 未采用目标来源或模型。');
       if (row.speed && result.serviceTier !== row.speed.tier)
         throw Error('旧对话 ' + row.id + ' 的原有速度设置未保留。');
+      row.applied = true;
       await client.call('thread/unsubscribe', { threadId: row.id });
     });
     await client.close();
-    // 重新启动官方后端检查持久结果，不能把 resume 的临时返回当成切换成功。
+    // 部分失败时也冷启动核对已更新的对话，准确报告实际完成条数。
     client = openSession(codexHome, bridgeHome, config);
     await initialize();
-    await processRows('verify', async (row) => {
-      const { thread } = await client.call('thread/read', {
-        threadId: row.id,
-        includeTurns: false,
-      });
-      if (thread.modelProvider !== provider || thread.model !== model)
-        throw Error('旧对话 ' + row.id + ' 的来源或模型未能持久保存。');
-      if (row.speed && (await savedServiceTier(row.rollout_path))?.tier !== row.speed.tier)
-        throw Error('旧对话 ' + row.id + ' 的原有速度设置未能持久保留。');
-    });
-    return { count: rows.length, provider, model };
+    const verifyFailure = await processRows(
+      rows.filter((row) => row.applied),
+      'verify',
+      async (row) => {
+        const { thread } = await client.call('thread/read', {
+          threadId: row.id,
+          includeTurns: false,
+        });
+        if (thread.modelProvider !== provider || thread.model !== row.nextModel)
+          throw Error('旧对话 ' + row.id + ' 的来源或模型未能持久保存。');
+        if (row.speed && (await savedServiceTier(row.rollout_path))?.tier !== row.speed.tier)
+          throw Error('旧对话 ' + row.id + ' 的速度设置未能持久保留。');
+        counts.updated++;
+      },
+    );
+    if (failure || verifyFailure) throw failure || verifyFailure;
+    return counts;
+  } catch (error) {
+    counts.failed = rows.length - counts.updated;
+    error.threads = counts;
+    throw error;
   } finally {
     await client.close();
   }

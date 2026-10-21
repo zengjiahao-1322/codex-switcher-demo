@@ -10,10 +10,13 @@ const { createAccounts, identity, writeJson } = require('../src/accounts/account
   { runSwitch: performSwitch } = require('../src/clients/desktop-account.cjs');
 // 业务单元检查不读取开发机上的其他编辑器；实际发现与重载由三窗口检查覆盖。
 const runSwitch = (job, dependencies = {}) =>
-  performSwitch(job, {
-    clients: () => ({ clients: [] }),
-    ...dependencies,
-  });
+  performSwitch(
+    { threadFollow: 'all', ...job },
+    {
+      clients: () => ({ clients: [] }),
+      ...dependencies,
+    },
+  );
 const jwt = (payload) =>
   'fixture.' + Buffer.from(JSON.stringify(payload)).toString('base64url') + '.signature';
 function auth(user, refresh = 'refresh-' + user, account = 'workspace-' + user) {
@@ -100,7 +103,7 @@ test('switch waits for desktop exit, preserves refreshed outgoing credentials, a
       accounts: a,
       syncThreads: async () => {
         events.push('sync');
-        return { count: 2, provider: 'openai', model: 'official' };
+        return { updated: 2, skipped: 0, failed: 0 };
       },
       stop: async () => {
         events.push('stop');
@@ -117,7 +120,7 @@ test('switch waits for desktop exit, preserves refreshed outgoing credentials, a
     },
   );
   assert.deepEqual(events, ['stop', 'sync', 'open']);
-  assert.equal(a.status().switchJob.threadRouting.count, 2);
+  assert.equal(a.status().switchJob.threads.updated, 2);
   const progress = a.status().switchJob;
   assert.equal(progress.configurationApplied, true);
   assert.equal(progress.desktopRequested, true);
@@ -279,7 +282,7 @@ test('相同模型切换官方账号仍会停止旧插件后端', async (t) => {
       clients: () => ({ clients: [] }),
       syncThreads: async () => {
         assert.equal(stops, 1);
-        return { count: 0 };
+        return { updated: 0, skipped: 0, failed: 0 };
       },
     },
   );
@@ -451,6 +454,47 @@ test('IDE-only official switch works with no desktop, model or model cache', asy
   assert.equal(c.model_provider, undefined);
   assert.equal(c.mcp_servers.keep.command, 'keep');
   assert.equal(a.status().switchJob.status, 'done');
+});
+
+test('关闭旧对话跟随时不调用同步，继续同步只重跑设置而不再次应用账号', async (t) => {
+  const f = configured(t),
+    a = loginFixture(f),
+    id = a.status().items[0].id;
+  await runSwitch(
+    { ...f, id, threadFollow: 'off', desktopExe: null, reloadEditors: false },
+    {
+      accounts: a,
+      syncThreads: async () => assert.fail('关闭时不能启动会话同步后端'),
+    },
+  );
+  assert.deepEqual(a.status().switchJob.threads, { updated: 0, skipped: 0, failed: 0 });
+  await runSwitch(
+    {
+      ...f,
+      id: 'thread-sync',
+      resumeThreads: true,
+      threadFollow: 'matching',
+      previousProvider: 'openai',
+      desktopExe: null,
+      reloadEditors: false,
+    },
+    {
+      accounts: {
+        syncCurrent: async () => {},
+        prepare: () => assert.fail('不能再次登录'),
+        apply: () => assert.fail('不能再次应用账号'),
+      },
+      syncThreads: async (input) => {
+        assert.equal(input.previousProvider, 'openai');
+        assert.equal(input.mode, 'matching');
+        return { updated: 1, skipped: 2, failed: 0 };
+      },
+    },
+  );
+  const job = a.status().switchJob;
+  assert.deepEqual(job.threads, { updated: 1, skipped: 2, failed: 0 });
+  assert.equal(job.previousProvider, 'openai');
+  assert.equal(Object.hasOwn(job, 'threadRouting'), false);
 });
 
 test('old-thread synchronization failure is not reported as a completed switch', async (t) => {
@@ -800,7 +844,7 @@ test('准备阶段并行检查登录和编辑器，两项都通过后才关闭�
         stopped = true;
       },
       open: async () => ({ pid: 1 }),
-      syncThreads: async () => ({ count: 0 }),
+      syncThreads: async () => ({ updated: 0, skipped: 0, failed: 0 }),
     },
   );
   await new Promise(setImmediate);
@@ -883,6 +927,7 @@ test('后台进程在锁交接和排队状态写入后才收到开始消息，�
   require('../src/clients/desktop-account.cjs').scheduleSwitch({
     ...f,
     id: 'missing-fixture',
+    threadFollow: 'all',
     reloadEditors: false,
   });
   // 正式后台有意 unref；测试宿主需要持有引用，等子进程终态后再结束事件循环。

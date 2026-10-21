@@ -5,7 +5,7 @@
  "src/platform/compatibility.cjs", "src/config/core.cjs", "src/clients/desktop-account.cjs", "src/diagnostics/diagnostics.cjs", "src/clients/editor-integration.cjs",
  "web/index.html", "scripts/install-deps.cjs", "main.cjs", "src/server/mcp-server.cjs", "src/platform/platform.cjs", "src/server/probe.cjs",
  "src/config/providers.cjs", "src/platform/runtime.cjs", "src/server/server.cjs", "src/server/service.cjs", "src/config/switch-state.cjs", "src/diagnostics/thread-routing.cjs", "src/shared/zip.cjs",
- "src/accounts/official-session.cjs", "src/accounts/quota-reader.cjs",
+ "src/accounts/official-session.cjs", "src/accounts/quota-reader.cjs", "src/config/thread-follow.cjs", "src/platform/data-protection.cjs",
  "src/platform/mac-processes.cjs", "src/platform/process-stop.cjs", "platform/windows/process-context.ps1", "Start.cmd", "launch-hidden.vbs", "install.cmd",
  "platform/windows/install.ps1", "platform/windows/uninstall.ps1", "package.json", "LICENSE", "README.md", "CHANGELOG.md",
  "vscode-companion/package.json", "vscode-companion/extension.cjs", "vscode-companion/extension.vsixmanifest",

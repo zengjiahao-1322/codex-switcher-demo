@@ -158,13 +158,18 @@ async function runSwitch(
   // 不调用桌面端关闭与启动流程。两种模式共用账号准备和配置应用逻辑。
   const file = path.join(job.bridgeHome, 'account-switch.json');
   const api = job.kind === 'api',
-    desktop = job.desktopExe !== null;
+    desktop = job.desktopExe !== null,
+    resume = job.resumeThreads === true,
+    follow = require('../config/thread-follow.cjs');
   let prepared,
     stoppedEditors = [],
     desktopStarted = null,
     editorReload = null,
     reloadAttempted = false,
-    applied = false;
+    applied = resume,
+    threads = null,
+    previousProvider,
+    mode;
   const startedAt = new Date().toISOString(),
     started = performance.now(),
     steps = [];
@@ -180,6 +185,9 @@ async function runSwitch(
       elapsedMs: Math.round(performance.now() - started),
       steps,
       configurationApplied: applied,
+      threadFollow: mode,
+      previousProvider,
+      ...(threads ? { threads } : {}),
       ...details,
       ...(['done', 'error'].includes(status) ? { finishedAt: new Date().toISOString() } : {}),
     });
@@ -203,13 +211,17 @@ async function runSwitch(
   };
   report('preparing', api ? '正在检查 API 和模型列表…' : '正在准备目标账号登录…');
   try {
+    mode = follow.selectedMode(job.bridgeHome, job.threadFollow);
+    previousProvider = resume ? job.previousProvider : follow.provider(job.codexHome);
     // 后台切换进程是新实例，先读取实际凭据存储，避免漏存 Mac 钥匙串账号。
     await step('prepare', api ? '检查 API 和准备模型' : '准备账号登录', async () => {
       await accounts.syncCurrent({ force: true });
       const checks = await Promise.allSettled([
-        api
-          ? require('../server/service.cjs').createService(job).prepareApi(job)
-          : accounts.prepare(job.id),
+        resume
+          ? Promise.resolve()
+          : api
+            ? require('../server/service.cjs').createService(job).prepareApi(job)
+            : accounts.prepare(job.id),
         (async () => {
           // 进程归属检查与登录校验互不依赖；全部通过后才允许关闭和写入。
           if (job.reloadEditors === false) return;
@@ -229,7 +241,7 @@ async function runSwitch(
             );
         })(),
       ]);
-      if (api && checks[0].status === 'fulfilled') prepared = checks[0].value;
+      if (api && !resume && checks[0].status === 'fulfilled') prepared = checks[0].value;
       // 失败时也等另一项收尾，避免释放切换锁后仍有旧校验在更新凭证。
       for (const check of checks) if (check.status === 'rejected') throw check.reason;
     });
@@ -242,6 +254,7 @@ async function runSwitch(
       );
     // 退出前官方客户端可能刚刷新令牌；应用目标配置前再保存一次最新登录。
     const result = await step('apply', '保存并应用目标配置', async () => {
+      if (resume) return { label: '当前来源' };
       await accounts.syncCurrent({ force: true });
       const value = api
         ? (accounts.captureCurrent(), prepared.apply())
@@ -256,21 +269,26 @@ async function runSwitch(
       '配置已写入，正在同步旧对话，尚未完成切换。',
     );
     // 新旧对话共用一次切换：先持久保存旧会话来源，再让客户端重新加载。
-    const threadRouting = await step('threads', '同步并核对旧对话', () =>
-      syncThreads({
-        codexHome: job.codexHome,
-        bridgeHome: job.bridgeHome,
-        onProgress: ({ completed, total, phase }) =>
-          report(
-            'switching',
-            (phase === 'verify' ? '正在核对旧对话持久结果' : '正在同步旧对话来源') +
-              '（' +
-              completed +
-              '/' +
-              total +
-              '）…',
-          ),
-      }),
+    threads = await step('threads', mode === 'off' ? '保留旧对话设置' : '同步并核对旧对话', () =>
+      mode === 'off'
+        ? Promise.resolve({ updated: 0, skipped: 0, failed: 0 })
+        : syncThreads({
+            codexHome: job.codexHome,
+            bridgeHome: job.bridgeHome,
+            mode,
+            previousProvider,
+            targetModels: job.targetModels,
+            onProgress: ({ completed, total, phase }) =>
+              report(
+                'switching',
+                (phase === 'verify' ? '正在核对旧对话持久结果' : '正在同步旧对话来源') +
+                  '（' +
+                  completed +
+                  '/' +
+                  total +
+                  '）…',
+              ),
+          }),
     );
     recordEffect(
       job.codexHome,
@@ -307,7 +325,7 @@ async function runSwitch(
       ? desktopStarted
         ? '已确认桌面主进程重新启动。'
         : '已请求重新打开桌面端。'
-      : '已同步新旧对话；未接入伴随扩展的编辑器窗口请执行“重载窗口”。';
+      : '未接入伴随扩展的编辑器窗口请执行“重载窗口”。';
     recordEffect(
       job.codexHome,
       job.bridgeHome,
@@ -317,20 +335,25 @@ async function runSwitch(
     report(
       'done',
       '已应用 ' +
-        (api ? prepared.label + ' · ' + job.model : result.label + ' 的官方配置') +
+        (resume
+          ? '当前来源（继续同步）'
+          : api
+            ? prepared.label + ' · ' + job.model
+            : result.label + ' 的官方配置') +
         '。' +
         effect +
         editorNote +
-        ' 已同步 ' +
-        threadRouting.count +
-        ' 条旧对话的设置。' +
-        (api && !result.catalogCount
+        (mode === 'off'
+          ? ' 本次保留旧对话原有设置。'
+          : ' 已核对 ' + threads.updated + ' 条旧对话，跳过 ' + threads.skipped + ' 条。') +
+        (api && !resume && !result.catalogCount
           ? ' 未生成模型目录，下拉可能仍显示官方列表；实际使用所选模型。'
           : ''),
-      { editorReload, threadRouting, desktopRequested: desktop, desktopStarted },
+      { editorReload, threads, desktopRequested: desktop, desktopStarted },
     );
-    return { ...result, threadRouting };
+    return { ...result, threads };
   } catch (e) {
+    threads = e.threads || threads;
     let recoveryNote = '';
     // 同步失败也要恢复已主动停止的插件，不能留下失去后端的面板；切换仍按失败回报。
     if (stoppedEditors.length && !reloadAttempted) {

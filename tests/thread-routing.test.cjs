@@ -147,13 +147,29 @@ test(
     db.prepare('UPDATE threads SET source=? WHERE id=?').run(original, threads[0].id);
     db.close();
     fs.writeFileSync(path.join(home, 'config.toml'), 'model_provider="hermes_bridge"\n' + text);
+    assert.deepEqual(
+      await synchronizeThreads({ codexHome: home, bridgeHome: bridge, mode: 'off' }),
+      { updated: 0, skipped: 0, failed: 0 },
+    );
+    assert.equal(pendingThreads(home, 'hermes_bridge', 'gpt-6.1-sol').length, threads.length);
+    assert.deepEqual(
+      await synchronizeThreads({
+        codexHome: home,
+        bridgeHome: bridge,
+        mode: 'matching',
+        previousProvider: 'other',
+      }),
+      { updated: 0, skipped: threads.length, failed: 0 },
+    );
     const progress = [];
     const r = await synchronizeThreads({
       codexHome: home,
       bridgeHome: bridge,
+      mode: 'matching',
+      previousProvider: 'openai',
       onProgress: (item) => progress.push(item),
     });
-    assert.equal(r.count, threads.length);
+    assert.equal(r.updated, threads.length);
     for (const phase of ['sync', 'verify'])
       assert.deepEqual(
         progress.filter((item) => item.phase === phase).map((item) => item.completed),
@@ -163,10 +179,10 @@ test(
     for (const [index, thread] of threads.entries())
       assert.deepEqual(stored(thread), before[index]);
     // 再次切换为空操作；反向切回也走同一逻辑，不另建对话。
-    assert.equal((await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).count, 0);
+    assert.equal((await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).updated, 0);
     fs.writeFileSync(path.join(home, 'config.toml'), text);
     assert.equal(
-      (await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).count,
+      (await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).updated,
       threads.length,
     );
     // 两个对话在 Codex 内选择不同速度。切来源时保留各自选择，不统一覆盖。
@@ -188,7 +204,7 @@ test(
       'model_provider="hermes_bridge"\nservice_tier="fast"\n' + text,
     );
     assert.equal(
-      (await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).count,
+      (await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).updated,
       threads.length,
     );
     for (const [index, thread] of threads.entries()) {
@@ -201,7 +217,7 @@ test(
         .at(-1).payload.thread_settings;
       assert.equal(settings.service_tier, index ? 'default' : 'priority');
     }
-    assert.equal((await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).count, 0);
+    assert.equal((await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).updated, 0);
     c = await connect();
     try {
       for (const [index, thread] of threads.entries()) {
@@ -219,7 +235,7 @@ test(
     // 官方配置未指定模型时，解析默认模型后仍应跳过已经匹配的历史。
     fs.writeFileSync(path.join(home, 'config.toml'), text.replace('model="gpt-6.1-sol"\n', ''));
     await synchronizeThreads({ codexHome: home, bridgeHome: bridge });
-    assert.equal((await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).count, 0);
+    assert.equal((await synchronizeThreads({ codexHome: home, bridgeHome: bridge })).updated, 0);
     // 并发批次遇到被占用的会话必须报错并回收在途请求，释放后仍可重新同步。
     fs.writeFileSync(path.join(home, 'config.toml'), 'model_provider="hermes_bridge"\n' + text);
     const locked = pendingThreads(home, 'hermes_bridge', 'gpt-6.1-sol')[0];
@@ -228,7 +244,7 @@ test(
       await c.call('thread/resume', { threadId: locked.id, excludeTurns: true });
       await assert.rejects(
         synchronizeThreads({ codexHome: home, bridgeHome: bridge }),
-        /仍被客户端占用/,
+        (error) => /仍被客户端占用/.test(error.message) && error.threads.failed > 0,
       );
     } finally {
       await c.close();
@@ -238,5 +254,34 @@ test(
     for (const [index, thread] of threads.entries())
       assert.deepEqual(stored(thread), before[index]);
     assert.equal(fs.existsSync(marker), false, '会话更新不应启动用户的 MCP');
+    // 目标仍支持单独选择的模型时保留它，不强行覆盖成全局默认模型。
+    c = await connect();
+    try {
+      await c.call('thread/resume', {
+        threadId: threads[1].id,
+        modelProvider: 'openai',
+        model: 'kept-model',
+        excludeTurns: true,
+      });
+      await c.call('thread/unsubscribe', { threadId: threads[1].id });
+    } finally {
+      await c.close();
+    }
+    const preserved = await synchronizeThreads({
+      codexHome: home,
+      bridgeHome: bridge,
+      targetModels: ['gpt-6.1-sol', 'kept-model'],
+    });
+    assert.equal(preserved.updated, 1);
+    c = await connect();
+    try {
+      assert.equal(
+        (await c.call('thread/read', { threadId: threads[1].id, includeTurns: false })).thread
+          .model,
+        'kept-model',
+      );
+    } finally {
+      await c.close();
+    }
   },
 );

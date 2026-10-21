@@ -319,7 +319,12 @@ async function initializeHome(executable, home) {
       path.join(selected, 'config.toml'),
       'service_tier="fast"\n[features]\nfast_mode=true\n',
     );
-    await api('desktopSwitch', { id: providerId, model: 'after-reload', reloadEditors: true });
+    await api('desktopSwitch', {
+      id: providerId,
+      model: 'after-reload',
+      reloadEditors: true,
+      threadFollow: 'all',
+    });
     const job = await waitFor(async () => {
       const state = await api('accounts');
       if (state.switchJob?.status === 'error') throw Error(state.switchJob.message);
@@ -388,6 +393,7 @@ async function initializeHome(executable, home) {
           bridgeHome: bridge,
           id: 'recovery-fixture',
           desktopExe: null,
+          threadFollow: 'all',
         },
         {
           accounts: {

@@ -127,12 +127,20 @@ async function existing() {
     openUrl(prior.url);
     return;
   }
+  const discoveryDir =
+    !process.env.BRIDGE_HOME || process.env.BRIDGE_DISCOVERY_DIR
+      ? process.env.BRIDGE_DISCOVERY_DIR || path.join(os.homedir(), '.codex-api-switcher')
+      : null;
+  const dataDirProtection = require('../platform/data-protection.cjs').protectDataDirs(
+    [bridgeHome, discoveryDir].filter(Boolean),
+  );
   const svc = createService({
     codexHome,
     bridgeHome,
     hermesHome,
     projectDir: PROJECT_ROOT,
     defaultPort: Number(process.env.BRIDGE_PORT) || 47831,
+    dataDirProtection,
   });
   const token = crypto.randomBytes(32).toString('hex'),
     a = svc.adapterSettings();

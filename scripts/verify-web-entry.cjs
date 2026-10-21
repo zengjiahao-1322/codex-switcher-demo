@@ -16,6 +16,8 @@ const { createService } = require('../src/server/service.cjs');
 const root = fs.mkdtempSync(
   path.join(process.env.SWITCHER_VERIFY_HOME || os.tmpdir(), 'switcher-web-entry-'),
 );
+const reports = process.env.SWITCHER_REPORT_DIR || path.resolve('verification');
+fs.mkdirSync(reports, { recursive: true });
 const home = path.join(root, 'home'),
   bridge = path.join(root, 'bridge');
 fs.mkdirSync(home);
@@ -57,7 +59,7 @@ async function start(token) {
           startedAt: new Date().toISOString(),
           elapsedMs: 1250,
           configurationApplied: true,
-          threadRouting: { count: 3 },
+          threads: { updated: 3, skipped: 0, failed: 0 },
           steps: [{ id: 'apply', label: '保存并应用目标配置', status: 'done', durationMs: 250 }],
           editorReload: {
             results: [
@@ -91,6 +93,7 @@ async function loaded(page, url) {
 }
 (async () => {
   try {
+    await service.actions.setThreadFollow({ mode: 'off' });
     await start('fixture-session-one');
     browser = await chromium.launch({
       headless: true,
@@ -103,19 +106,27 @@ async function loaded(page, url) {
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     const base = 'http://127.0.0.1:' + port;
-    await loaded(page, base + '/');
-    checked('fresh-browser-direct-url');
-    await page.goto('about:blank');
-    await loaded(page, base + '/#expired-shortcut-token');
+    await page.goto(base + '/');
+    await page.locator('#session-notice').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('.workspace').isHidden(), true);
+    checked('fresh-browser-direct-url-requires-launcher');
+    await loaded(page, base + '/#fixture-session-one');
     assert.equal(new URL(page.url()).hash, '');
-    checked('old-shortcut-link');
+    checked('current-launch-token-establishes-session');
+    const expiredContext = await browser.newContext();
+    const expired = await expiredContext.newPage();
+    await expired.goto(base + '/#expired-shortcut-token');
+    await expired.locator('#session-notice').waitFor({ state: 'visible' });
+    assert.equal(await expired.locator('.workspace').isHidden(), true);
+    await expiredContext.close();
+    checked('expired-shortcut-token-rejected');
     const second = await context.newPage();
     await loaded(second, base + '/');
     await second.reload();
     await second.waitForFunction(() => document.getElementById('provider').options.length > 0);
     checked('new-tab-and-refresh');
     const local = await context.newPage();
-    await loaded(local, 'http://localhost:' + port + '/');
+    await loaded(local, 'http://localhost:' + port + '/#fixture-session-one');
     checked('localhost-address');
     console.log('Restarting fixture server');
     await new Promise((resolve) => {
@@ -124,14 +135,13 @@ async function loaded(page, url) {
       server.closeAllConnections();
     });
     await start('fixture-session-after-restart');
-    // 不刷新页面，直接使用旧标签页里的按钮，确认请求自行恢复访问。
-    const recovered = page.waitForResponse(
-      (response) => response.url().endsWith('/api/threads') && response.status() === 200,
-    );
+    // 后台重启使旧 Cookie 失效；页面必须提示从启动器重新打开，不能读取主页重取权限。
     await page.locator('#threads-refresh').evaluate((button) => button.click());
-    await recovered;
-    assert.equal(await page.evaluate(async () => (await fetch('/api/state')).status), 200);
-    checked('old-tab-recovers-after-service-restart');
+    await page.locator('#session-notice').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('.workspace').isHidden(), true);
+    assert.equal(await page.evaluate(async () => (await fetch('/api/state')).status), 401);
+    checked('old-tab-requires-launcher-after-service-restart');
+    await loaded(page, base + '/#fixture-session-after-restart');
     // 页面只保留普通 API 检测，不再展示或提交独立加速选项。
     assert.equal(await page.locator('#fast').count(), 0);
     assert.equal(await page.locator('#probe-fast, #fast-hint').count(), 0);
@@ -165,7 +175,7 @@ async function loaded(page, url) {
     fixtureJob = {
       ...fixtureJob,
       status: 'error',
-      threadRouting: undefined,
+      threads: undefined,
       editorReload: undefined,
       steps: [{ id: 'threads', label: '同步并核对旧对话', status: 'error', durationMs: 500 }],
     };
@@ -176,7 +186,7 @@ async function loaded(page, url) {
     checked('source-switch-does-not-set-speed');
     console.log('Capturing verified page');
     await page.screenshot({
-      path: path.resolve('verification/web-entry.png'),
+      path: path.join(reports, 'web-entry.png'),
       fullPage: true,
       timeout: 15000,
     });
@@ -206,7 +216,7 @@ async function loaded(page, url) {
     if (server?.listening) await new Promise((resolve) => server.close(resolve));
     report.checkedAt = new Date().toISOString();
     report.fixtureDirectory = root;
-    fs.writeFileSync(path.resolve('verification/web-entry.json'), JSON.stringify(report, null, 2));
+    fs.writeFileSync(path.join(reports, 'web-entry.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report));
   }
 })();

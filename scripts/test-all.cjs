@@ -24,7 +24,9 @@ child.on('error', (error) => {
   process.exitCode = 1;
 });
 child.on('close', (code) => {
-  fs.mkdirSync(path.join(PROJECT_ROOT, 'verification'), { recursive: true });
-  fs.writeFileSync(path.join(PROJECT_ROOT, 'verification', 'test-results.tap'), output);
+  if (!process.argv.includes('--no-report')) {
+    fs.mkdirSync(path.join(PROJECT_ROOT, 'verification'), { recursive: true });
+    fs.writeFileSync(path.join(PROJECT_ROOT, 'verification', 'test-results.tap'), output);
+  }
   process.exitCode = code === null ? 1 : code;
 });
