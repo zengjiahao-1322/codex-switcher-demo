@@ -158,7 +158,12 @@ test(
         child.once('error', reject);
         child.once('close', () => {
           clearTimeout(timer);
-          reject(Error('升级入口提前退出：' + errors));
+          let detail = errors;
+          try {
+            detail += '\nstdout: ' + out;
+            detail += '\nmain-error: ' + fs.readFileSync(path.join(data, 'main-error.log'), 'utf8');
+          } catch {}
+          reject(Error('升级入口提前退出：' + detail));
         });
       });
       return { child, closed, kind };
