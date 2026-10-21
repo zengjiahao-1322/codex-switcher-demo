@@ -7,6 +7,7 @@ const fs = require('fs'),
   crypto = require('crypto');
 const { createServer } = require('./server.cjs'),
   { createService } = require('./service.cjs');
+const { writeJson } = require('../accounts/accounts.cjs');
 const platform = require('../platform/platform.cjs'),
   codexHome = platform.codexHome(),
   bridgeHome = platform.dataHome();
@@ -22,6 +23,11 @@ const hermesHome =
 fs.mkdirSync(bridgeHome, { recursive: true });
 const runningPath = path.join(bridgeHome, 'running.json'),
   noOpen = process.argv.includes('--no-open');
+const runtimeInfo = {
+  ...require('../platform/build-info.cjs').buildInfo(),
+  pid: process.pid,
+  entry: path.join(PROJECT_ROOT, 'main.cjs'),
+};
 const openUrl = (url) => {
   if (!noOpen) platform.openUrl(url);
 };
@@ -50,7 +56,26 @@ function logAdapter(message) {
     fs.appendFileSync(p, new Date().toISOString() + ' ' + message + '\n', { mode: 0o600 });
   } catch {}
 }
-// 单实例：已有服务仍在响应时直接打开它，不再启动新服务。
+function ownsOldService(pid, entry) {
+  let command;
+  if (process.platform === 'darwin') {
+    command = cp.execFileSync('/bin/ps', ['-ww', '-p', String(pid), '-o', 'command='], {
+      encoding: 'utf8',
+    });
+    if (!/(?:^|\/)node(?:\s|"|$)/.test(command)) return false;
+  } else {
+    const found = JSON.parse(
+      require('../clients/desktop-account.cjs').powershell(
+        '$p=Get-CimInstance Win32_Process -Filter ("ProcessId="+$env:SWITCHER_UPDATE_PID);if($p){@{exe=$p.ExecutablePath;command=$p.CommandLine}|ConvertTo-Json -Compress}else{"null"}',
+        { SWITCHER_UPDATE_PID: String(pid) },
+      ),
+    );
+    if (!found || path.basename(found.exe).toLowerCase() !== 'node.exe') return false;
+    command = found.command;
+  }
+  return entry ? command.includes(entry) : /[\\/]main\.cjs(?:\s|"|$)/.test(command);
+}
+// 只复用相同构建；更新应用不能继续打开仍在内存中的旧后台和旧页面。
 async function existing() {
   const r = readJson(runningPath);
   if (!r) return null;
@@ -59,13 +84,46 @@ async function existing() {
   } catch {
     return null;
   }
+  const u = new URL(r.url);
   try {
-    const u = new URL(r.url);
     const res = await fetch(u.origin + '/', { signal: AbortSignal.timeout(3000) });
-    return res.ok ? r : null;
+    if (!res.ok) return null;
   } catch {
     return null;
   }
+  const headers = { Authorization: 'Bearer ' + u.hash.slice(1) };
+  const response = await fetch(u.origin + '/api/runtime', {
+    headers,
+    signal: AbortSignal.timeout(3000),
+  });
+  const oldRuntime = response.ok ? await response.json() : null;
+  if (oldRuntime?.id === runtimeInfo.id && oldRuntime.pid === r.pid) return r;
+  // 旧版没有构建接口，用既有鉴权接口确认服务，再核对 PID 确实属于 Node 主入口。
+  let verified = oldRuntime?.pid === r.pid;
+  if (!oldRuntime) {
+    const legacy = await fetch(u.origin + '/api/accounts', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(3000),
+    });
+    const accountState = legacy.ok ? await legacy.json() : null;
+    verified = Array.isArray(accountState?.items) && Object.hasOwn(accountState, 'switchJob');
+  }
+  if (!verified || !ownsOldService(r.pid, oldRuntime?.entry))
+    throw Error('无法确认旧切换器后台归属，请先关闭旧切换器再启动新版；配置尚未修改。');
+  process.kill(r.pid, 'SIGTERM');
+  const until = Date.now() + 5000;
+  while (Date.now() < until) {
+    try {
+      process.kill(r.pid, 0);
+    } catch (error) {
+      if (error.code === 'ESRCH') return null;
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw Error('旧切换器后台尚未退出，请关闭旧切换器后重试。');
 }
 (async () => {
   const prior = await existing();
@@ -84,6 +142,7 @@ async function existing() {
   const token = crypto.randomBytes(32).toString('hex'),
     a = svc.adapterSettings();
   const server = createServer({
+    runtime: runtimeInfo,
     token,
     getState: svc.state,
     actions: svc.actions,
@@ -94,15 +153,13 @@ async function existing() {
     const port = server.address().port;
     svc.setListeningPort(port);
     const url = 'http://127.0.0.1:' + port + '/#' + token;
-    const connection = { pid: process.pid, url };
-    fs.writeFileSync(runningPath, JSON.stringify(connection), { mode: 0o600 });
+    const connection = { pid: process.pid, url, build: runtimeInfo };
+    writeJson(runningPath, connection);
     if (!process.env.BRIDGE_HOME || process.env.BRIDGE_DISCOVERY_DIR) {
       const dir =
         process.env.BRIDGE_DISCOVERY_DIR || path.join(os.homedir(), '.codex-api-switcher');
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, 'connection.json'), JSON.stringify(connection), {
-        mode: 0o600,
-      });
+      writeJson(path.join(dir, 'connection.json'), connection);
     }
     console.log('BRIDGE_READY http://127.0.0.1:' + port);
     openUrl(url);
@@ -117,9 +174,11 @@ async function existing() {
       return;
     }
     console.log('BRIDGE_PORT_IN_USE ' + a.port);
-    server.listen(0, '127.0.0.1', ready);
+    server.listen(0, '127.0.0.1');
   });
-  server.listen(a.port, '127.0.0.1', ready);
+  // 端口回落时仍只执行一次 ready，避免重复打开页面及覆盖正在读取的连接记录。
+  server.once('listening', ready);
+  server.listen(a.port, '127.0.0.1');
   const cleanup = () => {
     const r = readJson(runningPath);
     if (r?.pid === process.pid) fs.rmSync(runningPath, { force: true });

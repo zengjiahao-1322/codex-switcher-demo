@@ -38,6 +38,7 @@ function createService({
   defaultPort = 47831,
   startService,
 } = {}) {
+  const build = require('../platform/build-info.cjs').buildInfo();
   fs.mkdirSync(bridgeHome, { recursive: true });
   let accounts = createAccounts({
     codexHome,
@@ -241,6 +242,7 @@ function createService({
       containsCurrent: !!catalogModels?.some((m) => m.slug === c.model),
     };
     return {
+      build,
       providers: [official(c), ...store.list(bridgeHome).map((p) => publicView(p, c))],
       current: {
         name: currentName,

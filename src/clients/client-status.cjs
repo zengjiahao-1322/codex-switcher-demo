@@ -16,6 +16,8 @@ const canonical = (p) => {
 };
 const sameHome = (a, b) => !!a && !!b && canonical(a) === canonical(b);
 const isDesktop = (p) => require('../platform/platform.cjs').isCodexDesktop(p.exe || '');
+const isEditor = (p) =>
+  /^(Code|Code - Insiders|Cursor|Windsurf)(?:\.exe| Helper(?: \(Plugin\))?)?$/i.test(p.name || '');
 let cached, scanning;
 function scan({ force = false } = {}) {
   if (!force && cached && Date.now() - cached.at < 2500) return cached.value;
@@ -197,13 +199,14 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
             /^node_repl(?:\.exe)?$/i.test(a.name || '') ||
             /[\\/]runtimes[\\/]cua_node[\\/]/i.test(a.exe || ''),
         ),
-        desktopShell = [p, ...ancestors].find(isDesktop),
+        ideRuntime = /openai\.chatgpt[-\\/]/i.test(p.exe || ''),
+        // 取最近的客户端宿主：编辑器可能由桌面端的终端启动，不能沿祖先链误归到桌面端。
+        host = [p, ...ancestors].find(
+          (a) => isDesktop(a) || isEditor(a) || windows.some((w) => w.pid === a.pid),
+        ),
+        desktopShell = !ideRuntime && host && isDesktop(host) ? host : null,
         desktop = !auxiliary && !!desktopShell,
-        editor = ancestors.find((a) =>
-          /^(Code|Code - Insiders|Cursor|Windsurf)(?:\.exe| Helper(?: \(Plugin\))?)?$/i.test(
-            a.name || '',
-          ),
-        );
+        editor = ancestors.find(isEditor);
       const context = p.context || {},
         tool = /codex-bridge-validate-|[\\/]accounts[\\/](login|[a-f0-9]{20})([\\/]|$)/i.test(
           context.cwd || '',
@@ -212,7 +215,7 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
       if (tool) kind = 'tool';
       else if (auxiliary) kind = 'auxiliary';
       else if (desktop) kind = 'desktop';
-      else if (editor || /openai\.chatgpt[-\\/]/i.test(p.exe || '')) kind = 'ide';
+      else if (host || ideRuntime) kind = 'ide';
       const byProcess = windows.find(
         (w) =>
           !w.remote && !w.wsl && (w.pid === p.parentPid || ancestors.some((a) => a.pid === w.pid)),
@@ -371,26 +374,7 @@ async function stopEditorBackends(codexHome, bridgeHome) {
   const targets = status.clients.filter(
     (client) => client.kind === 'ide' && client.confirmed && client.shared,
   );
-  for (const client of targets) {
-    try {
-      process.kill(client.pid);
-    } catch (error) {
-      if (error.code !== 'ESRCH') throw error;
-    }
-  }
-  const alive = (pid) => {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  const deadline = Date.now() + 5000;
-  while (targets.some((client) => alive(client.pid))) {
-    if (Date.now() >= deadline) throw Error('编辑器的旧 Codex 后端尚未退出，未完成旧对话同步。');
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
+  await require('../platform/process-stop.cjs').stopProcesses(targets.map((client) => client.pid));
   return editors;
 }
 function desktopTargets(exe, codexHome, { inventory = scan({ force: true }) } = {}) {

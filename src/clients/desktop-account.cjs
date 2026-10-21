@@ -107,29 +107,7 @@ async function stopMacDesktop(exe, codexHome) {
     ids = new Set(roots);
   for (let pass = 0; pass < 8; pass++)
     for (const p of inventory.ancestry) if (ids.has(p.parentPid)) ids.add(p.pid);
-  const signal = (pid, sig) => {
-    try {
-      process.kill(pid, sig);
-    } catch (e) {
-      if (e.code !== 'ESRCH') throw e;
-    }
-  };
-  for (const pid of roots) signal(pid, 'SIGTERM');
-  // 客户端提前退出就继续，仍给正在保存状态的进程保留原有等待上限。
-  for (let attempt = 0; attempt < 15; attempt++) {
-    const remaining = [...ids].some((pid) => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch (e) {
-        if (e.code === 'ESRCH') return false;
-        throw e;
-      }
-    });
-    if (!remaining) return;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  for (const pid of [...ids].reverse()) signal(pid, 'SIGKILL');
+  await require('../platform/process-stop.cjs').stopProcesses([...ids]);
 }
 async function openDesktop(exe, home) {
   if (process.platform === 'darwin') {
@@ -257,6 +235,11 @@ async function runSwitch(
     });
     currentStatus = 'switching';
     if (desktop) await step('stop', '关闭目标桌面端', () => stop(job.desktopExe, job.codexHome));
+    // 先释放旧登录和运行中的回合，再写目标凭证，避免旧后端退出时覆盖新账号。
+    if (job.reloadEditors !== false)
+      stoppedEditors = await step('editors', '释放共用配置的编辑器会话', () =>
+        require('./client-status.cjs').stopEditorBackends(job.codexHome, job.bridgeHome),
+      );
     // 退出前官方客户端可能刚刷新令牌；应用目标配置前再保存一次最新登录。
     const result = await step('apply', '保存并应用目标配置', async () => {
       await accounts.syncCurrent({ force: true });
@@ -266,11 +249,6 @@ async function runSwitch(
       applied = true;
       return value;
     });
-    // 账号变更可能不改变供应商和模型，仍须结束旧后端持有的登录和执行中的回合。
-    if (job.reloadEditors !== false)
-      stoppedEditors = await step('editors', '释放共用配置的编辑器会话', () =>
-        require('./client-status.cjs').stopEditorBackends(job.codexHome, job.bridgeHome),
-      );
     recordEffect(
       job.codexHome,
       job.bridgeHome,

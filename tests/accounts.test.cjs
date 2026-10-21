@@ -264,6 +264,10 @@ test('相同模型切换官方账号仍会停止旧插件后端', async (t) => {
   let stops = 0;
   const clients = require('../src/clients/client-status.cjs');
   t.mock.method(clients, 'stopEditorBackends', async () => {
+    assert.equal(
+      identity(JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json')))).id !== bob.id,
+      true,
+    );
     stops++;
     return [];
   });

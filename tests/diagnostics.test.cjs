@@ -213,6 +213,29 @@ test('window registry reloads only confirmed shared-home editor and records ackn
   assert.equal(JSON.parse(fs.readFileSync(file)).command, null);
 });
 
+test('Windows 与 Mac 的编辑器由 Codex 桌面端启动时，插件仍归属最近的编辑器宿主', (t) => {
+  const f = fixture(t),
+    c = require('../src/clients/client-status.cjs');
+  for (const [desktop, editor] of [
+    ['C:/OpenAI.Codex_test/app/Codex.exe', 'Code.exe'],
+    ['/Applications/Codex.app/Contents/MacOS/Codex', 'Code Helper (Plugin)'],
+  ]) {
+    const status = c.snapshot(f.home, f.bridge, {
+      inventory: {
+        ancestry: [
+          { pid: 50, parentPid: 1, exe: desktop, name: 'Codex' },
+          { pid: 100, parentPid: 50, name: editor },
+        ],
+        processes: [
+          { pid: 101, parentPid: 100, exe: 'codex', context: { ok: true, home: f.home } },
+        ],
+      },
+    });
+    assert.equal(status.clients[0].kind, 'ide');
+    assert.equal(status.clients[0].desktopPid, null);
+  }
+});
+
 test('同一 VS Code 实例的窗口共用通信标识时，按扩展宿主进程关联后端', (t) => {
   const f = fixture(t),
     c = require('../src/clients/client-status.cjs');

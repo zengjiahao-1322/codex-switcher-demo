@@ -226,6 +226,90 @@ test(
   },
 );
 
+test('两端都停止共享插件后端并保留独立配置，Mac 后端忽略退出信号时仍能继续重载', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-editor-stop-'));
+  const home = path.join(root, 'shared'),
+    separate = path.join(root, 'independent'),
+    bridge = path.join(root, 'bridge'),
+    exe = path.join(
+      root,
+      'openai.chatgpt-fixture',
+      'bin',
+      process.platform === 'win32' ? 'codex.exe' : 'codex',
+    );
+  fs.mkdirSync(path.dirname(exe), { recursive: true });
+  fs.mkdirSync(home);
+  fs.mkdirSync(separate);
+  fs.mkdirSync(bridge);
+  fs.copyFileSync(process.execPath, exe);
+  fs.chmodSync(exe, 0o755);
+  const children = [home, home, separate].map((codexHome) => {
+    const child = cp.spawn(
+      exe,
+      ['-e', "process.on('SIGTERM',()=>{});console.log('ready');setInterval(()=>{},1000)"],
+      {
+        env: { ...process.env, CODEX_HOME: codexHome },
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      },
+    );
+    return {
+      child,
+      ready: new Promise((resolve, reject) => {
+        child.stdout.once('data', resolve);
+        child.once('error', reject);
+      }),
+      closed: new Promise((resolve) => child.once('close', resolve)),
+    };
+  });
+  try {
+    await Promise.all(children.map((entry) => entry.ready));
+    const clients = require('../src/clients/client-status.cjs');
+    clients.heartbeat(bridge, {
+      id: 'fixture-host-1',
+      pid: process.pid,
+      name: 'Fixture editor',
+      home,
+    });
+    const before = clients.snapshot(home, bridge, { inventory: clients.scan({ force: true }) });
+    for (let index = 0; index < children.length; index++) {
+      const row = before.clients.find((client) => client.pid === children[index].child.pid);
+      assert.ok(row, '必须读取到原生进程');
+      assert.equal(row.confirmed, true);
+      assert.equal(row.kind, 'ide');
+      assert.equal(row.shared, index < 2);
+    }
+    const stopped = await clients.stopEditorBackends(home, bridge);
+    await Promise.all(children.slice(0, 2).map((entry) => entry.closed));
+    if (process.platform === 'darwin')
+      assert.ok(children.slice(0, 2).every(({ child }) => child.signalCode === 'SIGKILL'));
+    assert.doesNotThrow(() => process.kill(children[2].child.pid, 0));
+    assert.equal(stopped.length, 1);
+    // 刷新进程表后旧后端已经消失，原窗口仍必须收到重载命令。
+    clients.scan({ force: true });
+    const request = clients.requestReload(home, bridge, { stoppedEditors: stopped });
+    assert.equal(request.count, 1);
+    assert.equal(
+      clients.heartbeat(bridge, { id: 'fixture-host-1', pid: process.pid }).command.id,
+      request.targets[0].commandId,
+    );
+  } finally {
+    for (const { child } of children) child.kill('SIGKILL');
+    await Promise.all(children.map((entry) => entry.closed));
+    await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('进程检查权限错误不能被当作已退出并继续切换', async (t) => {
+  t.mock.method(process, 'kill', (pid, signal) => {
+    assert.equal(pid, 123456789);
+    if (signal === 0) throw Object.assign(Error('fixture denied'), { code: 'EPERM' });
+  });
+  await assert.rejects(require('../src/platform/process-stop.cjs').stopProcesses([123456789]), {
+    code: 'EPERM',
+  });
+});
+
 // 两个平台使用同一场景：不提供 CODEX_EXE、不安装桌面版，
 // 从官方扩展的目录结构发现真实 Codex，再验证登录 RPC 与进程归属。
 test('native IDE-only runtime starts and cancels official login without a desktop or cached model', async (t) => {

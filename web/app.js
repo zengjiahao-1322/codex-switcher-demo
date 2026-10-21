@@ -290,10 +290,7 @@ function quotaNode(q) {
     // 失败时不再把旧 buckets 当成当前额度展示，避免“凭证失效但额度正常”的误解。
     note(q.error || '本次额度读取失败', 'quota-error');
     if (q.checkedAt)
-      note(
-        '上次成功读取：' + new Date(q.checkedAt).toLocaleString('zh-CN'),
-        'quota-time',
-      );
+      note('上次成功读取：' + new Date(q.checkedAt).toLocaleString('zh-CN'), 'quota-time');
     return box;
   }
   const duration = (n) =>
@@ -438,12 +435,7 @@ function renderAccounts() {
     info.append(document.createTextNode(a.label), tag(a.plan));
     if (a.current && state?.current.official)
       info.append(
-        tag(
-          a.pendingLogin
-            ? '登录已更新 · 待应用'
-            : '正在使用',
-          a.pendingLogin ? 'muted' : 'done',
-        ),
+        tag(a.pendingLogin ? '登录已更新 · 待应用' : '正在使用', a.pendingLogin ? 'muted' : 'done'),
       );
     const email = document.createElement('small');
     email.textContent = a.label === a.email ? 'ChatGPT 官方账号' : a.email;
@@ -889,6 +881,9 @@ function renderDiagnosis() {
 }
 async function refresh() {
   state = await api('state');
+  $('app-version').textContent = state.build
+    ? '· ' + state.build.version + ' · 构建 ' + state.build.id
+    : '· 后台构建未知，请重新启动新版切换器';
   renderEffect();
   renderDiagnosis();
   renderSummary();

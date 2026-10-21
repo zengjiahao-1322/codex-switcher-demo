@@ -3,7 +3,7 @@ const http = require('node:http'),
   fs = require('node:fs'),
   path = require('node:path'),
   crypto = require('node:crypto');
-function createServer({ token, getState, actions = {}, adapterToken, handleResponses }) {
+function createServer({ token, getState, actions = {}, adapterToken, handleResponses, runtime }) {
   const downloads = new Map();
   return http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -64,6 +64,8 @@ function createServer({ token, getState, actions = {}, adapterToken, handleRespo
         crypto.timingSafeEqual(browserToken, expectedToken);
       if (!bearerOk && !cookieOk) return send(401, { error: '本机会话已过期，请刷新页面后重试。' });
       try {
+        if (runtime && req.method === 'GET' && url.pathname === '/api/runtime')
+          return send(200, runtime);
         if (req.method === 'GET' && url.pathname === '/api/state')
           return send(200, await getState());
         if (req.method !== 'POST') return send(405, { error: 'Method not allowed' });

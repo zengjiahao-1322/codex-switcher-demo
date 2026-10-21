@@ -4,6 +4,20 @@
 
 后端按职责存放在 `src/accounts/`、`src/config/`、`src/clients/`、`src/diagnostics/`、`src/server/` 和 `src/platform/`。`src/paths.cjs` 统一定位项目根目录；根目录 `main.cjs` 只转交启动，保证快捷方式和默认用户数据路径不随目录整理改变。
 
+## Windows 与 Mac 共用的功能边界
+
+账号、额度、配置应用、旧对话同步、后台切换任务、步骤耗时和窗口重载协议共用实现；平台层只负责运行程序发现、凭证存储、进程读取与退出、应用启动。不能因为没有桌面版就停用账号或切换功能。
+
+| 安装情况 | 账号登录与额度 | 应用配置 | 客户端更新 |
+| --- | --- | --- | --- |
+| 仅官方 Codex 编辑器扩展 | 使用扩展自带的官方 app-server | 共用切换任务 | 只停止共用目录的插件后端，再由伴随扩展重载对应窗口；不启动桌面版 |
+| 仅 Codex 桌面版 | 使用桌面版自带的官方 app-server | 共用切换任务 | 重启目标桌面端并确认新进程 |
+| 桌面版与编辑器同时使用 | 优先用户指定或伴随扩展上报的运行程序，也可自动发现 | 共用切换任务 | 分别处理共用目录的桌面与插件，独立目录不跟随 |
+
+`src/platform/runtime.cjs` 独立发现官方运行程序，不通过桌面应用启动才能登录。伴随扩展只负责窗口通信与重载，不承担账号登录或额度 RPC；未接入时可取消“同时重载”，应用后手动重载窗口。远程和 WSL 配置另行处理。
+
+`src/clients/desktop-account.cjs` 的 `runSwitch()` 统一生成步骤及耗时，`web/app.js` 统一渲染；没有按系统拆分的旧版切换页面。`src/platform/build-info.cjs` 为运行代码生成一次构建标识，新入口只复用同构建后台，避免新包连接旧后台继续显示旧页面。页面底部显示版本和构建标识，便于核对实际运行版本。
+
 ```mermaid
 flowchart LR
   UI[浏览器界面\nindex.html + app.js]
@@ -48,11 +62,13 @@ flowchart LR
 
 1. 页面把账号 id 发给 `src/server/service.cjs`。
 2. `src/accounts/accounts.cjs` 准备账号登录；需要续期或验证时，通过 `src/accounts/official-session.cjs` 调用独立的 Codex `app-server` 做 `account/read(refreshToken=true)`，并检查编辑器重载通道。
-3. 关闭目标桌面端后，`src/accounts/accounts.cjs` 写入所选账号凭证，`src/config/core.cjs` 恢复官方配置。
-4. `src/clients/client-status.cjs` 停止共用配置的旧编辑器后端，再由 `src/diagnostics/thread-routing.cjs` 同步并核对旧会话来源。
+3. 关闭目标桌面端，并由 `src/clients/client-status.cjs` 停止共用配置的旧编辑器后端；停止前保留窗口身份，以便后端退出后仍能发送重载。
+4. 重新保存退出时更新的当前登录，再由 `src/accounts/accounts.cjs` 写入所选账号凭证、`src/config/core.cjs` 恢复官方配置，最后通过 `src/diagnostics/thread-routing.cjs` 同步并核对旧会话来源。
 5. 重新打开目标桌面端，并向已连接的伴随扩展发送编辑器窗口重载请求。
 
 准备阶段并行执行账号/API 验证与编辑器归属检查，全部收尾且通过后才能关闭客户端和应用配置；任一检查失败都保留配置。Windows 扫描异步等待系统进程，避免阻塞登录 RPC；关闭阶段复用该阶段新取得的进程树，按已确认进程的退出信号等待，共享两秒保存时限，强制停止后仍确认实际退出。后台切换进程在父进程完成锁交接、写入排队状态并通过 IPC 发出开始消息后执行，不再固定等待 1.5 秒。这些优化不依赖缩短账号校验或使用旧验证结果。
+
+两端的编辑器后端和 Mac 桌面使用 `src/platform/process-stop.cjs`：发送 SIGTERM 后最多等待 1.5 秒，仍未退出的已确认进程使用 SIGKILL，再等待真实退出。权限错误直接回报，不当作已经退出。客户端归属取最近的桌面或编辑器宿主，避免由 Codex 终端启动的编辑器被误归为桌面端。
 
 添加账号时，每次登录使用 `accounts/login/<随机标识>/` 独立目录。登录完成通知必须匹配本次 `loginId`；通知早于 start 响应时先暂存，收到响应后处理。成功状态先提交再关闭登录进程，旧通知不覆盖结果；失败时保留已写入的凭证和脱敏原因，方便恢复。
 
