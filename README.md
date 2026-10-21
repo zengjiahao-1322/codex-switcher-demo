@@ -38,6 +38,8 @@ Mac 包按芯片拆分，只携带一套 Node.js，避免原通用包同时下�
 
 ## 当前架构
 
+主分支包含账号登录、额度并发和错误分类的最新源码修复。页面在 API 模式下隐藏“已保留登录”标签，官方模式下标注“正在使用”。这些修改尚未更新到现有 `v0.1.3` 下载包；源码更新与正式 Release 分开发布。
+
 ```mermaid
 flowchart LR
   UI[浏览器界面\nindex.html + app.js] --> S[本地 HTTP 服务\nmain.cjs + server.cjs]
@@ -124,6 +126,8 @@ node scripts/build-release.cjs darwin --arch=x64
 ```
 
 打包文件由 `release-files.json` 明确列出；`private/`、本机运行时、验证目录和研究记录不会提交。发布 `v*` 标签后，CI 仅在 Windows 与两种 Mac 芯片的检查通过时创建 GitHub Release，附带各平台压缩包及 SHA-256。Mac 还会实际执行系统 Bash 安装脚本、验证安装后签名，并通过 LaunchServices 启动应用。发布前另外启动真实 VS Code 的三个隔离窗口，验证伴随扩展安装、共享目录窗口重载和独立目录隔离；该检查同时在 Windows、Mac M 系列和 Mac Intel 执行。测试编辑器不会放入发行包。
+
+主分支验证统一由 `.github/workflows/release.yml` 调度；编辑器检查复用 `editor-reload-validation.yml`。临时 Mac 测试分支 `verify/macos-*`（包含安装器测试分支）统一由 `macos-validation.yml` 验证，不再维护重复的安装包专用流程。
 
 ## 卸载
 

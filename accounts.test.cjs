@@ -272,7 +272,9 @@ test('official login completion adds the new account without changing the active
   assert.equal(s.items.length, 2);
   assert.equal(s.items.find((x) => x.current).email, 'alice@example.test');
   assert.equal(fs.readFileSync(path.join(f.codexHome, 'auth.json'), 'utf8'), before);
-  assert.equal(fs.existsSync(path.join(f.bridgeHome, 'accounts/login/auth.json')), false);
+  const loginRoot = path.join(f.bridgeHome, 'accounts', 'login');
+  for (const attempt of fs.readdirSync(loginRoot))
+    assert.equal(fs.existsSync(path.join(loginRoot, attempt, 'auth.json')), false);
   assert.equal(JSON.stringify(s).includes('refresh-new-user'), false);
 });
 test('canceling an official login leaves saved and active accounts intact', async (t) => {

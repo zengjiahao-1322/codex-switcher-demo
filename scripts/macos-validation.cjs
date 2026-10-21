@@ -79,7 +79,7 @@ async function validate() {
       path.join(defaultHome, 'config.toml'),
       '[features]\nplugins=false\nremote_plugin=false\n',
     );
-    let child;
+    let child, loginHome;
     const manager = createAccounts({
       codexHome: defaultHome,
       bridgeHome: bridge,
@@ -87,6 +87,7 @@ async function validate() {
       spawnProcess: (exe, args, options) => {
         const env = { ...options.env, HOME: home };
         if (mode === 'default-home') delete env.CODEX_HOME;
+        loginHome = env.CODEX_HOME || defaultHome;
         child = cp.spawn(exe, ['--model', 'mac-fixture', ...args], { ...options, env });
         return child;
       },
@@ -101,8 +102,7 @@ async function validate() {
         { encoding: 'utf8' },
       );
       const context = JSON.parse(raw);
-      const expected =
-        mode === 'default-home' ? defaultHome : path.join(bridge, 'accounts', 'login');
+      const expected = loginHome;
       assert.equal(context.ok, true, context.error);
       assert.ok(sameHome(context.home, expected));
       assert.equal(context.overrides.model, 'mac-fixture');

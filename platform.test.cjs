@@ -213,18 +213,27 @@ test('native IDE-only runtime starts and cancels official login without a deskto
     bridgeHome = path.join(root, 'bridge');
   fs.mkdirSync(codexHome);
   fs.mkdirSync(bridgeHome);
+  let loginHome;
   const manager = require('./accounts.cjs').createAccounts({
     codexHome,
     bridgeHome,
     codexExe: lookup,
+    spawnProcess: (exe, args, options) => {
+      loginHome = options.env.CODEX_HOME;
+      return cp.spawn(exe, args, options);
+    },
   });
   try {
     const login = await manager.startLogin();
     assert.equal(login.status, 'waiting');
     assert.equal(new URL(login.authUrl).protocol, 'https:');
+    // 登录已按尝试隔离目录；验证实际传入子进程的目录，而非旧的共享路径。
+    const loginRoot = path.join(bridgeHome, 'accounts', 'login');
+    assert.equal(require('./client-status.cjs').sameHome(path.dirname(loginHome), loginRoot), true);
+    assert.equal(fs.existsSync(path.join(loginHome, 'config.toml')), true);
     if (process.platform === 'darwin') {
       const inventory = require('./mac-processes.cjs').scan(),
-        home = path.join(bridgeHome, 'accounts', 'login');
+        home = loginHome;
       const processRow = inventory.processes.find(
         (p) => p.context.ok && require('./client-status.cjs').sameHome(p.context.home, home),
       );

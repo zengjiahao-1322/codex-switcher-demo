@@ -3,7 +3,7 @@ name: macOS validation only
 # 仅临时验证分支触发，不更新主分支，不创建 Release。
 on:
   push:
-    branches: ['verify/macos-*', '!verify/macos-installer-*']
+    branches: ['verify/macos-*']
 
 permissions:
   contents: read
