@@ -16,12 +16,18 @@ async function stopProcesses(ids) {
       process.kill(pid, 0);
       if (process.platform === 'darwin') {
         // 父进程尚未回收的 zombie 已没有可执行代码，不应阻塞新配置接管。
-        const state = cp
-          .execFileSync('/bin/ps', ['-o', 'state=', '-p', String(pid)], {
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-          })
-          .trim();
+        let state;
+        try {
+          state = cp
+            .execFileSync('/bin/ps', ['-o', 'state=', '-p', String(pid)], {
+              encoding: 'utf8',
+              stdio: ['ignore', 'pipe', 'ignore'],
+            })
+            .trim();
+        } catch {
+          // PID 在两次检查之间退出，ps 的非零状态就是退出确认结果。
+          return false;
+        }
         if (state.startsWith('Z')) return false;
       }
       return true;
