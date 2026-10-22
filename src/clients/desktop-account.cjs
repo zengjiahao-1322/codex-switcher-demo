@@ -246,12 +246,20 @@ async function runSwitch(
       for (const check of checks) if (check.status === 'rejected') throw check.reason;
     });
     currentStatus = 'switching';
-    if (desktop) await step('stop', '关闭目标桌面端', () => stop(job.desktopExe, job.codexHome));
-    // 先释放旧登录和运行中的回合，再写目标凭证，避免旧后端退出时覆盖新账号。
-    if (job.reloadEditors !== false)
-      stoppedEditors = await step('editors', '释放共用配置的编辑器会话', () =>
-        require('./client-status.cjs').stopEditorBackends(job.codexHome, job.bridgeHome),
-      );
+    // 桌面端与编辑器后端是两组独立进程；同时释放它们，完成后才写入目标凭证。
+    const desktopStop = desktop
+        ? step('stop', '关闭目标桌面端', () => stop(job.desktopExe, job.codexHome))
+        : Promise.resolve(null),
+      editorStop =
+        job.reloadEditors !== false
+          ? step('editors', '释放共用配置的编辑器会话', () =>
+              require('./client-status.cjs').stopEditorBackends(job.codexHome, job.bridgeHome),
+            )
+          : Promise.resolve([]),
+      [desktopResult, editorResult] = await Promise.allSettled([desktopStop, editorStop]);
+    if (desktopResult.status === 'rejected') throw desktopResult.reason;
+    if (editorResult.status === 'rejected') throw editorResult.reason;
+    stoppedEditors = editorResult.value;
     // 退出前官方客户端可能刚刷新令牌；应用目标配置前再保存一次最新登录。
     const result = await step('apply', '保存并应用目标配置', async () => {
       if (resume) return { label: '当前来源' };
