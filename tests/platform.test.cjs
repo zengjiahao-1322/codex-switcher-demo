@@ -103,12 +103,12 @@ test('ZIP packages preserve filenames and executable bits', (t) => {
 test(
   'Windows 未运行目标桌面时跳过退出等待，不向空 PID 查询进程',
   { skip: process.platform !== 'win32' },
-  (t) => {
+  async (t) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-no-desktop-'));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const missing = path.join(root, 'nonexistent-desktop.exe');
     assert.equal(fs.existsSync(missing), false);
-    require('../src/clients/desktop-account.cjs').stopDesktop(missing);
+    await require('../src/clients/desktop-account.cjs').stopDesktop(missing);
   },
 );
 
@@ -133,7 +133,15 @@ test(
     });
     try {
       await new Promise((resolve) => setTimeout(resolve, 200));
-      require('../src/clients/desktop-account.cjs').stopDesktop(exe, home);
+      let ticks = 0;
+      const timer = setInterval(() => ticks++, 50);
+      try {
+        await require('../src/clients/desktop-account.cjs').stopDesktop(exe, home);
+      } finally {
+        clearInterval(timer);
+      }
+      // 真实 PowerShell 关闭进程期间，心跳和另一个释放操作仍可执行。
+      assert.ok(ticks > 1);
       await children[0].closed;
       assert.notEqual(children[0].child.exitCode, null);
       assert.doesNotThrow(() => process.kill(children[1].child.pid, 0));

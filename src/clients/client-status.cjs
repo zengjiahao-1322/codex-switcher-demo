@@ -377,7 +377,9 @@ function clientStatus(codexHome, bridgeHome, options) {
 async function stopEditorBackends(codexHome, bridgeHome) {
   // 旧后端持有登录、运行中的回合和会话写锁。停止共用配置的 Codex 子进程，保留编辑器窗口，
   // 同步完成后再由既有重载流程恢复扩展；独立配置目录不受影响。
-  const status = snapshot(codexHome, bridgeHome);
+  const status = snapshot(codexHome, bridgeHome, {
+    inventory: await scanAsync({ force: true }),
+  });
   const editors = status.clients.filter((client) => client.kind === 'editor' && client.canReload);
   const targets = status.clients.filter(
     (client) => client.kind === 'ide' && client.confirmed && client.shared,

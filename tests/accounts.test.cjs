@@ -898,6 +898,62 @@ test('并行检查失败后等待另一项收尾，期间保留切换锁且不�
   assert.equal(fs.readFileSync(path.join(f.codexHome, 'auth.json'), 'utf8'), before);
 });
 
+test('并行释放客户端失败时不应用配置，并恢复已经停止的编辑器', async (t) => {
+  const f = configured(t),
+    a = createAccounts(f),
+    id = a.status().items[0].id,
+    clients = require('../src/clients/client-status.cjs'),
+    editor = { editorId: 'parallel-release-editor' },
+    before = fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8');
+  let releaseDesktop,
+    releaseEditors,
+    recovered = false,
+    applied = false;
+  const desktopGate = new Promise((resolve) => {
+      releaseDesktop = resolve;
+    }),
+    editorGate = new Promise((resolve) => {
+      releaseEditors = resolve;
+    });
+  t.mock.method(clients, 'stopEditorBackends', async () => {
+    await editorGate;
+    return [editor];
+  });
+  t.mock.method(clients, 'requestReload', (_home, _bridge, { stoppedEditors }) => {
+    assert.deepEqual(stoppedEditors, [editor]);
+    recovered = true;
+    return { count: 1, targets: [] };
+  });
+  const task = runSwitch(
+    { ...f, id, desktopExe: 'fixture-desktop.exe', threadFollow: 'off' },
+    {
+      accounts: {
+        ...a,
+        apply: () => {
+          applied = true;
+        },
+      },
+      stop: async () => {
+        await desktopGate;
+        throw Error('desktop release failed');
+      },
+      open: async () => assert.fail('释放失败不能启动桌面端'),
+    },
+  );
+  const rejected = assert.rejects(task, /desktop release failed/);
+  await new Promise(setImmediate);
+  assert.equal(a.status().switchJob.steps.filter((s) => s.status === 'running').length, 2);
+  releaseDesktop();
+  await new Promise(setImmediate);
+  assert.equal(recovered, false);
+  assert.equal(applied, false);
+  releaseEditors();
+  await rejected;
+  assert.equal(recovered, true);
+  assert.equal(applied, false);
+  assert.equal(fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8'), before);
+});
+
 test('后台进程在锁交接和排队状态写入后才收到开始消息，终态不被排队状态覆盖', async (t) => {
   const f = configured(t),
     cp = require('node:child_process'),

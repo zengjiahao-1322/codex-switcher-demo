@@ -263,16 +263,13 @@ async function synchronizeThreads({
       rows.filter((row) => row.applied),
       'verify',
       async (row) => {
-        const [{ thread }, savedSpeed] = await Promise.all([
-          client.call('thread/read', {
-            threadId: row.id,
-            includeTurns: false,
-          }),
-          row.speed ? savedServiceTier(row.rollout_path) : Promise.resolve(null),
-        ]);
+        const { thread } = await client.call('thread/read', {
+          threadId: row.id,
+          includeTurns: false,
+        });
         if (thread.modelProvider !== provider || thread.model !== row.nextModel)
           throw Error('旧对话 ' + row.id + ' 的来源或模型未能持久保存。');
-        if (row.speed && savedSpeed?.tier !== row.speed.tier)
+        if (row.speed && (await savedServiceTier(row.rollout_path))?.tier !== row.speed.tier)
           throw Error('旧对话 ' + row.id + ' 的速度设置未能持久保留。');
         counts.updated++;
       },

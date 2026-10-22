@@ -28,6 +28,30 @@ function powershell(script, env = {}) {
     );
   }
 }
+async function powershellAsync(script, env = {}) {
+  const childEnv = { ...process.env, ...env };
+  delete childEnv.PSModulePath;
+  try {
+    const { stdout } = await require('node:util').promisify(cp.execFile)(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        "$ErrorActionPreference='Stop';try {" +
+          script +
+          '} catch {[Console]::Error.WriteLine($_.Exception.Message);exit 1}',
+      ],
+      { encoding: 'utf8', windowsHide: true, env: childEnv },
+    );
+    return stdout.trim();
+  } catch (error) {
+    throw Error(
+      String(error.stderr || '').trim() ||
+        '桌面端操作失败（PowerShell 退出码 ' + error.code + '）。',
+    );
+  }
+}
 function desktopInfo() {
   if (process.platform === 'darwin') {
     const inventory = require('./client-status.cjs').scan();
@@ -48,17 +72,17 @@ function desktopInfo() {
     ),
   );
 }
-function stopDesktop(exe, codexHome) {
+async function stopDesktop(exe, codexHome) {
   if (process.platform === 'darwin') return stopMacDesktop(exe, codexHome);
   const clients = require('./client-status.cjs'),
-    inventory = codexHome ? clients.scan({ force: true }) : null,
+    inventory = codexHome ? await clients.scanAsync({ force: true }) : null,
     targetIds = inventory ? clients.desktopTargets(exe, codexHome, { inventory }) : null,
     backendIds = inventory
       ? inventory.ancestry
           .filter((p) => /^codex\.exe$/i.test(p.name) && targetIds.includes(p.parentPid))
           .map((p) => p.pid)
       : null;
-  powershell(
+  await powershellAsync(
     `
  $restricted=$env:SWITCHER_DESKTOP_IDS -ne '*';$allowed=@($env:SWITCHER_DESKTOP_IDS.Split(',') | Where-Object {$_ -and $_ -ne '*'} | ForEach-Object {[int]$_});
  # 只查询目标 PID 或同名进程，不重复打开整张系统进程表读取路径。
@@ -257,9 +281,10 @@ async function runSwitch(
             )
           : Promise.resolve([]),
       [desktopResult, editorResult] = await Promise.allSettled([desktopStop, editorStop]);
+    // 即使桌面关闭失败，也要保存已停止的编辑器，供失败恢复重新连接。
+    if (editorResult.status === 'fulfilled') stoppedEditors = editorResult.value;
     if (desktopResult.status === 'rejected') throw desktopResult.reason;
     if (editorResult.status === 'rejected') throw editorResult.reason;
-    stoppedEditors = editorResult.value;
     // 退出前官方客户端可能刚刷新令牌；应用目标配置前再保存一次最新登录。
     const result = await step('apply', '保存并应用目标配置', async () => {
       if (resume) return { label: '当前来源' };
