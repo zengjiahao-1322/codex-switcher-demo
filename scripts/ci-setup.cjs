@@ -32,5 +32,7 @@ if (process.platform === 'darwin') {
     '-o',
     'bin/mac-process-context',
   ]);
+} else if (process.platform === 'win32') {
+  cp.execFileSync(process.execPath, ['scripts/build-windows-helper.cjs'], { stdio: 'inherit' });
 }
 console.log('Native Codex located; platform helper ready.');

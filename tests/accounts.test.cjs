@@ -17,6 +17,9 @@ const runSwitch = (job, dependencies = {}) =>
       ...dependencies,
     },
   );
+const sharedEditors = () => ({
+  clients: [{ kind: 'ide', confirmed: true, shared: true, editorId: 'fixture-shared-editor' }],
+});
 const jwt = (payload) =>
   'fixture.' + Buffer.from(JSON.stringify(payload)).toString('base64url') + '.signature';
 function auth(user, refresh = 'refresh-' + user, account = 'workspace-' + user) {
@@ -279,7 +282,7 @@ test('相同模型切换官方账号仍会停止旧插件后端', async (t) => {
     { ...f, id: bob.id, model: 'official', desktopExe: null },
     {
       accounts: a,
-      clients: () => ({ clients: [] }),
+      clients: sharedEditors,
       syncThreads: async () => {
         assert.equal(stops, 1);
         return { updated: 0, skipped: 0, failed: 0 };
@@ -581,7 +584,7 @@ test('旧对话同步失败后恢复已停止的插件，保留失败状态和�
       { ...f, id, desktopExe: null },
       {
         accounts: a,
-        clients: () => ({ clients: [] }),
+        clients: sharedEditors,
         syncThreads: async () => {
           throw Error('fixture sync failure');
         },
@@ -598,7 +601,7 @@ test('旧对话同步失败后恢复已停止的插件，保留失败状态和�
       { ...f, id, desktopExe: null },
       {
         accounts: a,
-        clients: () => ({ clients: [] }),
+        clients: sharedEditors,
         syncThreads: async () => {
           throw Error('fixture sync failure');
         },
@@ -927,6 +930,7 @@ test('并行释放客户端失败时不应用配置，并恢复已经停止的�
   const task = runSwitch(
     { ...f, id, desktopExe: 'fixture-desktop.exe', threadFollow: 'off' },
     {
+      clients: sharedEditors,
       accounts: {
         ...a,
         apply: () => {
@@ -952,6 +956,50 @@ test('并行释放客户端失败时不应用配置，并恢复已经停止的�
   assert.equal(recovered, true);
   assert.equal(applied, false);
   assert.equal(fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8'), before);
+});
+
+test('没有共用配置的编辑器时不执行释放和重载步骤', async (t) => {
+  const f = configured(t),
+    a = createAccounts(f),
+    id = a.status().items[0].id,
+    clients = require('../src/clients/client-status.cjs');
+  t.mock.method(clients, 'stopEditorBackends', () => assert.fail('没有目标不能执行编辑器释放'));
+  t.mock.method(clients, 'requestReload', () => assert.fail('没有目标不能派发重载'));
+  await runSwitch({ ...f, id, desktopExe: null, threadFollow: 'off' }, { accounts: a });
+  const job = a.status().switchJob;
+  assert.equal(job.status, 'done');
+  assert.equal(
+    job.steps.some((step) => ['editors', 'reload'].includes(step.id)),
+    false,
+  );
+  assert.match(job.message, /无共用配置的编辑器后端需要重载/);
+});
+
+test('账号准备期间出现的共用编辑器在关闭前重新检查并加入重载', async (t) => {
+  const f = configured(t),
+    a = createAccounts(f),
+    id = a.status().items[0].id,
+    clients = require('../src/clients/client-status.cjs'),
+    editor = { editorId: 'fixture-shared-editor' };
+  let checks = 0,
+    stops = 0,
+    reloads = 0;
+  t.mock.method(clients, 'stopEditorBackends', async () => {
+    stops++;
+    return [editor];
+  });
+  t.mock.method(clients, 'requestReload', (_home, _bridge, { stoppedEditors }) => {
+    assert.deepEqual(stoppedEditors, [editor]);
+    reloads++;
+    return { count: 1, targets: [] };
+  });
+  await runSwitch(
+    { ...f, id, desktopExe: null, threadFollow: 'off' },
+    { accounts: a, clients: () => (++checks === 1 ? { clients: [] } : sharedEditors()) },
+  );
+  assert.equal(checks, 2);
+  assert.equal(stops, 1);
+  assert.equal(reloads, 1);
 });
 
 test('后台进程在锁交接和排队状态写入后才收到开始消息，终态不被排队状态覆盖', async (t) => {

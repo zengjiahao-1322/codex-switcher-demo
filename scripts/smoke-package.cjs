@@ -128,7 +128,8 @@ const freePort = () =>
       );
       for (const file of [
         'src/platform/platform.cjs',
-        'platform/windows/process-context.ps1',
+        'platform/windows/process-context.cs',
+        'bin/process-context.exe',
         'src/diagnostics/diagnostics.cjs',
         'src/clients/editor-integration.cjs',
         'vscode-companion/extension.cjs',

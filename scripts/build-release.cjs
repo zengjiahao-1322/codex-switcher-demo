@@ -71,11 +71,18 @@ async function runtime(platform, arch) {
   let entries, filename;
   if (target === 'win32') {
     const r = await runtime('win', 'x64');
+    cp.execFileSync(process.execPath, [path.join(project, 'scripts', 'build-windows-helper.cjs')], {
+      stdio: 'inherit',
+    });
     entries = sourceEntries('Codex Switcher/');
     entries.push(
       { name: 'Codex Switcher/release-files.json', file: path.join(project, 'release-files.json') },
       { name: 'Codex Switcher/runtime/node.exe', file: r.exe },
       { name: 'Codex Switcher/runtime/NODE-LICENSE', file: r.license },
+      {
+        name: 'Codex Switcher/bin/process-context.exe',
+        file: path.join(project, 'bin', 'process-context.exe'),
+      },
     );
     filename = 'codex-switcher-windows-x64.zip';
   } else if (target === 'darwin') {

@@ -72,10 +72,10 @@ function desktopInfo() {
     ),
   );
 }
-async function stopDesktop(exe, codexHome) {
-  if (process.platform === 'darwin') return stopMacDesktop(exe, codexHome);
+async function stopDesktop(exe, codexHome, { inventory: checkedInventory } = {}) {
+  if (process.platform === 'darwin') return stopMacDesktop(exe, codexHome, checkedInventory);
   const clients = require('./client-status.cjs'),
-    inventory = codexHome ? await clients.scanAsync({ force: true }) : null,
+    inventory = checkedInventory || (codexHome ? await clients.scanAsync({ force: true }) : null),
     targetIds = inventory ? clients.desktopTargets(exe, codexHome, { inventory }) : null,
     backendIds = inventory
       ? inventory.ancestry
@@ -124,10 +124,10 @@ function openWindowsDesktop() {
     "$pkg=Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1;if(-not $pkg){throw '未找到 Codex 桌面应用'};Start-Process explorer.exe -ArgumentList ('shell:AppsFolder\\'+$pkg.PackageFamilyName+'!App')",
   );
 }
-async function stopMacDesktop(exe, codexHome) {
+async function stopMacDesktop(exe, codexHome, checkedInventory) {
   const status = require('./client-status.cjs'),
-    roots = status.desktopTargets(exe, codexHome),
-    inventory = status.scan(),
+    inventory = checkedInventory || status.scan({ force: true }),
+    roots = status.desktopTargets(exe, codexHome, { inventory }),
     ids = new Set(roots);
   for (let pass = 0; pass < 8; pass++)
     for (const p of inventory.ancestry) if (ids.has(p.parentPid)) ids.add(p.pid);
@@ -170,11 +170,10 @@ async function runSwitch(
     open = openDesktop,
     accounts = createAccounts(job),
     syncThreads = require('../diagnostics/thread-routing.cjs').synchronizeThreads,
-    clients = async () => {
-      const status = require('./client-status.cjs');
-      return status.clientStatus(job.codexHome, job.bridgeHome, {
-        inventory: await status.scanAsync(),
-      });
+    clients = async ({ force = false } = {}) => {
+      const status = require('./client-status.cjs'),
+        inventory = await status.scanAsync({ force });
+      return { ...status.clientStatus(job.codexHome, job.bridgeHome, { inventory }), inventory };
     },
   } = {},
 ) {
@@ -193,7 +192,9 @@ async function runSwitch(
     applied = resume,
     threads = null,
     previousProvider,
-    mode;
+    mode,
+    releaseInventory,
+    hasSharedEditors = false;
   const startedAt = new Date().toISOString(),
     started = performance.now(),
     steps = [];
@@ -233,6 +234,21 @@ async function runSwitch(
       item.durationMs = Math.round(performance.now() - begin);
     }
   };
+  const checkEditors = (detected) => {
+    if (detected.some((c) => c.kind === 'ide' && !c.confirmed && (!c.home || c.shared)))
+      throw Error(
+        '无法确认部分 Codex 插件后端的配置目录，尚未切换。请展开“影响范围与其他客户端”查看进程读取错误。',
+      );
+    const missing = detected.filter(
+      (c) => c.kind === 'ide' && c.confirmed && c.shared && !c.editorId,
+    );
+    if (missing.length)
+      throw Error(
+        '检测到 ' +
+          missing.length +
+          ' 个共用配置的 Codex 插件后端尚未接入伴随扩展。请先在“影响范围与其他客户端”接入编辑器；配置尚未修改，客户端未关闭。若要稍后手动重载，可取消“同时重载”。',
+      );
+  };
   report('preparing', api ? '正在检查 API 和模型列表…' : '正在准备目标账号登录…');
   try {
     mode = follow.selectedMode(job.bridgeHome, job.threadFollow);
@@ -249,37 +265,34 @@ async function runSwitch(
         (async () => {
           // 进程归属检查与登录校验互不依赖；全部通过后才允许关闭和写入。
           if (job.reloadEditors === false) return;
-          const detected = (await clients()).clients;
-          if (detected.some((c) => c.kind === 'ide' && !c.confirmed && (!c.home || c.shared)))
-            throw Error(
-              '无法确认部分 Codex 插件后端的配置目录，尚未切换。请展开“影响范围与其他客户端”查看进程读取错误。',
-            );
-          const missing = detected.filter(
-            (c) => c.kind === 'ide' && c.confirmed && c.shared && !c.editorId,
-          );
-          if (missing.length)
-            throw Error(
-              '检测到 ' +
-                missing.length +
-                ' 个共用配置的 Codex 插件后端尚未接入伴随扩展。请先在“影响范围与其他客户端”接入编辑器；配置尚未修改，客户端未关闭。若要稍后手动重载，可取消“同时重载”。',
-            );
+          checkEditors((await clients()).clients);
         })(),
       ]);
       if (api && !resume && checks[0].status === 'fulfilled') prepared = checks[0].value;
       // 失败时也等另一项收尾，避免释放切换锁后仍有旧校验在更新凭证。
       for (const check of checks) if (check.status === 'rejected') throw check.reason;
+      if (job.reloadEditors !== false) {
+        // 登录校验可能耗时数秒。关闭前重新核对一次，所有关闭操作共用此刻的进程表。
+        const latest = await clients({ force: true });
+        checkEditors(latest.clients);
+        releaseInventory = latest.inventory;
+        hasSharedEditors = latest.clients.some((c) => c.kind === 'ide' && c.confirmed && c.shared);
+      }
     });
     currentStatus = 'switching';
     // 桌面端与编辑器后端是两组独立进程；同时释放它们，完成后才写入目标凭证。
     const desktopStop = desktop
-        ? step('stop', '关闭目标桌面端', () => stop(job.desktopExe, job.codexHome))
+        ? step('stop', '关闭目标桌面端', () =>
+            stop(job.desktopExe, job.codexHome, { inventory: releaseInventory }),
+          )
         : Promise.resolve(null),
-      editorStop =
-        job.reloadEditors !== false
-          ? step('editors', '释放共用配置的编辑器会话', () =>
-              require('./client-status.cjs').stopEditorBackends(job.codexHome, job.bridgeHome),
-            )
-          : Promise.resolve([]),
+      editorStop = hasSharedEditors
+        ? step('editors', '释放共用配置的编辑器会话', () =>
+            require('./client-status.cjs').stopEditorBackends(job.codexHome, job.bridgeHome, {
+              inventory: releaseInventory,
+            }),
+          )
+        : Promise.resolve([]),
       [desktopResult, editorResult] = await Promise.allSettled([desktopStop, editorStop]);
     // 即使桌面关闭失败，也要保存已停止的编辑器，供失败恢复重新连接。
     if (editorResult.status === 'fulfilled') stoppedEditors = editorResult.value;
@@ -336,7 +349,7 @@ async function runSwitch(
       );
     }
     let editorNote = '';
-    if (job.reloadEditors !== false) {
+    if (hasSharedEditors) {
       reloadAttempted = true;
       try {
         const reloaded = await step('reload', '发送编辑器重载请求', () =>
@@ -351,8 +364,10 @@ async function runSwitch(
       } catch (error) {
         throw Error('编辑器重载请求未发送：' + error.message);
       }
-    } else {
+    } else if (job.reloadEditors === false) {
       editorNote = ' 本次未重载编辑器；完成任务后请手动重载需要更新的窗口。';
+    } else {
+      editorNote = ' 无共用配置的编辑器后端需要重载。';
     }
     const effect = desktop
       ? desktopStarted

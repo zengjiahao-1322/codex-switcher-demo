@@ -170,15 +170,19 @@ async function synchronizeThreads({
   const config = toml.parse(fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8'));
   const provider = config.model_provider || 'openai';
   if (!fs.readdirSync(codexHome).some((name) => /^state_\d+\.sqlite$/.test(name))) return counts;
-  let client = openSession(codexHome, bridgeHome, config);
-  const initialize = () =>
-    client.call('initialize', {
+  let sessions = [openSession(codexHome, bridgeHome, config)];
+  const initialize = (session) =>
+    session.call('initialize', {
       clientInfo: { name: 'codex-switcher-routing', version: '1' },
       capabilities: { experimentalApi: true },
     });
+  const closeSessions = async () => {
+    const results = await Promise.allSettled(sessions.map((session) => session.close()));
+    for (const result of results) if (result.status === 'rejected') throw result.reason;
+  };
   let rows = [];
   try {
-    await initialize();
+    await initialize(sessions[0]);
     // 先由官方后端恢复 WAL，再读索引；只筛选未归档的用户对话。
     rows = pendingThreads(codexHome, provider).filter((row) => {
       if (mode === 'matching' && row.model_provider !== previousProvider) {
@@ -197,7 +201,7 @@ async function synchronizeThreads({
       models = catalog.models.map((item) => item.slug);
     }
     if (!models?.length || !model) {
-      const { data } = await client.call('model/list', {});
+      const { data } = await sessions[0].call('model/list', {});
       if (!models?.length) models = data.map((item) => item.model);
       model ||= data.find((item) => item.isDefault)?.model || data[0]?.model;
     }
@@ -211,18 +215,25 @@ async function synchronizeThreads({
       return true;
     });
     if (!rows.length) return counts;
+    // 单个官方后端会将恢复操作排队。批量时由两个后端分担不同对话，
+    // 总在途数仍为四，不增加同时加载的对话数；小批量复用已有后端。
+    if (rows.length > 4) {
+      const second = openSession(codexHome, bridgeHome, config);
+      sessions.push(second);
+      await initialize(second);
+    }
     const processRows = async (batch, phase, action) => {
       let next = 0,
         completed = 0,
         failure;
       onProgress({ completed, total: batch.length, phase });
-      // 共用一个官方后端、最多四条在途；失败后停止派发，等待在途任务收尾。
+      // 最多四条在途；失败后停止派发，等待在途任务收尾。
       await Promise.all(
-        Array.from({ length: Math.min(4, batch.length) }, async () => {
+        Array.from({ length: Math.min(4, batch.length) }, async (_, worker) => {
           while (!failure && next < batch.length) {
             const row = batch[next++];
             try {
-              await action(row);
+              await action(row, worker);
               onProgress({ completed: ++completed, total: batch.length, phase });
             } catch (error) {
               failure ??= error;
@@ -232,7 +243,8 @@ async function synchronizeThreads({
       );
       return failure;
     };
-    const failure = await processRows(rows, 'sync', async (row) => {
+    const failure = await processRows(rows, 'sync', async (row, worker) => {
+      const client = sessions[worker % sessions.length];
       row.speed = await savedServiceTier(row.rollout_path);
       let result;
       try {
@@ -255,15 +267,15 @@ async function synchronizeThreads({
       row.applied = true;
       await client.call('thread/unsubscribe', { threadId: row.id });
     });
-    await client.close();
+    await closeSessions();
     // 部分失败时也冷启动核对已更新的对话，准确报告实际完成条数。
-    client = openSession(codexHome, bridgeHome, config);
-    await initialize();
+    sessions = [openSession(codexHome, bridgeHome, config)];
+    await initialize(sessions[0]);
     const verifyFailure = await processRows(
       rows.filter((row) => row.applied),
       'verify',
       async (row) => {
-        const { thread } = await client.call('thread/read', {
+        const { thread } = await sessions[0].call('thread/read', {
           threadId: row.id,
           includeTurns: false,
         });
@@ -281,7 +293,7 @@ async function synchronizeThreads({
     error.threads = counts;
     throw error;
   } finally {
-    await client.close();
+    await closeSessions();
   }
 }
 

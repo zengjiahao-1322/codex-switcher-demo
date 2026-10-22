@@ -7,6 +7,11 @@ const { PROJECT_ROOT } = require('../src/paths.cjs');
 const tests = path.join(PROJECT_ROOT, 'tests');
 // 本地和 CI 使用同一个正式测试目录，不混入历史研究脚本。
 const files = fs.readdirSync(tests).filter((name) => name.endsWith('.test.cjs'));
+if (process.platform === 'win32')
+  require('node:child_process').execFileSync(process.execPath, ['scripts/build-windows-helper.cjs'], {
+    cwd: PROJECT_ROOT,
+    stdio: 'inherit',
+  });
 const child = spawn(
   process.execPath,
   ['--test', '--test-timeout=120000', ...files.map((name) => path.join(tests, name))],

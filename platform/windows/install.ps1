@@ -55,7 +55,7 @@ try {
 
   # Offline release archives already include runtime and dependencies.
   if ((Resolve-Path $src).Path -ne (Resolve-Path $InstallDir).Path) {
-    foreach ($folder in @('runtime','node_modules')) {
+    foreach ($folder in @('runtime','node_modules','bin')) {
       $bundled = Join-Path $src $folder
       if (Test-Path -LiteralPath $bundled) { Copy-Item -LiteralPath $bundled -Destination $InstallDir -Recurse -Force }
     }
@@ -76,6 +76,15 @@ try {
     Copy-Item (Join-Path $tmp "node\node-$NodeVersion-win-x64\node.exe") $nodeExe -Force
     Copy-Item (Join-Path $tmp "node\node-$NodeVersion-win-x64\LICENSE") (Join-Path $InstallDir 'runtime\NODE-LICENSE') -Force
   } else { Step "Node.js $NodeVersion already present" }
+
+  # GitHub 源码安装没有预编译二进制；发行压缩包已随包带上助手。
+  Step 'Checking the Windows process helper'
+  $nativeHelperFile = Join-Path -Path $InstallDir -ChildPath 'bin\process-context.exe'
+  if (-not (Test-Path -LiteralPath $nativeHelperFile)) {
+    Step 'Building the Windows process helper'
+    & $nodeExe (Join-Path $InstallDir 'scripts\build-windows-helper.cjs')
+    if ($LASTEXITCODE -ne 0) { throw 'Windows process helper build failed.' }
+  }
 
   # 5. Dependencies.
   Step 'Installing dependencies'

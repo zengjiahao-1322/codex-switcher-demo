@@ -3,8 +3,8 @@ const { PROJECT_ROOT } = require('../paths.cjs');
 
 const fs = require('node:fs'),
   path = require('node:path'),
-  crypto = require('node:crypto');
-const { powershell } = require('./desktop-account.cjs');
+  crypto = require('node:crypto'),
+  cp = require('node:child_process');
 const { writeJson, readJson } = require('../accounts/accounts.cjs');
 const canonical = (p) => {
   let value = path.resolve(p);
@@ -19,19 +19,18 @@ const isDesktop = (p) => require('../platform/platform.cjs').isCodexDesktop(p.ex
 const isEditor = (p) =>
   /^(Code|Code - Insiders|Cursor|Windsurf)(?:\.exe| Helper(?: \(Plugin\))?)?$/i.test(p.name || '');
 let cached, scanning;
+const windowsHelper = path.join(PROJECT_ROOT, 'bin', 'process-context.exe');
+function requireWindowsHelper() {
+  if (!fs.existsSync(windowsHelper))
+    throw Error('Windows 进程助手尚未构建，请先运行 runtime\\node.exe scripts\\build-windows-helper.cjs。');
+  return windowsHelper;
+}
 function scan({ force = false } = {}) {
   if (!force && cached && Date.now() - cached.at < 2500) return cached.value;
   const value =
     process.platform === 'darwin'
       ? require('../platform/mac-processes.cjs').scan()
-      : JSON.parse(
-          powershell(
-            fs.readFileSync(
-              path.join(PROJECT_ROOT, 'platform/windows/process-context.ps1'),
-              'utf8',
-            ),
-          ),
-        );
+      : JSON.parse(cp.execFileSync(requireWindowsHelper(), [], { encoding: 'utf8', windowsHide: true }));
   cached = { at: Date.now(), value };
   return value;
 }
@@ -39,19 +38,12 @@ async function scanAsync({ force = false } = {}) {
   if (!force && cached && Date.now() - cached.at < 2500) return cached.value;
   if (scanning) return scanning;
   if (process.platform === 'darwin') return scan({ force });
-  // PowerShell 扫描在独立进程里执行，等待它时允许账号 RPC 继续收发。
-  const env = { ...process.env };
-  delete env.PSModulePath;
+  // 助手在独立进程里执行，等待它时允许账号 RPC 继续收发。
   scanning = new Promise((resolve, reject) => {
-    require('node:child_process').execFile(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        fs.readFileSync(path.join(PROJECT_ROOT, 'platform/windows/process-context.ps1'), 'utf8'),
-      ],
-      { encoding: 'utf8', windowsHide: true, env },
+    cp.execFile(
+      requireWindowsHelper(),
+      [],
+      { encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error) {
           reject(Error(stderr.trim() || '无法读取 Codex 进程归属。'));
@@ -374,11 +366,11 @@ function reloadResults(bridgeHome, targets) {
 function clientStatus(codexHome, bridgeHome, options) {
   return snapshot(codexHome, bridgeHome, options);
 }
-async function stopEditorBackends(codexHome, bridgeHome) {
+async function stopEditorBackends(codexHome, bridgeHome, { inventory } = {}) {
   // 旧后端持有登录、运行中的回合和会话写锁。停止共用配置的 Codex 子进程，保留编辑器窗口，
   // 同步完成后再由既有重载流程恢复扩展；独立配置目录不受影响。
   const status = snapshot(codexHome, bridgeHome, {
-    inventory: await scanAsync({ force: true }),
+    inventory: inventory || (await scanAsync({ force: true })),
   });
   const editors = status.clients.filter((client) => client.kind === 'editor' && client.canReload);
   const targets = status.clients.filter(
