@@ -8,7 +8,7 @@ const { runPage } = require('./fake-page.cjs');
 const { createService } = require('../src/server/service.cjs');
 
 // 页面读取的状态来自真实 service，只替换会启动或重启客户端的接口。
-function backend({ switchJob = null, desktopSwitch } = {}) {
+function backend({ switchJob = null, desktopSwitch, clients = [] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-switch-ui-'));
   fs.mkdirSync(path.join(root, 'codex'));
   fs.mkdirSync(path.join(root, 'bridge'));
@@ -21,7 +21,7 @@ function backend({ switchJob = null, desktopSwitch } = {}) {
     if (route === 'state') return { body: await service.state() };
     if (route === 'accounts') return { body: { items: [], switchJob } };
     if (route === 'clients')
-      return { body: { home: '', clients: [], auxiliary: [], editors: [], connectedEditors: 0 } };
+      return { body: { home: '', clients, auxiliary: [], editors: [], connectedEditors: 0 } };
     if (route === 'desktopSwitch') return desktopSwitch(body);
     if (route === 'setThreadFollow') return { body: await service.actions.setThreadFollow(body) };
     return { body: { message: route + ' ok' } };
@@ -103,6 +103,78 @@ test('#4 旧对话部分未同步时提供继续同步', async () => {
   assert.equal(page.byId('threads-resume').textContent, '继续同步剩余 2 条旧对话');
   await page.byId('threads-resume').onclick();
   assert.equal(page.calls('resumeThreadSync').length, 1);
+});
+
+// 分别覆盖已接入、未关联、独立目录和带远程标签但未确认后端的窗口。
+const editor = (id, extra = {}) => ({ id: 'editor-' + id, editorId: id, kind: 'editor', ...extra });
+const backendProcess = (pid, editorId = null) => ({
+  id: 'process-' + pid,
+  pid,
+  kind: 'ide',
+  confirmed: true,
+  shared: true,
+  editorId,
+});
+
+test('多窗口提示区分已接入、未关联和独立配置，不凭远程标签推断归属', async () => {
+  const page = await runPage({
+    respond: backend({
+      clients: [
+        editor('a', { pid: 900, canReload: true, confirmed: true, shared: true }),
+        backendProcess(11, 'a'),
+        backendProcess(12),
+        backendProcess(13),
+        editor('ssh', { remote: 'ssh-remote+server', canReload: false }),
+        editor('separate', { canReload: false, confirmed: true, shared: false }),
+      ],
+    }),
+  });
+  await page.byId('client-details').ontoggle();
+  const hint = page.byId('editor-reload-hint').textContent;
+  assert.ok(hint.includes('1 个窗口已接入（扩展宿主 PID 900）'), hint);
+  assert.ok(hint.includes('2 个共用配置的 Codex 后台（PID 12、13）没有对应到已接入的窗口'), hint);
+  assert.ok(hint.includes('1 个窗口使用独立配置目录，不随本机切换'), hint);
+  assert.ok(hint.includes('1 个窗口尚未关联到本机 Codex 后端，暂不能确认是否跟随本机切换'), hint);
+  assert.equal(hint.includes('安装'), false, '原因未确认前不给安装建议');
+});
+
+// 已确认的本机后端不能被窗口的远程标签否决。
+test('带远程标签但后端共用本机配置的窗口算作已接入', async () => {
+  const page = await runPage({
+    respond: backend({
+      clients: [
+        editor('a', {
+          pid: 900,
+          remote: 'ssh-remote+server',
+          canReload: true,
+          confirmed: true,
+          shared: true,
+        }),
+        backendProcess(11, 'a'),
+      ],
+    }),
+  });
+  await page.byId('client-details').ontoggle();
+  assert.equal(
+    page.byId('editor-reload-hint').textContent,
+    '1 个窗口已接入（扩展宿主 PID 900），可自动重载。',
+  );
+});
+
+test('所有后台都已接入时只显示可自动重载', async () => {
+  const page = await runPage({
+    respond: backend({
+      clients: [
+        editor('a', { pid: 900, canReload: true, confirmed: true, shared: true }),
+        backendProcess(11, 'a'),
+      ],
+    }),
+  });
+  await page.byId('client-details').ontoggle();
+  assert.equal(
+    page.byId('editor-reload-hint').textContent,
+    '1 个窗口已接入（扩展宿主 PID 900），可自动重载。',
+  );
 });
 
 test('#4 切换成功或没有失败条目时不显示继续同步', async () => {

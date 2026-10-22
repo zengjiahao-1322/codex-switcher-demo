@@ -1150,11 +1150,26 @@ async function refreshClients() {
       (p) => p.kind === 'ide' && p.confirmed && p.shared && !p.editorId,
     );
     const ready = c.clients.filter((p) => p.kind === 'editor' && p.canReload);
-    $('editor-reload-hint').textContent = missing.length
-      ? missing.length + ' 个共用配置的 Codex 插件后端未接入；自动切换前请先接入伴随扩展。'
-      : ready.length
-        ? ready.length + ' 个共用配置的窗口已连接，可接收重载请求。'
-        : '尚无已确认共用配置、可自动重载的编辑器窗口。';
+    const separate = c.clients.filter((p) => p.kind === 'editor' && p.confirmed && !p.shared);
+    const unmatched = c.clients.filter((p) => p.kind === 'editor' && !p.confirmed);
+    // 分别展示可重载、独立配置和未关联的窗口，不从“没有找到”推断远端归属。
+    const parts = [];
+    const pids = (rows) => 'PID ' + rows.map((p) => p.pid).join('、');
+    if (ready.length)
+      parts.push(ready.length + ' 个窗口已接入（扩展宿主 ' + pids(ready) + '），可自动重载');
+    if (missing.length)
+      parts.push(
+        missing.length +
+          ' 个共用配置的 Codex 后台（' +
+          pids(missing) +
+          '）没有对应到已接入的窗口，暂不能自动切换',
+      );
+    if (separate.length) parts.push(separate.length + ' 个窗口使用独立配置目录，不随本机切换');
+    if (unmatched.length)
+      parts.push(unmatched.length + ' 个窗口尚未关联到本机 Codex 后端，暂不能确认是否跟随本机切换');
+    $('editor-reload-hint').textContent = parts.length
+      ? parts.join('；') + '。'
+      : '尚无已确认共用配置、可自动重载的编辑器窗口。';
     $('clients-status').textContent =
       `本次切换目录：${c.home}\nCodex 程序：${c.runtime || '未找到，请安装官方扩展或填写下方路径'}\n检测到 ${c.clients.length} 个客户端 / 窗口，${c.connectedEditors} 个伴随扩展连接。`;
     if (document.activeElement !== $('config-home')) $('config-home').value = c.home;
@@ -1173,19 +1188,16 @@ async function refreshClients() {
       row.className = 'client-row';
       const title = document.createElement('b');
       title.textContent = client.name + ' · PID ' + client.pid;
+      // 归属以实际后端的配置目录为准；远程 / WSL 只是窗口类型，不决定是否跟随切换。
       row.append(
         title,
         tag(
-          client.remote || client.wsl
-            ? '远程 / WSL 独立环境'
-            : client.confirmed
-              ? client.shared
-                ? '共用当前目录'
-                : '独立目录'
-              : '归属未确认',
+          client.confirmed ? (client.shared ? '共用当前目录' : '独立目录') : '归属未确认',
           client.shared ? 'done' : 'muted',
         ),
       );
+      if (client.remote || client.wsl)
+        row.append(tag(client.wsl ? 'WSL 窗口' : '远程窗口', 'muted'));
       const detail = document.createElement('small');
       detail.textContent =
         (client.home || '尚未确认 CODEX_HOME') +
@@ -1195,7 +1207,7 @@ async function refreshClients() {
         (client.error ? '\n进程读取失败：' + client.error : '') +
         (client.workspace ? '\n' + client.workspace : '') +
         (client.kind === 'editor' && !client.confirmed
-          ? '\n尚未确认此窗口的 Codex 后端。请打开 Codex 扩展；若已打开，请查看其输出是否启动失败。'
+          ? '\n本机尚未关联到此窗口的 Codex 后端，暂不能确认是否跟随本机切换。请打开 Codex 扩展；若已打开，请查看其输出是否启动失败。'
           : '') +
         (client.kind === 'editor'
           ? '\n客户端：' +
@@ -1246,7 +1258,7 @@ async function refreshClients() {
         );
       else if (client.kind === 'ide' && !client.editorId) {
         const note = document.createElement('small');
-        note.textContent = '安装下方伴随扩展后可精确重载此窗口。';
+        note.textContent = '这个 Codex 后台没有对应到已接入伴随扩展的窗口，暂不能自动重载。';
         row.append(note);
       }
       $('clients-list').append(row);
