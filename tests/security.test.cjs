@@ -102,7 +102,8 @@ test('#2 未经确认的自定义路径被拒绝，确认后只认这一个文�
     codexExe: planted,
     allowUntrusted: true,
   });
-  assert.equal(findCodex({ dataHome: bridge }), fs.realpathSync(planted));
+  // 此处验证用户设置，排除 CI 为真实运行时设置的 CODEX_EXE 覆盖。
+  assert.equal(findCodex({ dataHome: bridge, env: {} }), fs.realpathSync(planted));
 
   // 设置文件被改成另一个未确认的程序时，不能沿用之前的确认。
   const settingsFile = path.join(bridge, 'settings.json'),
@@ -111,7 +112,9 @@ test('#2 未经确认的自定义路径被拒绝，确认后只认这一个文�
     settingsFile,
     JSON.stringify({ ...settings, codexExe: fakeCodex(tmp('swapped')) }),
   );
-  assert.throws(() => findCodex({ dataHome: bridge }), { code: 'untrusted_codex' });
+  assert.throws(() => findCodex({ dataHome: bridge, env: {} }), { code: 'untrusted_codex' });
+  // 显式环境变量仍按约定优先，不能为通过设置测试而改变实际查找顺序。
+  assert.equal(findCodex({ dataHome: bridge, env: { CODEX_EXE: planted } }), planted);
 });
 
 // 页面状态来自真实 service；clients 会探测本机进程，这里固定为空。
