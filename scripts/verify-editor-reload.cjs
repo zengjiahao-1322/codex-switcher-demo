@@ -461,11 +461,9 @@ async function initializeHome(executable, home) {
     process.exitCode = 1;
   } finally {
     report.checkedAt = new Date().toISOString();
-    fs.mkdirSync(path.join(project, 'verification'), { recursive: true });
-    fs.writeFileSync(
-      path.join(project, 'verification', 'editor-reload.json'),
-      JSON.stringify(report, null, 2),
-    );
+    const reportDir = process.env.SWITCHER_REPORT_DIR || path.join(project, 'verification');
+    fs.mkdirSync(reportDir, { recursive: true });
+    fs.writeFileSync(path.join(reportDir, 'editor-reload.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report));
     for (const entry of processes) fs.writeFileSync(path.join(entry.folder, 'stop'), '');
     for (const entry of processes) {

@@ -95,7 +95,7 @@ async function install(id, projectDir = PROJECT_ROOT) {
     message:
       '已为 ' +
       editor.name +
-      ' 安装伴随扩展。请在各窗口确认状态栏显示“Codex Switcher · 已连接”；已有窗口可能需要先执行一次“重载窗口”才能启用新版本。',
+      ' 安装伴随扩展。已有窗口可能需要先执行一次“重载窗口”才能启用新版本；打开 Codex 后，状态栏显示“Codex Switcher · 已接入”才表示后端已关联，可自动重载。',
   };
 }
 function cliFor(shim) {

@@ -77,10 +77,10 @@ try {
     Copy-Item (Join-Path $tmp "node\node-$NodeVersion-win-x64\LICENSE") (Join-Path $InstallDir 'runtime\NODE-LICENSE') -Force
   } else { Step "Node.js $NodeVersion already present" }
 
-  # GitHub 源码安装没有预编译二进制；发行压缩包已随包带上助手。
+  # Source installs build the helper; release archives already bundle it.
   Step 'Checking the Windows process helper'
-  $nativeHelperFile = Join-Path -Path $InstallDir -ChildPath 'bin\process-context.exe'
-  if (-not (Test-Path -LiteralPath $nativeHelperFile)) {
+  $bundledHelper = Join-Path -Path $src -ChildPath 'bin\process-context.exe'
+  if (-not (Test-Path -LiteralPath $bundledHelper)) {
     Step 'Building the Windows process helper'
     & $nodeExe (Join-Path $InstallDir 'scripts\build-windows-helper.cjs')
     if ($LASTEXITCODE -ne 0) { throw 'Windows process helper build failed.' }

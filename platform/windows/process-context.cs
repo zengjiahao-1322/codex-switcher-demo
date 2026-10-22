@@ -36,7 +36,9 @@ public static class SwitcherProcessContext
     {
         var buffer = new byte[count];
         IntPtr read;
-        if (!ReadProcessMemory(handle, new IntPtr(address), buffer, count, out read) || read.ToInt64() == 0)
+        // 跨到不可读页时 Windows 允许返回部分数据；保留实际读到的字节。
+        ReadProcessMemory(handle, new IntPtr(address), buffer, count, out read);
+        if (read.ToInt64() == 0)
             throw new InvalidOperationException("process_memory_unavailable");
         Array.Resize(ref buffer, (int)read.ToInt64());
         return buffer;

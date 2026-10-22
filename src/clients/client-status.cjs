@@ -22,7 +22,9 @@ let cached, scanning;
 const windowsHelper = path.join(PROJECT_ROOT, 'bin', 'process-context.exe');
 function requireWindowsHelper() {
   if (!fs.existsSync(windowsHelper))
-    throw Error('Windows 进程助手尚未构建，请先运行 runtime\\node.exe scripts\\build-windows-helper.cjs。');
+    throw Error(
+      'Windows 进程助手尚未构建，请先运行 runtime\\node.exe scripts\\build-windows-helper.cjs。',
+    );
   return windowsHelper;
 }
 function scan({ force = false } = {}) {
@@ -30,7 +32,9 @@ function scan({ force = false } = {}) {
   const value =
     process.platform === 'darwin'
       ? require('../platform/mac-processes.cjs').scan()
-      : JSON.parse(cp.execFileSync(requireWindowsHelper(), [], { encoding: 'utf8', windowsHide: true }));
+      : JSON.parse(
+          cp.execFileSync(requireWindowsHelper(), [], { encoding: 'utf8', windowsHide: true }),
+        );
   cached = { at: Date.now(), value };
   return value;
 }
@@ -214,13 +218,10 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
       else if (desktop) kind = 'desktop';
       else if (host || ideRuntime) kind = 'ide';
       const byProcess = windows.find(
-        (w) =>
-          !w.remote && !w.wsl && (w.pid === p.parentPid || ancestors.some((a) => a.pid === w.pid)),
+        (w) => w.pid === p.parentPid || ancestors.some((a) => a.pid === w.pid),
       );
       // 通信标识可能属于整个 VS Code 实例；不能先匹配它而抢走另一个窗口的后端。
-      const byHook = windows.filter(
-        (w) => !w.remote && !w.wsl && w.windowKey && w.windowKey === context.windowKey,
-      );
+      const byHook = windows.filter((w) => w.windowKey && w.windowKey === context.windowKey);
       const companion = byProcess || (byHook.length === 1 ? byHook[0] : null);
       const shared = sameHome(context.home, codexHome),
         layers = configLayers(context.home, context.cwd, context.profile, context.overrides);
@@ -291,7 +292,9 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
       confirmed: !!confirmed.length,
       shared: !!shared,
       stale: matching.some((x) => x.stale),
-      canReload: !!shared && !w.remote && !w.wsl,
+      // 是否共用本机配置由真实后端决定。远程工作区也可能使用本机 Codex，
+      // 不能用工作区类型或 WSL 设置否定已经确认的本地进程归属。
+      canReload: !!shared,
       commandPending: !!w.command,
       lastAck: w.lastAck,
       companionVersion: w.companionVersion,

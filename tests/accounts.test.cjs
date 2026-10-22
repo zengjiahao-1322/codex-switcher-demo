@@ -270,11 +270,10 @@ test('相同模型切换官方账号仍会停止旧插件后端', async (t) => {
   let stops = 0;
   const clients = require('../src/clients/client-status.cjs');
   t.mock.method(clients, 'stopEditorBackends', async () => {
-    if (stops === 0)
-      assert.equal(
-        identity(JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json')))).id !== bob.id,
-        true,
-      );
+    assert.equal(
+      identity(JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json')))).id !== bob.id,
+      true,
+    );
     stops++;
     return [];
   });
@@ -290,7 +289,7 @@ test('相同模型切换官方账号仍会停止旧插件后端', async (t) => {
       },
     },
   );
-  assert.equal(stops, 2);
+  assert.equal(stops, 1);
   assert.equal(
     identity(JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json')))).id,
     bob.id,
@@ -541,13 +540,13 @@ test('插件没有重载通道时在关闭客户端和修改配置之前停止�
       {
         accounts: a,
         clients: () => ({
-          clients: [{ kind: 'ide', confirmed: true, shared: true, editorId: null }],
+          clients: [{ pid: 811, kind: 'ide', confirmed: true, shared: true, editorId: null }],
         }),
         stop: () => assert.fail('must not stop desktop'),
         open: () => assert.fail('must not open desktop'),
       },
     ),
-    /尚未接入伴随扩展/,
+    /未关联到编辑器窗口/,
   );
   assert.equal(fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8'), before);
   assert.equal(a.status().switchJob.configurationApplied, false);
@@ -998,8 +997,8 @@ test('账号准备期间出现的共用编辑器在关闭前重新检查并加�
     { ...f, id, desktopExe: null, threadFollow: 'off' },
     { accounts: a, clients: () => (++checks === 1 ? { clients: [] } : sharedEditors()) },
   );
-  assert.equal(checks, 3);
-  assert.equal(stops, 2);
+  assert.equal(checks, 2);
+  assert.equal(stops, 1);
   assert.equal(reloads, 1);
 });
 

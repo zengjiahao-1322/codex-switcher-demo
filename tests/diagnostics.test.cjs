@@ -272,6 +272,106 @@ test('同一 VS Code 实例的窗口共用通信标识时，按扩展宿主进�
   });
   assert.equal(ambiguous.clients.find((p) => p.kind === 'ide').editorId, null);
 });
+
+test('远程窗口或 WSL 设置不应否定真实本地后端的 PID 归属', (t) => {
+  const f = fixture(t),
+    c = require('../src/clients/client-status.cjs');
+  for (const flags of [{ remote: 'ssh-remote+fixture' }, { wsl: true }]) {
+    const id = flags.remote ? 'window-remote-local' : 'window-wsl-local';
+    c.heartbeat(f.bridge, { id, pid: 810, home: null, ...flags });
+    const inventory = {
+      ancestry: [{ pid: 810, parentPid: 1, name: 'Code Helper (Plugin)' }],
+      processes: [{ pid: 811, parentPid: 810, exe: 'codex', context: { ok: true, home: f.home } }],
+    };
+    const result = c.snapshot(f.home, f.bridge, { inventory });
+    assert.equal(result.clients.find((p) => p.pid === 811).editorId, id);
+    assert.equal(
+      result.clients.find((p) => p.kind === 'editor' && p.editorId === id).canReload,
+      true,
+    );
+    fs.rmSync(path.join(f.bridge, 'clients', id + '.json'));
+  }
+});
+
+test('心跳返回真实后端关联结果，已连接不能代替已接入', async (t) => {
+  const f = fixture(t),
+    clients = require('../src/clients/client-status.cjs');
+  const inventory = {
+    ancestry: [{ pid: 810, parentPid: 1, name: 'Code Helper (Plugin)' }],
+    processes: [],
+  };
+  t.mock.method(clients, 'scanAsync', async () => inventory);
+  const service = require('../src/server/service.cjs').createService({
+    codexHome: f.home,
+    bridgeHome: f.bridge,
+    hermesHome: path.join(f.root, 'no-hermes'),
+  });
+  const input = { id: 'connected-window', pid: 810, remote: 'ssh-remote+fixture' };
+  const pending = await service.actions.clientHeartbeat(input);
+  assert.equal(pending.connection.state, 'unmatched');
+  assert.deepEqual(pending.connection.backendPids, []);
+  inventory.processes.push({
+    pid: 811,
+    parentPid: 810,
+    exe: 'codex',
+    context: { ok: true, home: f.home },
+  });
+  const ready = await service.actions.clientHeartbeat(input);
+  assert.equal(ready.connection.state, 'ready');
+  assert.deepEqual(ready.connection.backendPids, [811]);
+  const rowFile = path.join(f.bridge, 'clients', input.id + '.json');
+  const row = JSON.parse(fs.readFileSync(rowFile));
+  writeJson(rowFile, { ...row, command: { id: 'linked-reload', type: 'reload' } });
+  assert.equal((await service.actions.clientHeartbeat(input)).command.id, 'linked-reload');
+  clients.heartbeat(f.bridge, { ...input, ack: 'linked-reload', ackStatus: 'reload_requested' });
+  const newInput = {
+    ...input,
+    id: 'reloaded-window',
+    completedReload: { clientId: input.id, commandId: 'linked-reload' },
+  };
+  inventory.processes.length = 0;
+  await service.actions.clientHeartbeat(newInput);
+  const targets = [{ id: input.id, commandId: 'linked-reload' }];
+  assert.equal(clients.reloadResults(f.bridge, targets)[0].status, 'received');
+  fs.rmSync(rowFile);
+  inventory.processes.push({
+    pid: 812,
+    parentPid: 810,
+    exe: 'codex',
+    context: { ok: true, home: f.home },
+  });
+  // 重载后的老宿主不再心跳，实际窗口由新编号注册。
+  writeJson(rowFile, { ...row, lastAck: { id: 'linked-reload', status: 'reload_requested' } });
+  const oldInputRow = JSON.parse(fs.readFileSync(rowFile));
+  oldInputRow.pid = 809;
+  writeJson(rowFile, oldInputRow);
+  await service.actions.clientHeartbeat(newInput);
+  assert.equal(clients.reloadResults(f.bridge, targets)[0].status, 'reloaded');
+  fs.rmSync(rowFile);
+  inventory.processes[0].context.home = path.join(f.root, 'independent');
+  const independent = await service.actions.clientHeartbeat({
+    ...newInput,
+    completedReload: undefined,
+  });
+  assert.equal(independent.connection.state, 'separate');
+  assert.equal(
+    clients.snapshot(f.home, f.bridge, { inventory }).clients.find((c) => c.kind === 'editor')
+      .canReload,
+    false,
+  );
+  // 远程工作区的本机伴随扩展没有本机 Codex 后端时，不能凭同目录声明取得重载资格。
+  inventory.processes.length = 0;
+  assert.equal(
+    (
+      await service.actions.clientHeartbeat({
+        ...newInput,
+        completedReload: undefined,
+        home: f.home,
+      })
+    ).connection.state,
+    'unmatched',
+  );
+});
 test('桌面壳尚无后端时仍识别 Codex，独立目录不跟随', (t) => {
   const f = fixture(t),
     c = require('../src/clients/client-status.cjs');

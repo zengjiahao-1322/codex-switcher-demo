@@ -84,14 +84,14 @@ const freePort = () =>
       });
     });
     const u = new URL(JSON.parse(fs.readFileSync(path.join(bridge, 'running.json'))).url),
-      api = async (name) => {
+      api = async (name, input = {}) => {
         const response = await fetch(u.origin + '/api/' + name, {
           method: 'POST',
           headers: {
             Authorization: 'Bearer ' + u.hash.slice(1),
             'Content-Type': 'application/json',
           },
-          body: '{}',
+          body: JSON.stringify(input),
         });
         const value = await response.json();
         assert.equal(response.status, 200, JSON.stringify(value));
@@ -100,6 +100,16 @@ const freePort = () =>
     assert.equal((await fetch(u.origin + '/')).status, 200);
     assert.equal((await api('accounts')).items.length, 0);
     await api('clients');
+    // 从解压后的发行包调用心跳，确认未依赖开发目录，也不会把连通误报为已接入。
+    const heartbeat = await api('clientHeartbeat', {
+      id: 'package-smoke-window',
+      pid: child.pid,
+      name: 'Package smoke',
+      home,
+    });
+    assert.equal(heartbeat.connection.state, 'unmatched');
+    assert.equal(heartbeat.connection.home, home);
+    assert.deepEqual(heartbeat.connection.backendPids, []);
     const vsix = await api('companionPackage');
     const response = await fetch(u.origin + vsix.url);
     assert.equal(response.status, 200);
@@ -190,7 +200,7 @@ const freePort = () =>
     console.log(
       'PASS extracted ' +
         target +
-        ' package: service, UI, clients, empty account store, VSIX download, config preserved',
+        ' package: service, UI, clients, heartbeat linkage, empty account store, VSIX download, config preserved',
     );
   } finally {
     if (child) {

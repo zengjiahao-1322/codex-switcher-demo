@@ -49,9 +49,11 @@ function activate(context) {
         folders.find((f) => f.uri.scheme === 'vscode-remote')?.uri.authority ||
         vscode.env.remoteName ||
         null;
-    const wsl = !!vscode.workspace
-      .getConfiguration('chatgpt')
-      .get('runCodexInWindowsSubsystemForLinux', false);
+    const wsl =
+      process.platform === 'win32' &&
+      !!vscode.workspace
+        .getConfiguration('chatgpt')
+        .get('runCodexInWindowsSubsystemForLinux', false);
     // 在 VS Code、Insiders、Cursor、Windsurf 中寻找当前安装的官方 Codex 扩展；
     // 不把扩展 ID 写死为一个版本，避免不同编辑器渠道改名后无法发现运行程序。
     const codexExtension = vscode.extensions.all.find((extension) => {
@@ -117,25 +119,27 @@ function activate(context) {
       const c = connection(),
         data = report(),
         r = await post(c, 'clientHeartbeat', { ...data, completedReload });
-      if (completedReload) {
+      if (completedReload && r.connection.state === 'ready') {
         await context.workspaceState.update('codexSwitcher.pendingReload', undefined);
         completedReload = undefined;
       }
+      // HTTP 心跳成功只说明连上后台；必须与真实本机 Codex 后端关联，
+      // 才显示可自动重载，避免和网页的“未关联”提示相互矛盾。
+      const labels = {
+        ready: '已接入',
+        unmatched: '后端未关联',
+        separate: '独立配置',
+      };
       status.tooltip =
-        'Connected to ' +
         new URL(c.url).origin +
-        ' · ' +
-        (data.home || 'separate remote/WSL environment');
-      status.text = '$(plug) Codex Switcher · 已连接';
+        '\n切换器目录：' +
+        r.connection.home +
+        '\n已关联 Codex PID：' +
+        (r.connection.backendPids.join(', ') || '无');
+      status.text = '$(plug) Codex Switcher · ' + labels[r.connection.state];
       if (r.command?.type === 'reload') {
-        if (data.remote || data.wsl) {
-          await post(c, 'clientHeartbeat', {
-            ...data,
-            ack: r.command.id,
-            ackStatus: 'different_environment',
-          });
-          return;
-        }
+        // 后台只给已确认共用配置的本机后端派发命令；远程窗口标签
+        // 不再重复否决它，否则会出现“已关联但拒绝重载”。
         await post(c, 'clientHeartbeat', {
           ...data,
           ack: r.command.id,

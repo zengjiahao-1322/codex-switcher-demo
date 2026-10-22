@@ -38,6 +38,119 @@ test('显式代理环境变量优先，不读取 Windows 系统代理', (t) => {
     else process.env.HTTPS_PROXY = previous;
   }
 });
+
+test('Win/Mac 伴随扩展按后端关联显示状态，远程窗口标记不阻止已确认的本机重载', async (t) => {
+  const http = require('node:http'),
+    vm = require('node:vm');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-companion-link-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const platform of ['win32', 'darwin']) {
+    let state = 'unmatched',
+      command = null,
+      didReload;
+    const reload = new Promise((resolve) => {
+      didReload = resolve;
+    });
+    const requests = [],
+      subscriptions = [],
+      commands = new Map(),
+      saved = new Map();
+    const server = http.createServer(async (req, res) => {
+      let data = '';
+      for await (const chunk of req) data += chunk;
+      requests.push(JSON.parse(data));
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({
+          command,
+          connection: { state, home: root, backendPids: state === 'ready' ? [811] : [] },
+        }),
+      );
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const file = path.join(root, platform + '.json');
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ url: 'http://127.0.0.1:' + server.address().port + '/#fixture' }),
+    );
+    const status = { show() {}, dispose() {} };
+    const vscode = {
+      StatusBarAlignment: { Right: 1 },
+      window: { createStatusBarItem: () => status },
+      env: { appName: 'VS Code', remoteName: 'ssh-remote' },
+      extensions: { all: [] },
+      workspace: {
+        workspaceFolders: [],
+        getConfiguration: (name) => ({
+          get: (key, fallback) =>
+            name === 'codexSwitcher'
+              ? file
+              : key === 'runCodexInWindowsSubsystemForLinux'
+                ? true
+                : fallback,
+        }),
+      },
+      commands: {
+        registerCommand: (name, action) => {
+          commands.set(name, action);
+          return { dispose() {} };
+        },
+        executeCommand: async (name) => {
+          assert.equal(name, 'workbench.action.reloadWindow');
+          didReload();
+        },
+      },
+    };
+    const loaded = { exports: {} };
+    const nativeRequire = require('node:module').createRequire(
+      path.join(PROJECT_ROOT, 'vscode-companion', 'extension.cjs'),
+    );
+    vm.runInNewContext(
+      fs.readFileSync(path.join(PROJECT_ROOT, 'vscode-companion', 'extension.cjs'), 'utf8'),
+      {
+        require: (name) => (name === 'vscode' ? vscode : nativeRequire(name)),
+        exports: loaded.exports,
+        process: { platform, arch: 'x64', pid: 810, env: {} },
+        URL,
+        setInterval: () => 1,
+        clearInterval() {},
+        setTimeout,
+      },
+    );
+    try {
+      loaded.exports.activate({
+        subscriptions,
+        workspaceState: {
+          get: (key) => saved.get(key),
+          update: async (key, value) => saved.set(key, value),
+        },
+      });
+      const until = Date.now() + 3000;
+      while (!status.text.includes('后端未关联') && Date.now() < until)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.match(status.text, /后端未关联/);
+      assert.equal(requests[0].wsl, platform === 'win32');
+      state = 'ready';
+      command = { id: 'confirmed-local-reload', type: 'reload' };
+      await commands.get('codexSwitcher.connect')();
+      assert.match(status.text, /已接入/);
+      assert.match(status.tooltip, /811/);
+      await Promise.race([
+        reload,
+        new Promise((_, reject) => setTimeout(() => reject(Error('未执行本机重载')), 3000)),
+      ]);
+      assert.ok(requests.some((r) => r.ackStatus === 'reload_requested'));
+      state = 'separate';
+      command = null;
+      await commands.get('codexSwitcher.connect')();
+      assert.match(status.text, /独立配置/);
+    } finally {
+      subscriptions.forEach((s) => s.dispose());
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+});
 test('窗口回报只推进对应重载编号，区分接收、重载和失败', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-ack-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -555,8 +555,27 @@ function createService({
         versionCache = null;
         return { message: '已改为读取 ' + home + '，后续切换只应用到此目录。' };
       }),
-    clientHeartbeat: (input) =>
-      require('../clients/client-status.cjs').heartbeat(bridgeHome, input),
+    clientHeartbeat: async (input) => {
+      const clients = require('../clients/client-status.cjs');
+      const { completedReload, ...registration } = input;
+      let result = clients.heartbeat(bridgeHome, registration);
+      const status = clients.snapshot(codexHome, bridgeHome, {
+        inventory: await clients.scanAsync(),
+      });
+      const backends = status.clients.filter((c) => c.kind === 'ide' && c.editorId === input.id);
+      const ready = backends.some((c) => c.confirmed && c.shared);
+      // 伴随扩展先于官方 Codex 激活。只有新的本机后端已关联，
+      // 才把旧窗口的重载请求推进为完成，不能只收到心跳就报成功。
+      if (completedReload && ready) result = clients.heartbeat(bridgeHome, input);
+      return {
+        ...result,
+        connection: {
+          state: ready ? 'ready' : backends.some((c) => c.confirmed) ? 'separate' : 'unmatched',
+          home: codexHome,
+          backendPids: backends.map((c) => c.pid),
+        },
+      };
+    },
     reloadClients: (input) =>
       require('../clients/client-status.cjs').requestReload(codexHome, bridgeHome, input),
     companionPackage: async () => {
