@@ -246,7 +246,7 @@ async function runSwitch(
       throw Error(
         '检测到 ' +
           missing.length +
-          ' 个共用配置的 Codex 插件后端尚未接入伴随扩展。请先在“影响范围与其他客户端”接入编辑器；配置尚未修改，客户端未关闭。若要稍后手动重载，可取消“同时重载”。',
+          ' 个共用配置的 Codex 插件后端尚未接入伴随扩展；当前已连接的编辑器只代表对应的一个扩展宿主。请在每个 VS Code 窗口及 SSH/远程主机分别安装伴随扩展后再切换。配置尚未修改，客户端未关闭。若要稍后手动重载，可取消“同时重载”。',
       );
   };
   report('preparing', api ? '正在检查 API 和模型列表…' : '正在准备目标账号登录…');
@@ -353,9 +353,22 @@ async function runSwitch(
       reloadAttempted = true;
       try {
         const reloaded = await step('reload', '发送编辑器重载请求', () =>
-          require('./client-status.cjs').requestReload(job.codexHome, job.bridgeHome, {
-            stoppedEditors,
-          }),
+          (async () => {
+            // 官方扩展可能在第一次停止后自动拉起旧后端；窗口重载前再释放一次，
+            // 确保它不会在新配置写入后继续持有旧登录状态。
+            const latest = await clients({ force: true });
+            if (latest.clients.some((c) => c.kind === 'ide' && c.confirmed && c.shared)) {
+              const restarted = await require('./client-status.cjs').stopEditorBackends(
+                job.codexHome,
+                job.bridgeHome,
+                { inventory: latest.inventory },
+              );
+              if (restarted.length) stoppedEditors = restarted;
+            }
+            return require('./client-status.cjs').requestReload(job.codexHome, job.bridgeHome, {
+              stoppedEditors,
+            });
+          })(),
         );
         editorReload = reloaded;
         if (reloaded.count || reloaded.detectedEditors || reloaded.connectedEditors) {

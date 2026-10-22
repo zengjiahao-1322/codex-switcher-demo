@@ -270,10 +270,11 @@ test('相同模型切换官方账号仍会停止旧插件后端', async (t) => {
   let stops = 0;
   const clients = require('../src/clients/client-status.cjs');
   t.mock.method(clients, 'stopEditorBackends', async () => {
-    assert.equal(
-      identity(JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json')))).id !== bob.id,
-      true,
-    );
+    if (stops === 0)
+      assert.equal(
+        identity(JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json')))).id !== bob.id,
+        true,
+      );
     stops++;
     return [];
   });
@@ -289,7 +290,7 @@ test('相同模型切换官方账号仍会停止旧插件后端', async (t) => {
       },
     },
   );
-  assert.equal(stops, 1);
+  assert.equal(stops, 2);
   assert.equal(
     identity(JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json')))).id,
     bob.id,
@@ -997,8 +998,8 @@ test('账号准备期间出现的共用编辑器在关闭前重新检查并加�
     { ...f, id, desktopExe: null, threadFollow: 'off' },
     { accounts: a, clients: () => (++checks === 1 ? { clients: [] } : sharedEditors()) },
   );
-  assert.equal(checks, 2);
-  assert.equal(stops, 1);
+  assert.equal(checks, 3);
+  assert.equal(stops, 2);
   assert.equal(reloads, 1);
 });
 
