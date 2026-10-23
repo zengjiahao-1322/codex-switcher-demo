@@ -3,8 +3,17 @@ const http = require('node:http'),
   fs = require('node:fs'),
   path = require('node:path'),
   crypto = require('node:crypto');
-function createServer({ token, getState, actions = {}, adapterToken, handleResponses, runtime }) {
+function createServer({
+  token,
+  getState,
+  actions = {},
+  adapterToken,
+  handleResponses,
+  runtime,
+  onFirstApiRequest,
+}) {
   const downloads = new Map();
+  let firstApiRequest = true;
   return http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -48,6 +57,10 @@ function createServer({ token, getState, actions = {}, adapterToken, handleRespo
       }
     }
     if (url.pathname.startsWith('/api/')) {
+      if (firstApiRequest) {
+        firstApiRequest = false;
+        onFirstApiRequest?.(url.pathname);
+      }
       const supplied = Buffer.from(req.headers.authorization || ''),
         expected = Buffer.from('Bearer ' + token);
       // 浏览器使用已建立的 Cookie 会话；命令行与伴随扩展使用 Bearer 凭证。

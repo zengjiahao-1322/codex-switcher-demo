@@ -304,6 +304,13 @@ function quotaNode(q) {
     note('额度尚未读取');
     return box;
   }
+  // 当前账号的令牌即将由 Codex 续期时，后台暂不查询，避免顶掉正在使用的登录；这不是错误。
+  if (q.status === 'deferred') {
+    note(q.message);
+    if (q.checkedAt)
+      note('上次成功读取：' + new Date(q.checkedAt).toLocaleString('zh-CN'), 'quota-time');
+    return box;
+  }
   if (q.status === 'error') {
     // 失败时不再把旧 buckets 当成当前额度展示，避免“凭证失效但额度正常”的误解。
     note(q.error || '本次额度读取失败', 'quota-error');

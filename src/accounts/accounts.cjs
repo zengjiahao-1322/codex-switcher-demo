@@ -192,6 +192,7 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
       load,
       authFile,
       captureCurrent,
+      currentId: () => identity(currentAuth())?.id,
       openSession,
       readJson,
       writeJson,

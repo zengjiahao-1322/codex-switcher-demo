@@ -58,12 +58,21 @@ function quotaError(error) {
   };
 }
 
+function tokenClaims(token) {
+  try {
+    return JSON.parse(Buffer.from(String(token).split('.')[1], 'base64url'));
+  } catch {
+    return {};
+  }
+}
+
 function createQuotaReader({
   bridgeHome,
   root,
   load,
   authFile,
   captureCurrent,
+  currentId = () => null,
   openSession,
   readJson,
   writeJson,
@@ -99,6 +108,27 @@ function createQuotaReader({
     if (!selected) throw Error('账号不存在，请重新选择');
     const file = path.join(root, id, 'quota.json'),
       previous = readJson(file, {});
+    if (currentId() === id) {
+      const auth = readJson(authFile(id)),
+        claims = tokenClaims(auth?.tokens?.access_token),
+        expiresAt = Number(claims.exp),
+        hasExpiry = Number.isFinite(expiresAt),
+        nearExpiry = hasExpiry && expiresAt <= Math.floor(Date.now() / 1000) + 5 * 60,
+        scheduled =
+          !hasExpiry &&
+          Date.parse(auth?.last_refresh || '') <= Date.now() - 8 * 24 * 60 * 60 * 1000;
+      if (nearExpiry || scheduled) {
+        const value = {
+          status: 'deferred',
+          reason: 'token_refresh_pending',
+          message:
+            '当前账号的登录即将由 Codex 自己续期，为避免顶掉正在使用的登录暂不查询；Codex 刷新后会自动恢复。',
+          ...(previous.checkedAt ? { checkedAt: previous.checkedAt } : {}),
+        };
+        writeJson(file, value);
+        return { id, ...value };
+      }
+    }
     let check;
     try {
       check = openSession(path.dirname(authFile(id)));

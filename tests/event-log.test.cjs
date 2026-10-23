@@ -105,7 +105,7 @@ test('同一窗口十次相同心跳只记一次，关联状态改变后才追�
   assert.equal(readRecent(bridgeHome, 1)[0].to, 'separate');
 });
 
-test('官方准备、额度和登录失败各自落盘，保留类型与错误码且不泄露秘密', async (t) => {
+test('官方准备和登录失败落盘，当前账号额度延迟且不泄露秘密', async (t) => {
   const { codexHome, bridgeHome } = fixture(t),
     jwt = (payload) =>
       'eyJhbGciOiJub25lIn0.' +
@@ -129,12 +129,12 @@ test('官方准备、额度和登录失败各自落盘，保留类型与错误�
   });
   const id = accounts.status().items[0].id;
   await assert.rejects(accounts.prepare(id), /校验程序不可用/);
-  assert.equal((await accounts.quota(id)).status, 'error');
+  assert.equal((await accounts.quota(id)).status, 'deferred');
   await assert.rejects(accounts.startLogin({ id }), /missing runtime/);
   const events = readRecent(bridgeHome, 10);
   assert.deepEqual(
     events.map((e) => e.op),
-    ['prepare', 'quota', 'login'],
+    ['prepare', 'login'],
   );
   for (const event of events) {
     assert.equal(event.event, 'official.error');

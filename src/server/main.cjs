@@ -7,6 +7,7 @@ const fs = require('fs'),
   crypto = require('crypto');
 const { createServer } = require('./server.cjs'),
   { createService } = require('./service.cjs');
+const { log: logEvent } = require('../diagnostics/event-log.cjs');
 const { writeJson } = require('../accounts/accounts.cjs');
 const platform = require('../platform/platform.cjs'),
   codexHome = platform.codexHome(),
@@ -121,7 +122,10 @@ async function existing() {
   return null;
 }
 (async () => {
+  const hadRunning = !!readJson(runningPath);
+  let phaseStarted = performance.now();
   const prior = await existing();
+  const phases = { existing: Math.round(performance.now() - phaseStarted) };
   if (prior) {
     console.log('BRIDGE_ALREADY_RUNNING ' + new URL(prior.url).origin);
     openUrl(prior.url);
@@ -131,9 +135,18 @@ async function existing() {
     !process.env.BRIDGE_HOME || process.env.BRIDGE_DISCOVERY_DIR
       ? process.env.BRIDGE_DISCOVERY_DIR || path.join(os.homedir(), '.codex-api-switcher')
       : null;
+  const protectedDirs = [bridgeHome, discoveryDir].filter(Boolean),
+    protectSkipped =
+      protectedDirs.length > 0 &&
+      protectedDirs.every(
+        (dir) => readJson(path.join(dir, 'acl-protected.json'))?.path === path.resolve(dir),
+      );
+  phaseStarted = performance.now();
   const dataDirProtection = require('../platform/data-protection.cjs').protectDataDirs(
-    [bridgeHome, discoveryDir].filter(Boolean),
+    protectedDirs,
   );
+  phases.protectDataDirs = Math.round(performance.now() - phaseStarted);
+  phaseStarted = performance.now();
   const svc = createService({
     codexHome,
     bridgeHome,
@@ -142,6 +155,7 @@ async function existing() {
     defaultPort: Number(process.env.BRIDGE_PORT) || 47831,
     dataDirProtection,
   });
+  phases.createService = Math.round(performance.now() - phaseStarted);
   const token = crypto.randomBytes(32).toString('hex'),
     a = svc.adapterSettings();
   const server = createServer({
@@ -151,8 +165,16 @@ async function existing() {
     actions: svc.actions,
     adapterToken: a.token,
     handleResponses: (req, res) => svc.handleResponses(req, res, { onError: logAdapter }),
+    onFirstApiRequest: (route) =>
+      logEvent(bridgeHome, 'startup.firstRequest', {
+        sinceReadyMs: Math.round(performance.now() - readyAt),
+        route,
+      }),
   });
+  let readyAt;
   const ready = () => {
+    phases.listen = Math.round(performance.now() - phaseStarted);
+    readyAt = performance.now();
     const port = server.address().port;
     svc.setListeningPort(port);
     const url = 'http://127.0.0.1:' + port + '/#' + token;
@@ -164,6 +186,13 @@ async function existing() {
       fs.mkdirSync(dir, { recursive: true });
       writeJson(path.join(dir, 'connection.json'), connection);
     }
+    logEvent(bridgeHome, 'startup', {
+      readyMs: Math.round(process.uptime() * 1000),
+      phases,
+      port,
+      handover: hadRunning && !prior,
+      protectSkipped,
+    });
     console.log('BRIDGE_READY http://127.0.0.1:' + port);
     openUrl(url);
   };
@@ -181,6 +210,7 @@ async function existing() {
   });
   // 端口回落时仍只执行一次 ready，避免重复打开页面及覆盖正在读取的连接记录。
   server.once('listening', ready);
+  phaseStarted = performance.now();
   server.listen(a.port, '127.0.0.1');
   const cleanup = () => {
     const r = readJson(runningPath);
