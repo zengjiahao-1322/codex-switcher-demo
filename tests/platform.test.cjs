@@ -489,7 +489,7 @@ test('native IDE-only runtime starts and cancels official login without a deskto
     );
     assert.equal(fs.existsSync(path.join(loginHome, 'config.toml')), true);
     if (process.platform === 'darwin') {
-      const inventory = require('../src/platform/mac-processes.cjs').scan(),
+      const inventory = await require('../src/platform/mac-processes.cjs').scanAsync(),
         home = loginHome;
       const processRow = inventory.processes.find(
         (p) =>

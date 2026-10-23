@@ -74,6 +74,8 @@ test('同一窗口十次相同心跳只记一次，关联状态改变后才追�
       processes: [],
     };
   t.mock.method(clients, 'scanAsync', async () => inventory);
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   const service = require('../src/server/service.cjs').createService({ codexHome, bridgeHome }),
     input = { id: 'fixture-editor', pid: 710, companionVersion: '0.1.3' };
   for (let i = 0; i < 10; i++) await service.actions.clientHeartbeat(input);
@@ -90,6 +92,7 @@ test('同一窗口十次相同心跳只记一次，关联状态改变后才追�
     exe: path.join(root, 'openai.chatgpt-test', 'bin', 'codex.exe'),
     context: { ok: true, home: codexHome },
   });
+  now += 5000;
   for (let i = 0; i < 10; i++) await service.actions.clientHeartbeat(input);
   events = readRecent(bridgeHome, 100);
   assert.equal(events.length, 2);
@@ -97,6 +100,7 @@ test('同一窗口十次相同心跳只记一次，关联状态改变后才追�
   assert.equal(events[1].to, 'ready');
   assert.deepEqual(events[1].backendPids, [711]);
   inventory.processes[0].context.home = path.join(root, 'independent');
+  now += 30000;
   await service.actions.clientHeartbeat(input);
   assert.equal(readRecent(bridgeHome, 1)[0].to, 'separate');
 });

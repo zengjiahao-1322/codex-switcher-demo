@@ -1517,10 +1517,9 @@ $('threads-refresh').onclick = () =>
   });
 $('diagnosis-thread').onchange = runDiagnosis;
 $('diagnosis-run').onclick = runDiagnosis;
-refreshAccounts()
-  .then(async (data) => {
-    await refresh();
-    refreshClients();
+// 首屏三个请求互不依赖，同时发出；任一先返回都能渲染，另一项到达后会补全界面。
+Promise.all([refreshAccounts(), refresh(), refreshClients()])
+  .then(([data]) => {
     const current = state.current.official && accountData?.items.find((a) => a.current);
     if (
       current &&

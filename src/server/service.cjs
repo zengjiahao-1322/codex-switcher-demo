@@ -53,6 +53,7 @@ function createService({
   let listeningPort = null;
   const passed = new Map();
   const companionStates = new Map();
+  const companionConnections = new Map();
   const fingerprint = (p, m) =>
     crypto
       .createHash('sha256')
@@ -516,7 +517,9 @@ function createService({
         });
       }),
     clients: async () => {
-      const status = require('../clients/client-status.cjs').clientStatus(codexHome, bridgeHome);
+      const clients = require('../clients/client-status.cjs'),
+        inventory = await clients.scanAsync(),
+        status = clients.clientStatus(codexHome, bridgeHome, { inventory });
       let runtime = null;
       try {
         runtime = findCodex({ dataHome: bridgeHome });
@@ -561,14 +564,24 @@ function createService({
           codexExe: () => findCodex({ dataHome: bridgeHome }),
         });
         versionCache = null;
+        companionConnections.clear();
         return { message: '已改为读取 ' + home + '，后续切换只应用到此目录。' };
       }),
     clientHeartbeat: async (input) => {
       const clients = require('../clients/client-status.cjs');
       const { completedReload, ...registration } = input;
       let result = clients.heartbeat(bridgeHome, registration);
+      const cached = companionConnections.get(input.id),
+        ttl = cached?.connection.state === 'ready' ? 30000 : 5000;
+      if (
+        cached &&
+        cached.pid === Number(input.pid) &&
+        !completedReload &&
+        Date.now() - cached.checkedAt < ttl
+      )
+        return { ...result, connection: cached.connection };
       const status = clients.snapshot(codexHome, bridgeHome, {
-        inventory: await clients.scanAsync(),
+        inventory: await clients.scanAsync({ force: !!completedReload }),
       });
       const backends = status.clients.filter((c) => c.kind === 'ide' && c.editorId === input.id);
       const ready = backends.some((c) => c.confirmed && c.shared);
@@ -580,6 +593,11 @@ function createService({
         home: codexHome,
         backendPids: backends.map((c) => c.pid),
       };
+      companionConnections.set(input.id, {
+        pid: Number(input.pid),
+        checkedAt: Date.now(),
+        connection,
+      });
       const from = companionStates.get(input.id) || null;
       if (from !== connection.state) {
         eventLog.log(bridgeHome, 'companion.state', {

@@ -41,30 +41,37 @@ function scan({ force = false } = {}) {
 async function scanAsync({ force = false } = {}) {
   if (!force && cached && Date.now() - cached.at < 2500) return cached.value;
   if (scanning) return scanning;
-  if (process.platform === 'darwin') return scan({ force });
   // 助手在独立进程里执行，等待它时允许账号 RPC 继续收发。
-  scanning = new Promise((resolve, reject) => {
-    cp.execFile(
-      requireWindowsHelper(),
-      [],
-      { encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(Error(stderr.trim() || '无法读取 Codex 进程归属。'));
-          return;
-        }
-        try {
-          const value = JSON.parse(stdout);
-          cached = { at: Date.now(), value };
-          resolve(value);
-        } catch (error) {
-          reject(error);
-        }
-      },
-    );
-  }).finally(() => {
-    scanning = null;
-  });
+  scanning = (
+    process.platform === 'darwin'
+      ? require('../platform/mac-processes.cjs').scanAsync()
+      : new Promise((resolve, reject) => {
+          cp.execFile(
+            requireWindowsHelper(),
+            [],
+            { encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+            (error, stdout, stderr) => {
+              if (error) {
+                reject(Error(stderr.trim() || '无法读取 Codex 进程归属。'));
+                return;
+              }
+              try {
+                const value = JSON.parse(stdout);
+                resolve(value);
+              } catch (error) {
+                reject(error);
+              }
+            },
+          );
+        })
+  )
+    .then((value) => {
+      cached = { at: Date.now(), value };
+      return value;
+    })
+    .finally(() => {
+      scanning = null;
+    });
   return scanning;
 }
 function ancestryOf(p, all) {
@@ -167,12 +174,17 @@ function heartbeat(bridgeHome, input) {
     lastAck: prior.lastAck || null,
   };
   if (input.ack && (row.command?.id === input.ack || row.lastAck?.id === input.ack)) {
-    row.lastAck = {
+    const ack = {
       id: input.ack,
-      at: Date.now(),
       status: input.ackStatus || 'accepted',
       error: input.ackError || null,
     };
+    if (
+      row.lastAck?.id !== ack.id ||
+      row.lastAck.status !== ack.status ||
+      row.lastAck.error !== ack.error
+    )
+      row.lastAck = { ...ack, at: Date.now() };
     if (row.command?.id === input.ack) row.command = null;
   }
   // 新扩展宿主启动后回报上次重载编号；只有编号匹配才能把“已接收”推进到“扩展已重载”。
@@ -186,7 +198,14 @@ function heartbeat(bridgeHome, input) {
       writeJson(oldFile, old);
     }
   }
-  writeJson(file, row);
+  const { seenAt: previousWrite, ...previousFields } = prior,
+    { seenAt, ...fields } = row;
+  // seenAt 记录实际落盘时间；五秒内无变化的心跳不重复写文件。
+  if (
+    Date.now() - previousWrite >= 5000 ||
+    JSON.stringify(fields) !== JSON.stringify(previousFields)
+  )
+    writeJson(file, row);
   return { command: row.command };
 }
 function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {

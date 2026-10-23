@@ -105,6 +105,34 @@ test('#4 旧对话部分未同步时提供继续同步', async () => {
   assert.equal(page.calls('resumeThreadSync').length, 1);
 });
 
+test('首屏同时发出 accounts、state、clients，不互相等待', async () => {
+  let releaseAccounts;
+  const accountsHeld = new Promise((resolve) => (releaseAccounts = resolve));
+  const respond = backend(),
+    sent = [];
+  const page = runPage({
+    respond: async (route, body) => {
+      sent.push('/api/' + route);
+      if (route === 'accounts') await accountsHeld;
+      return respond(route, body);
+    },
+  });
+  // accounts 尚未返回时，state 和 clients 必须已经发出；无论断言结果如何都放行，避免测试挂起。
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const before = [...sent];
+  releaseAccounts();
+  const loaded = await page;
+  for (const route of ['/api/state', '/api/clients'])
+    assert.ok(before.includes(route), route + ' 应在 accounts 返回前发出：' + before.join(','));
+  assert.deepEqual(
+    loaded.requests
+      .slice(0, 3)
+      .map((r) => r.url)
+      .sort(),
+    ['/api/accounts', '/api/clients', '/api/state'],
+  );
+});
+
 // 分别覆盖已接入、未关联、独立目录和带远程标签但未确认后端的窗口。
 const editor = (id, extra = {}) => ({ id: 'editor-' + id, editorId: id, kind: 'editor', ...extra });
 const backendProcess = (pid, editorId = null) => ({

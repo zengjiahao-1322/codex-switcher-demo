@@ -301,6 +301,8 @@ test('心跳返回真实后端关联结果，已连接不能代替已接入', as
     processes: [],
   };
   t.mock.method(clients, 'scanAsync', async () => inventory);
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   const service = require('../src/server/service.cjs').createService({
     codexHome: f.home,
     bridgeHome: f.bridge,
@@ -316,6 +318,7 @@ test('心跳返回真实后端关联结果，已连接不能代替已接入', as
     exe: 'codex',
     context: { ok: true, home: f.home },
   });
+  now += 5000;
   const ready = await service.actions.clientHeartbeat(input);
   assert.equal(ready.connection.state, 'ready');
   assert.deepEqual(ready.connection.backendPids, [811]);
@@ -349,6 +352,7 @@ test('心跳返回真实后端关联结果，已连接不能代替已接入', as
   assert.equal(clients.reloadResults(f.bridge, targets)[0].status, 'reloaded');
   fs.rmSync(rowFile);
   inventory.processes[0].context.home = path.join(f.root, 'independent');
+  now += 30000;
   const independent = await service.actions.clientHeartbeat({
     ...newInput,
     completedReload: undefined,
@@ -361,6 +365,7 @@ test('心跳返回真实后端关联结果，已连接不能代替已接入', as
   );
   // 远程工作区的本机伴随扩展没有本机 Codex 后端时，不能凭同目录声明取得重载资格。
   inventory.processes.length = 0;
+  now += 5000;
   assert.equal(
     (
       await service.actions.clientHeartbeat({

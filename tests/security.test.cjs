@@ -28,7 +28,11 @@ test('#1 会话无效时显示重新打开的提示，不再访问主页重取�
   assert.equal(page.byId('session-notice').hidden, false);
   assert.equal(page.workspace.hidden, true);
   assert.equal(page.byId('summary').textContent, '未连接本机会话');
-  assert.equal(page.requests.length, 1, '会话失效后不应继续发请求');
+  // 首屏三个请求同时发出；发现会话失效之后，任何操作都不应再发请求。
+  const before = page.requests.length;
+  assert.ok(before <= 3, '首屏请求数：' + before);
+  await page.byId('threads-refresh').onclick();
+  assert.equal(page.requests.length, before, '会话失效后不应继续发请求');
   assert.equal(
     page.requests.some((r) => r.url === '/'),
     false,
