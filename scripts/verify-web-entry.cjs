@@ -193,7 +193,10 @@ async function loaded(page, url) {
       fullPage: true,
       timeout: 15000,
     });
-    const failed = await context.newPage();
+    // 使用独立会话建立当前启动凭证，避免前面 127.0.0.1/localhost 页面
+    // 的 Cookie 在不同平台浏览器实现中互相影响错误页面验收。
+    const failedContext = await browser.newContext();
+    const failed = await failedContext.newPage();
     await failed.route('**/api/accounts', (route) =>
       route.fulfill({
         status: 500,
@@ -201,9 +204,13 @@ async function loaded(page, url) {
         body: JSON.stringify({ error: 'fixture load failure' }),
       }),
     );
-    await failed.goto(base + '/');
-    await failed.waitForFunction(
-      () => document.getElementById('summary').textContent === '本机配置读取失败',
+    const failedAccounts = failed.waitForResponse(
+      (response) => response.url().endsWith('/api/accounts') && response.status() === 500,
+    );
+    await failed.goto(base + '/#fixture-session-after-restart');
+    await failedAccounts;
+    await failed.waitForFunction(() =>
+      document.getElementById('summary').textContent.includes('本机配置读取失败'),
     );
     assert.ok((await failed.locator('#status').innerText()).includes('fixture load failure'));
     checked('load-error-does-not-stay-loading');
