@@ -112,9 +112,11 @@ test('Win/Mac 伴随扩展按后端关联显示状态，远程窗口标记不阻
         exports: loaded.exports,
         process: { platform, arch: 'x64', pid: 810, env: {} },
         URL,
+        AbortController,
         setInterval: () => 1,
         clearInterval() {},
         setTimeout,
+        clearTimeout,
       },
     );
     try {

@@ -208,6 +208,38 @@ function heartbeat(bridgeHome, input) {
     writeJson(file, row);
   return { command: row.command };
 }
+function waitForCommand(bridgeHome, id, wait, signal) {
+  const file = path.join(bridgeHome, 'clients', id + '.json');
+  return new Promise((resolve, reject) => {
+    let modified;
+    const finish = (error, command = null) => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', aborted);
+      if (error) reject(error);
+      else resolve(command);
+    };
+    const check = () => {
+      try {
+        const current = fs.statSync(file).mtimeMs;
+        if (current !== modified) {
+          modified = current;
+          const row = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (row.command) finish(null, row.command);
+        }
+      } catch (error) {
+        finish(error);
+      }
+    };
+    const aborted = () => finish(null),
+      interval = setInterval(check, 250),
+      timeout = setTimeout(() => finish(null), wait);
+    signal?.addEventListener('abort', aborted, { once: true });
+    // 扫描进程期间也可能刚写入命令，开始等待时先读一次，避免漏掉这次变化。
+    if (signal?.aborted) aborted();
+    else check();
+  });
+}
 function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
   const all = inventory.ancestry,
     // 远程 extension host 的 PID 不在本机进程表中，但心跳仍是已认证的窗口登记。
@@ -475,6 +507,8 @@ module.exports = {
   diagnosticClients,
   snapshot,
   heartbeat,
+  records,
+  waitForCommand,
   requestReload,
   sameHome,
   configLayers,

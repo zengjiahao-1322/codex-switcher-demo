@@ -89,7 +89,17 @@ function createServer({ token, getState, actions = {}, adapterToken, handleRespo
           text += chunk;
           if (Buffer.byteLength(text) > 16384) return send(413, { error: 'Payload too large' });
         }
-        const result = await action(JSON.parse(text || '{}'));
+        const controller = new AbortController(),
+          disconnected = () => controller.abort();
+        // req.close 也会在正文正常读完时触发；响应关闭才代表本次连接已经结束。
+        res.once('close', disconnected);
+        let result;
+        try {
+          result = await action(JSON.parse(text || '{}'), { signal: controller.signal });
+        } finally {
+          res.off('close', disconnected);
+        }
+        if (res.destroyed) return;
         if (url.pathname === '/api/companionPackage') {
           const key = crypto.randomBytes(24).toString('hex');
           for (const [k, v] of downloads) if (Date.now() - v.at > 300000) downloads.delete(k);

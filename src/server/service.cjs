@@ -490,6 +490,47 @@ function createService({
       },
     };
   }
+  async function connectionFor(input) {
+    const clients = require('../clients/client-status.cjs'),
+      cached = companionConnections.get(input.id),
+      ttl = cached?.connection.state === 'ready' ? 30000 : 5000;
+    if (
+      cached &&
+      cached.pid === Number(input.pid) &&
+      !input.completedReload &&
+      Date.now() - cached.checkedAt < ttl
+    )
+      return cached.connection;
+    const status = clients.snapshot(codexHome, bridgeHome, {
+      inventory: await clients.scanAsync({ force: !!input.completedReload }),
+    });
+    const backends = status.clients.filter((c) => c.kind === 'ide' && c.editorId === input.id),
+      ready = backends.some((c) => c.confirmed && c.shared),
+      connection = {
+        state: ready ? 'ready' : backends.some((c) => c.confirmed) ? 'separate' : 'unmatched',
+        home: codexHome,
+        backendPids: backends.map((c) => c.pid),
+      };
+    companionConnections.set(input.id, {
+      pid: Number(input.pid),
+      checkedAt: Date.now(),
+      connection,
+    });
+    const from = companionStates.get(input.id) || null;
+    if (from !== connection.state) {
+      eventLog.log(bridgeHome, 'companion.state', {
+        editor: input.id,
+        editorPid: Number(input.pid),
+        from,
+        to: connection.state,
+        backendPids: connection.backendPids,
+        remote: input.remote || null,
+        companionVersion: input.companionVersion || null,
+      });
+      companionStates.set(input.id, connection.state);
+    }
+    return connection;
+  }
   const actions = {
     setThreadFollow: ({ mode }) =>
       exclusive(async () => {
@@ -567,53 +608,24 @@ function createService({
         companionConnections.clear();
         return { message: '已改为读取 ' + home + '，后续切换只应用到此目录。' };
       }),
-    clientHeartbeat: async (input) => {
+    clientHeartbeat: async (input, { signal } = {}) => {
       const clients = require('../clients/client-status.cjs');
       const { completedReload, ...registration } = input;
       let result = clients.heartbeat(bridgeHome, registration);
-      const cached = companionConnections.get(input.id),
-        ttl = cached?.connection.state === 'ready' ? 30000 : 5000;
-      if (
-        cached &&
-        cached.pid === Number(input.pid) &&
-        !completedReload &&
-        Date.now() - cached.checkedAt < ttl
-      )
-        return { ...result, connection: cached.connection };
-      const status = clients.snapshot(codexHome, bridgeHome, {
-        inventory: await clients.scanAsync({ force: !!completedReload }),
-      });
-      const backends = status.clients.filter((c) => c.kind === 'ide' && c.editorId === input.id);
-      const ready = backends.some((c) => c.confirmed && c.shared);
-      // 伴随扩展先于官方 Codex 激活。只有新的本机后端已关联，
-      // 才把旧窗口的重载请求推进为完成，不能只收到心跳就报成功。
-      if (completedReload && ready) result = clients.heartbeat(bridgeHome, input);
-      const connection = {
-        state: ready ? 'ready' : backends.some((c) => c.confirmed) ? 'separate' : 'unmatched',
-        home: codexHome,
-        backendPids: backends.map((c) => c.pid),
-      };
-      companionConnections.set(input.id, {
-        pid: Number(input.pid),
-        checkedAt: Date.now(),
-        connection,
-      });
-      const from = companionStates.get(input.id) || null;
-      if (from !== connection.state) {
-        eventLog.log(bridgeHome, 'companion.state', {
-          editor: input.id,
-          editorPid: Number(input.pid),
-          from,
-          to: connection.state,
-          backendPids: connection.backendPids,
-          remote: input.remote || null,
-          companionVersion: input.companionVersion || null,
-        });
-        companionStates.set(input.id, connection.state);
+      let connection = await connectionFor(input);
+      // 新后端已关联后才推进完成确认；心跳连通本身不能代表重载成功。
+      if (completedReload && connection.state === 'ready')
+        result = clients.heartbeat(bridgeHome, input);
+      const wait = Math.min(10000, Math.max(0, Number(input.wait) || 0));
+      if (wait && !input.ack && !completedReload && !result.command) {
+        result.command = await clients.waitForCommand(bridgeHome, input.id, wait, signal);
+        // 等待期间后端可能已经就绪；按原有缓存期限确认回复时的状态。
+        if (!signal?.aborted) connection = await connectionFor(input);
       }
       return {
         ...result,
         connection,
+        longPoll: true,
       };
     },
     reloadClients: (input) =>

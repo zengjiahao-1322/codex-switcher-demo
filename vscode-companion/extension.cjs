@@ -4,13 +4,14 @@ const fs = require('node:fs'),
   path = require('node:path'),
   crypto = require('node:crypto'),
   http = require('node:http');
-function post(connection, route, data) {
+function post(connection, route, data, signal) {
   return new Promise((resolve, reject) => {
     const u = new URL(connection.url);
     const q = http.request(
       new URL('/api/' + route, u.origin),
       {
         method: 'POST',
+        signal,
         headers: { Authorization: 'Bearer ' + u.hash.slice(1), 'content-type': 'application/json' },
       },
       (r) => {
@@ -26,7 +27,7 @@ function post(connection, route, data) {
         });
       },
     );
-    q.setTimeout(3000, () => q.destroy(Error('switcher unavailable')));
+    q.setTimeout(15000, () => q.destroy(Error('switcher unavailable')));
     q.on('error', reject);
     q.end(JSON.stringify(data));
   });
@@ -36,7 +37,10 @@ function activate(context) {
     id = crypto.randomUUID();
   let busy = false,
     stopped = false,
+    longPoll = false,
+    timer,
     completedReload = context.workspaceState.get('codexSwitcher.pendingReload');
+  const controller = new AbortController();
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 20);
   status.text = '$(plug) Codex Switcher';
   status.command = 'codexSwitcher.connect';
@@ -89,7 +93,7 @@ function activate(context) {
     return {
       id,
       companionVersion: require('./package.json').version,
-      reloadProtocol: 2,
+      reloadProtocol: 3,
       companionHost: runsOnRemoteHost ? 'remote' : 'local',
       pid: process.pid,
       name: vscode.env.appName,
@@ -121,15 +125,30 @@ function activate(context) {
     );
   async function tick() {
     if (busy || stopped) return;
+    clearTimeout(timer);
     busy = true;
+    let delay = 2000;
     try {
       const c = connection(),
         data = report(),
-        r = await post(c, 'clientHeartbeat', { ...data, completedReload });
+        r = await post(
+          c,
+          'clientHeartbeat',
+          {
+            ...data,
+            completedReload,
+            ...(longPoll ? { wait: 10000 } : {}),
+          },
+          controller.signal,
+        );
+      if (stopped) return;
+      longPoll = r.longPoll === true;
       if (completedReload && r.connection.state === 'ready') {
         await context.workspaceState.update('codexSwitcher.pendingReload', undefined);
         completedReload = undefined;
       }
+      // 新后端未就绪时完成确认会立即返回，沿用原节奏，避免连续强制扫描。
+      delay = longPoll && !completedReload ? 0 : 2000;
       // HTTP 心跳成功只说明连上后台；必须与真实本机 Codex 后端关联，
       // 才显示可自动重载，避免和网页的“未关联”提示相互矛盾。
       const labels = {
@@ -147,11 +166,16 @@ function activate(context) {
       if (r.command?.type === 'reload') {
         // 后台只给已确认共用配置的本机后端派发命令；远程窗口标签
         // 不再重复否决它，否则会出现“已关联但拒绝重载”。
-        await post(c, 'clientHeartbeat', {
-          ...data,
-          ack: r.command.id,
-          ackStatus: 'reload_requested',
-        });
+        await post(
+          c,
+          'clientHeartbeat',
+          {
+            ...data,
+            ack: r.command.id,
+            ackStatus: 'reload_requested',
+          },
+          controller.signal,
+        );
         await context.workspaceState.update('codexSwitcher.lastReload', r.command.id);
         await context.workspaceState.update('codexSwitcher.pendingReload', {
           clientId: id,
@@ -163,28 +187,37 @@ function activate(context) {
           } catch (error) {
             await context.workspaceState.update('codexSwitcher.pendingReload', undefined);
             // 请求已收到但编辑器未能执行时，不能继续显示为成功或误报服务未运行。
-            await post(c, 'clientHeartbeat', {
-              ...data,
-              ack: r.command.id,
-              ackStatus: 'reload_failed',
-              ackError: error.message,
-            }).catch(() => {});
+            await post(
+              c,
+              'clientHeartbeat',
+              {
+                ...data,
+                ack: r.command.id,
+                ackStatus: 'reload_failed',
+                ackError: error.message,
+              },
+              controller.signal,
+            ).catch(() => {});
           }
         }, 200);
       }
     } catch (error) {
+      if (stopped) return;
+      delay = 5000;
       status.text = '$(debug-disconnect) Codex Switcher · 未连接';
       status.tooltip = '未连接切换器：' + error.message;
     } finally {
       busy = false;
+      // 一次请求结束才安排下一次；新服务连续长轮询，旧服务仍保持原来的两秒间隔。
+      if (!stopped) timer = setTimeout(tick, delay);
     }
   }
   context.subscriptions.push(vscode.commands.registerCommand('codexSwitcher.connect', tick));
-  const timer = setInterval(tick, 2000);
   context.subscriptions.push({
     dispose() {
       stopped = true;
-      clearInterval(timer);
+      clearTimeout(timer);
+      controller.abort();
     },
   });
   tick();
