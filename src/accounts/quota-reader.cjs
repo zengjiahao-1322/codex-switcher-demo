@@ -2,6 +2,7 @@
 
 const path = require('node:path');
 const { officialErrorKind } = require('./official-session.cjs');
+const { log } = require('../diagnostics/event-log.cjs');
 
 function quotaBuckets(result) {
   const buckets =
@@ -58,6 +59,7 @@ function quotaError(error) {
 }
 
 function createQuotaReader({
+  bridgeHome,
   root,
   load,
   authFile,
@@ -93,7 +95,8 @@ function createQuotaReader({
   }
   async function readQuota(id) {
     captureCurrent();
-    if (!load().some((account) => account.id === id)) throw Error('账号不存在，请重新选择');
+    const selected = load().find((account) => account.id === id);
+    if (!selected) throw Error('账号不存在，请重新选择');
     const file = path.join(root, id, 'quota.json'),
       previous = readJson(file, {});
     let check;
@@ -113,14 +116,21 @@ function createQuotaReader({
       writeJson(file, value);
       return { id, ...value };
     } catch (error) {
-      const failure = quotaError(error),
-        value = {
-          ...previous,
-          status: 'error',
-          attemptedAt: new Date().toISOString(),
-          errorKind: failure.kind,
-          error: failure.message,
-        };
+      const failure = quotaError(error);
+      log(bridgeHome, 'official.error', {
+        op: 'quota',
+        account: selected.email,
+        kind: failure.kind,
+        code: error.code ?? null,
+        message: error.message,
+      });
+      const value = {
+        ...previous,
+        status: 'error',
+        attemptedAt: new Date().toISOString(),
+        errorKind: failure.kind,
+        error: failure.message,
+      };
       writeJson(file, value);
       return { id, ...value };
     } finally {

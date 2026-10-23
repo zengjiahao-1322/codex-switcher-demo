@@ -5,6 +5,7 @@ const fs = require('node:fs'),
 const { switchJob } = require('../config/switch-state.cjs'),
   { createOfficialSession, officialErrorKind } = require('./official-session.cjs'),
   { createQuotaReader, quotaBuckets } = require('./quota-reader.cjs');
+const { log } = require('../diagnostics/event-log.cjs');
 function readJson(file, fallback = null) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -186,6 +187,7 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
   // 每个账号有独立 CODEX_HOME，查询其他账号时不修改当前客户端的配置。
   const openSession = createOfficialSession({ bridgeHome, codexExe, spawnProcess }),
     { quota } = createQuotaReader({
+      bridgeHome,
       root,
       load,
       authFile,
@@ -218,6 +220,13 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
       return remember(refreshed, { pendingLogin: row.pendingLogin });
     } catch (error) {
       const kind = officialErrorKind(error);
+      log(bridgeHome, 'official.error', {
+        op: 'prepare',
+        account: row.email,
+        kind,
+        code: error.code ?? null,
+        message: error.message,
+      });
       const failure = Error(
         kind === 'auth_invalid'
           ? row.label + ' 的官方登录已失效，请点“重新登录”；本次未关闭桌面端。'
@@ -235,11 +244,19 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
       await check?.close();
     }
   }
-  async function finishLogin(active, attempt, message) {
+  async function finishLogin(active, attempt, message, error) {
     // 先提交终态，再回收进程；旧进程的退出通知不能覆盖成功或下一次登录。
     if (session !== active || login !== attempt) return;
     session = null;
     Object.assign(attempt, message);
+    if (message.status === 'error')
+      log(bridgeHome, 'official.error', {
+        op: 'login',
+        account: load().find((a) => a.id === attempt.targetId)?.email || null,
+        kind: officialErrorKind(error || Error(message.message)),
+        code: error?.code ?? null,
+        message: error?.message || message.message,
+      });
     await active?.close();
   }
   async function startLogin({ id } = {}) {
@@ -303,7 +320,7 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
         });
       } catch (error) {
         // 保存失败时保留已经取得的凭证，不能让一次入库错误迫使用户重新登录。
-        await finishLogin(active, attempt, { status: 'error', message: error.message });
+        await finishLogin(active, attempt, { status: 'error', message: error.message }, error);
       }
     };
     try {
@@ -326,7 +343,7 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
       for (const notification of notifications) await onNotification(notification);
       return { ...attempt };
     } catch (e) {
-      await finishLogin(active, attempt, { status: 'error', message: e.message });
+      await finishLogin(active, attempt, { status: 'error', message: e.message }, e);
       throw e;
     }
   }

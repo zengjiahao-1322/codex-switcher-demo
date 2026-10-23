@@ -11,14 +11,15 @@ const { createAccounts, identity, writeJson } = require('../src/accounts/account
 // 业务单元检查不读取开发机上的其他编辑器；实际发现与重载由三窗口检查覆盖。
 const runSwitch = (job, dependencies = {}) =>
   performSwitch(
-    { threadFollow: 'all', ...job },
+    { threadFollow: 'all', target: '测试来源', ...job },
     {
-      clients: () => ({ clients: [] }),
+      clients: () => ({ clients: [], inventory: { ancestry: [] } }),
       ...dependencies,
     },
   );
 const sharedEditors = () => ({
   clients: [{ kind: 'ide', confirmed: true, shared: true, editorId: 'fixture-shared-editor' }],
+  inventory: { ancestry: [] },
 });
 const jwt = (payload) =>
   'fixture.' + Buffer.from(JSON.stringify(payload)).toString('base64url') + '.signature';
@@ -358,7 +359,7 @@ test('登录失败保留具体原因和已落盘凭证，重试使用独立目�
   assert.equal(fs.readFileSync(path.join(f.codexHome, 'auth.json'), 'utf8'), before);
 });
 
-test('不同单账号请求共用两个额度名额，排队请求合并，失败后释放名额', async () => {
+test('不同单账号请求共用两个额度名额，排队请求合并，失败后释放名额', async (t) => {
   const { createQuotaReader } = require('../src/accounts/quota-reader.cjs'),
     ids = ['slow', 'fast', 'failed', 'queued'],
     gates = new Map(),
@@ -375,6 +376,7 @@ test('不同单账号请求共用两个额度名额，排队请求合并，失�
     gates.set(id, { promise, resolve, reject });
   }
   const reader = createQuotaReader({
+    bridgeHome: fixture(t).bridgeHome,
     root: 'fixture',
     load: () => ids.map((id) => ({ id })),
     authFile: (id) => path.join('fixture', id, 'auth.json'),
@@ -541,6 +543,7 @@ test('插件没有重载通道时在关闭客户端和修改配置之前停止�
         accounts: a,
         clients: () => ({
           clients: [{ pid: 811, kind: 'ide', confirmed: true, shared: true, editorId: null }],
+          inventory: { ancestry: [] },
         }),
         stop: () => assert.fail('must not stop desktop'),
         open: () => assert.fail('must not open desktop'),
@@ -555,7 +558,10 @@ test('插件没有重载通道时在关闭客户端和修改配置之前停止�
       { ...f, id, desktopExe: 'fixture-desktop.exe' },
       {
         accounts: a,
-        clients: () => ({ clients: [{ kind: 'ide', confirmed: false }] }),
+        clients: () => ({
+          clients: [{ kind: 'ide', confirmed: false }],
+          inventory: { ancestry: [] },
+        }),
         stop: () => assert.fail('must not stop unknown client'),
       },
     ),
@@ -827,7 +833,7 @@ test('准备阶段并行检查登录和编辑器，两项都通过后才关闭�
   });
   t.after(() => {
     finishAuth();
-    finishEditors({ clients: [] });
+    finishEditors({ clients: [], inventory: { ancestry: [] } });
   });
   const task = runSwitch(
     { ...f, id, model: 'official', desktopExe: 'fixture-desktop.exe' },
@@ -855,7 +861,7 @@ test('准备阶段并行检查登录和编辑器，两项都通过后才关闭�
   finishAuth();
   await new Promise(setImmediate);
   assert.equal(stopped, false);
-  finishEditors({ clients: [] });
+  finishEditors({ clients: [], inventory: { ancestry: [] } });
   await task;
   assert.equal(stopped, true);
 });
@@ -995,7 +1001,11 @@ test('账号准备期间出现的共用编辑器在关闭前重新检查并加�
   });
   await runSwitch(
     { ...f, id, desktopExe: null, threadFollow: 'off' },
-    { accounts: a, clients: () => (++checks === 1 ? { clients: [] } : sharedEditors()) },
+    {
+      accounts: a,
+      clients: () =>
+        ++checks === 1 ? { clients: [], inventory: { ancestry: [] } } : sharedEditors(),
+    },
   );
   assert.equal(checks, 2);
   assert.equal(stops, 1);

@@ -282,8 +282,8 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
         ),
     );
   // 旧版 UI 伴随扩展在 Remote-SSH 窗口中没有上报 CODEX_HOME，
-  // 且扩展宿主与 Codex 后端可能不在同一条本机父进程链。截图中的真实场景是
-  // 一个远程窗口和一个共用后端；只有两边都唯一时才按窗口补关联，多窗口继续保持未确认。
+  // 且扩展宿主与 Codex 后端可能不在同一条本机父进程链。
+  // 只有登记窗口和共用后端都唯一时才补关联，多窗口继续保持未确认。
   const legacyRemoteWindows = windows.filter(
       (w) => w.remote && !w.home && w.companionHost !== 'remote',
     ),
@@ -318,6 +318,7 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
       lastAck: w.lastAck,
       companionVersion: w.companionVersion,
       companionHost: w.companionHost,
+      heartbeatAgeSec: Math.floor((Date.now() - w.seenAt) / 1000),
       extensionId: w.extensionId,
       extensionName: w.extensionName,
       editorKind: w.editorKind || w.name,
@@ -389,6 +390,35 @@ function reloadResults(bridgeHome, targets) {
 function clientStatus(codexHome, bridgeHome, options) {
   return snapshot(codexHome, bridgeHome, options);
 }
+// 只选取排查关联所需的字段，不把命令行、配置内容或工作区正文写入日志。
+function diagnosticClients(status, inventory) {
+  const processes = new Map(inventory.ancestry.map((p) => [p.pid, p])),
+    editors = new Map(
+      status.clients.filter((c) => c.kind === 'editor').map((c) => [c.editorId, c]),
+    );
+  return status.clients.map((c) => {
+    const editor = editors.get(c.editorId),
+      chain = [];
+    for (let p = processes.get(c.pid); p && chain.length < 8; p = processes.get(p.parentPid))
+      chain.push(p.pid + ':' + p.name);
+    return {
+      kind: c.kind,
+      pid: c.pid,
+      chain,
+      home: c.home || null,
+      homeSource: c.homeSource || null,
+      confirmed: c.confirmed,
+      shared: c.shared,
+      editorId: c.editorId || null,
+      remote: editor?.remote || null,
+      wsl: !!editor?.wsl,
+      companionHost: editor?.companionHost || null,
+      companionVersion: editor?.companionVersion || null,
+      reloadProtocol: editor?.reloadProtocol || 0,
+      heartbeatAgeSec: editor?.heartbeatAgeSec ?? null,
+    };
+  });
+}
 async function stopEditorBackends(codexHome, bridgeHome, { inventory } = {}) {
   // 旧后端持有登录、运行中的回合和会话写锁。停止共用配置的 Codex 子进程，保留编辑器窗口，
   // 同步完成后再由既有重载流程恢复扩展；独立配置目录不受影响。
@@ -423,6 +453,7 @@ module.exports = {
   scanAsync,
   reloadResults,
   clientStatus,
+  diagnosticClients,
   snapshot,
   heartbeat,
   requestReload,

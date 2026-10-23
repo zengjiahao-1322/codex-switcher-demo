@@ -47,6 +47,13 @@ async function runPage({ hash = '', respond, confirm = () => true }) {
   document.getElementById = byId;
   const workspace = element();
   document.querySelector = (selector) => (selector === '.workspace' ? workspace : element());
+  // 记录页面新建的元素，测试据此检查下载链接等动态内容。
+  const created = [];
+  document.createElement = (tag) => {
+    const node = element();
+    created.push({ tag, node });
+    return node;
+  };
   const context = {
     document,
     location: { hash, pathname: '/', search: '' },
@@ -65,9 +72,11 @@ async function runPage({ hash = '', respond, confirm = () => true }) {
     prompt: () => null,
     console,
     URL,
+    Blob,
     setTimeout,
     clearTimeout,
-    setInterval: () => 0,
+    // 返回非零编号，页面据此判断定时刷新已开启；回调本身不执行。
+    setInterval: () => 1,
     clearInterval: () => {},
     queueMicrotask,
   };
@@ -79,6 +88,7 @@ async function runPage({ hash = '', respond, confirm = () => true }) {
     history,
     byId,
     workspace,
+    created,
     settle,
     calls: (route) => requests.filter((r) => r.url === '/api/' + route),
   };

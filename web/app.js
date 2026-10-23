@@ -624,7 +624,13 @@ async function refreshAccounts() {
   const job = data.switchJob;
   if (job) {
     const key = JSON.stringify(job);
-    if (key !== lastJobMessage && (switching || accountTimer)) status(job.message);
+    if (key !== lastJobMessage && (switching || accountTimer))
+      status(
+        job.message +
+          (job.status === 'error'
+            ? '\n如需排查，可在“影响范围与其他客户端”导出诊断日志发给维护者。'
+            : ''),
+      );
     lastJobMessage = key;
   }
   if (state) {
@@ -1153,7 +1159,6 @@ async function refreshClients() {
     const separate = c.clients.filter((p) => p.kind === 'editor' && p.confirmed && !p.shared);
     const unmatched = c.clients.filter((p) => p.kind === 'editor' && !p.confirmed);
     const outdated = c.clients.filter((p) => p.kind === 'editor' && p.reloadProtocol < 2);
-    const remoteUnmatched = unmatched.filter((p) => p.remote);
     // 分别展示可重载、独立配置和未关联的窗口，不从“没有找到”推断远端归属。
     const parts = [];
     const pids = (rows) => 'PID ' + rows.map((p) => p.pid).join('、');
@@ -1173,11 +1178,6 @@ async function refreshClients() {
       );
     if (outdated.length)
       parts.push(outdated.length + ' 个窗口使用旧版伴随扩展，请重新安装本版 VSIX 并重载窗口');
-    if (remoteUnmatched.length)
-      parts.push(
-        remoteUnmatched.length +
-          ' 个 Remote-SSH 窗口没有关联到本机的 Codex 后端；本机切换器只切换本机的 Codex，要切换 SSH 主机上的 Codex，需在该主机运行同版本切换器（目前支持 Windows 和 macOS 主机，暂不支持 Linux）',
-      );
     $('editor-reload-hint').textContent = parts.length
       ? parts.join('；') + '。'
       : '尚无已确认共用配置、可自动重载的编辑器窗口。';
@@ -1218,7 +1218,7 @@ async function refreshClients() {
         (client.error ? '\n进程读取失败：' + client.error : '') +
         (client.workspace ? '\n' + client.workspace : '') +
         (client.kind === 'editor' && !client.confirmed
-          ? '\n尚未关联到本机可见的 Codex 后端，暂不能确认是否跟随本机切换。请确认伴随扩展与切换器运行在同一主机。'
+          ? '\n尚未关联到本机可见的 Codex 后端，暂不能确认是否跟随本机切换。可导出诊断日志查看进程关系。'
           : '') +
         (client.kind === 'editor'
           ? '\n客户端：' +
@@ -1348,6 +1348,17 @@ $('environment-save').onclick = () =>
     await refresh();
     await refreshClients();
     status(r.message);
+  });
+// 诊断日志由后台脱敏后返回文本，在页面里直接存成文件，不经过下载链接。
+$('diagnostics-export').onclick = () =>
+  busy($('diagnostics-export'), async () => {
+    const r = await api('exportDiagnostics', {}),
+      link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([r.text], { type: 'text/plain;charset=utf-8' }));
+    link.download = r.filename;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    status('已生成 ' + r.filename + '。内容已脱敏，不含登录令牌和 API 密钥，可以直接发给维护者。');
   });
 $('companion-download').onclick = () =>
   busy($('companion-download'), async () => {

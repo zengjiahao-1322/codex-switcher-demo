@@ -16,7 +16,7 @@
 
 `src/platform/runtime.cjs` 独立发现当前编辑器渠道安装的官方运行程序，不通过桌面应用启动才能登录。伴随扩展会从编辑器扩展清单识别 OpenAI 的 Codex/ChatGPT 扩展，不依赖单一扩展 ID；只负责窗口通信与重载，不承担账号登录或额度 RPC。是否参与切换由实际本机 Codex 后端的 PID 归属和配置目录决定，远程工作区或 WSL 设置只是窗口信息，不能否定已确认的本机后端；真正使用远端配置的后端不随本机切换。
 
-心跳成功只代表连接到了切换器服务。`clientHeartbeat` 返回 `connection.state`（`ready`、`unmatched`、`separate`）、管理目录和关联后端 PID，伴随扩展据此显示“已接入”“后端未关联”或“独立配置”。Remote-SSH 的伴随扩展在 workspace extension host 中上报 `companionHost=remote`；同一远端切换器按远端 `CODEX_HOME` 且窗口唯一时关联后端，本机切换器不会读取 SSH 主机的 PID。重载后必须等新的 Codex 后端关联到共用配置，才确认重载完成；这仍不代表已经通过真实模型请求验证了官方登录或上游额度。
+心跳成功只代表连接到了切换器服务。`clientHeartbeat` 返回 `connection.state`（`ready`、`unmatched`、`separate`）、管理目录和关联后端 PID，伴随扩展据此显示“已接入”“后端未关联”或“独立配置”。`companionHost` 由扩展实际运行位置上报，窗口标签或使用 SSH 连接电脑的方式都不能代替进程归属证据。关联优先使用 PID/祖先链，其次使用唯一通信标识；实际运行于远端宿主的扩展还可按唯一配置目录关联。重载后必须等新的 Codex 后端关联到共用配置，才确认重载完成；这仍不代表已经通过真实模型请求验证了官方登录或上游额度。
 
 `src/clients/desktop-account.cjs` 的 `runSwitch()` 统一生成步骤及耗时，`web/app.js` 统一渲染；没有按系统拆分的旧版切换页面。`src/platform/build-info.cjs` 为运行代码生成一次构建标识，新入口只复用同构建后台，避免新包连接旧后台继续显示旧页面。页面底部显示版本和构建标识，便于核对实际运行版本。
 
@@ -92,6 +92,12 @@ flowchart LR
 - 诊断遇到过期 access token 时，会调用官方账号验证；成功就显示“官方登录仍可用”，明确鉴权失败才提供重新登录操作。
 - 网络失败、超时和额度服务暂时不可用不会被改写成“登录失效”。
 
+## 本地诊断日志（本轮源码，尚未发布）
+
+`src/diagnostics/event-log.cjs` 集中处理脱敏、同步追加和日志轮换。切换任务记录开始、客户端快照、逐步骤耗时与终态；服务只在窗口关联状态改变时记录心跳事件；官方登录、准备及额度读取记录各自的错误类型。进程链取自同一次扫描的 `inventory.ancestry`，最多八级，不记录完整命令行、环境变量、配置正文或对话正文。
+
+日志保存在数据目录的 `logs/switcher.log`，超过 2 MiB 后于下一次写入时轮换，最多保留三份。`exportDiagnostics` 读取实时环境头与最近 2000 行，页面通过 Blob 下载；不会上传日志。公共 `pid` 是写入进程，`companion.state.editorPid` 是编辑器宿主，避免两者混淆。`switch.end.reload` 如实保存任务结束时已经观测到的窗口状态，不将仍在等待的重载写成完成。
+
 ## 代码入口
 
 | 层       | 文件                                                                    | 责任                                                         |
@@ -104,4 +110,5 @@ flowchart LR
 | 额度读取 | `src/accounts/quota-reader.cjs`                                         | 额度 RPC、统一两个并发、账号级请求合并、额度缓存和结构化错误 |
 | 客户端   | `src/clients/client-status.cjs`、`vscode-companion/`                    | 发现窗口、确认配置归属、请求重载和记录结果                   |
 | 会话诊断 | `src/diagnostics/diagnostics.cjs`、`src/diagnostics/thread-routing.cjs` | 旧会话错误证据、来源同步和可见上下文导出                     |
+| 事件日志 | `src/diagnostics/event-log.cjs`                                         | 切换事件脱敏落盘、轮换和诊断导出读取（尚未发布）             |
 | 页面     | `web/index.html`、`web/app.js`                                          | 来源选择、账号列表、额度和客户端状态展示                     |

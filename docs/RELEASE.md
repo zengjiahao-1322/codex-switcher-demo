@@ -1,6 +1,6 @@
-# Codex Switcher 0.1.3 Demo（Remote-SSH 修订版）
+# Codex Switcher 0.1.3 Demo（编辑器关联修订版）
 
-2026-10-23 替换 0.1.3 下载文件，修复 Remote-SSH 窗口关联和旧版伴随扩展误报。Windows、Mac M 系列和 Mac Intel 从同一提交构建。
+2026-10-23 替换 0.1.3 下载文件，修订编辑器窗口关联和旧版伴随扩展提示。Windows、Mac M 系列和 Mac Intel 从同一提交构建。部分使用者机器的后端关联问题仍待实际复测。
 
 ## 本版更新
 
@@ -21,11 +21,11 @@
 
 ## 下载与启动
 
-| 系统 | 下载文件 | 启动方式 |
-| --- | --- | --- |
+| 系统        | 下载文件                         | 启动方式                                                                |
+| ----------- | -------------------------------- | ----------------------------------------------------------------------- |
 | Windows x64 | `codex-switcher-windows-x64.zip` | 完整解压，双击 `Codex Switcher/Start.cmd`；需要安装时运行 `install.cmd` |
-| Mac M 系列 | `codex-switcher-macos-arm64.zip` | 解压，运行 `Install.command`，或打开其中的 `Codex Switcher.app` |
-| Mac Intel | `codex-switcher-macos-x64.zip` | 启动方式同上 |
+| Mac M 系列  | `codex-switcher-macos-arm64.zip` | 解压，运行 `Install.command`，或打开其中的 `Codex Switcher.app`         |
+| Mac Intel   | `codex-switcher-macos-x64.zip`   | 启动方式同上                                                            |
 
 请先安装 Codex 桌面版或 OpenAI 官方 Codex 编辑器扩展。每个包内置对应系统的 Node.js 和依赖，无需另装 Node、npm 或 Python；包内不含个人账号、密钥、聊天或验证数据。随包提供 SHA-256 校验文件。
 
@@ -43,7 +43,7 @@
 
 macOS 另验证系统 Bash 安装脚本、首次与重复安装、数据保留、签名完整性和 LaunchServices 启动。应用使用 ad-hoc 签名，尚无 Apple Developer ID 签名或公证；浏览器下载后的首次打开仍可能需要在“系统设置 → 隐私与安全性”中手动允许。个人账号完整网页登录、真实额度和日常桌面操作仍需真实 Mac 用户验收；macOS 12 尚无实机结果。
 
-**运行边界**：Remote-SSH 需要在 SSH 主机运行同版本切换器并在远端 extension host 安装伴随扩展；本机切换器不能扫描远端 PID。CI 使用隔离配置和合成账号，个人官方账号登录与额度仍需按实际机器验收。
+**运行边界**：关联取决于实际 Codex 后端的进程和配置目录，不能仅凭 SSH 连接方式或窗口标签判断。CI 使用隔离配置和合成账号，使用者机器的后端关联、个人官方账号登录与额度仍需实际验收。
 
 已确认共用本机配置的编辑器窗口会一起重载，独立目录及真正运行在 WSL、SSH 和容器中的远端后端不自动跟随；窗口标签不否定真实的本机后端关联。重启或重载可能中断正在运行的任务，请等任务完成并保存工作后再切换；已保存的聊天文件会保留，运行中的任务和未保存状态不能保证自动恢复。Cursor、Windsurf、Insiders 尚未逐款完成与 VS Code 相同的 GUI 验收。
 

@@ -64,6 +64,14 @@ function isCodexDesktop(exe = '') {
   );
 }
 let proxyCache;
+const proxyKeys = [
+  'HTTP_PROXY',
+  'http_proxy',
+  'HTTPS_PROXY',
+  'https_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+];
 function windowsProxyEnv(settings) {
   if (settings.enabled !== 1 || !settings.server) return {};
   const entries = Object.fromEntries(
@@ -89,14 +97,7 @@ function codexEnv(home) {
     CODEX_HOME: home,
     PATH: path.dirname(process.execPath) + path.delimiter + (process.env.PATH || ''),
   };
-  const hasExplicitProxy = [
-    'HTTP_PROXY',
-    'http_proxy',
-    'HTTPS_PROXY',
-    'https_proxy',
-    'ALL_PROXY',
-    'all_proxy',
-  ].some((key) => env[key]);
+  const hasExplicitProxy = proxyKeys.some((key) => env[key]);
   if (process.platform === 'win32' && !hasExplicitProxy) {
     // Windows 桌面启动通常没有代理环境变量，但系统代理可能已经开启。
     if (!proxyCache || Date.now() - proxyCache.at > 60000) {
@@ -149,6 +150,11 @@ function codexEnv(home) {
   }
   return env;
 }
+function proxySource(home) {
+  if (proxyKeys.some((key) => process.env[key])) return 'env';
+  const env = codexEnv(home);
+  return proxyKeys.some((key) => env[key]) ? 'system' : 'none';
+}
 module.exports = {
   mac,
   dataHome,
@@ -159,5 +165,6 @@ module.exports = {
   macApps,
   isCodexDesktop,
   codexEnv,
+  proxySource,
   windowsProxyEnv,
 };

@@ -4,6 +4,7 @@ const path = require('node:path'),
   cp = require('node:child_process');
 const { createAccounts, writeJson } = require('../accounts/accounts.cjs');
 const { handoff, release, recordEffect } = require('../config/switch-state.cjs');
+const { log } = require('../diagnostics/event-log.cjs');
 function powershell(script, env = {}) {
   const childEnv = { ...process.env, ...env };
   delete childEnv.PSModulePath;
@@ -201,13 +202,14 @@ async function runSwitch(
   let currentStatus = 'preparing';
   const report = (status, message, details = {}) => {
     currentStatus = status;
+    const elapsedMs = Math.round(performance.now() - started);
     writeJson(file, {
       id: job.id,
       pid: process.pid,
       status,
       message,
       startedAt,
-      elapsedMs: Math.round(performance.now() - started),
+      elapsedMs,
       steps,
       configurationApplied: applied,
       threadFollow: mode,
@@ -216,6 +218,17 @@ async function runSwitch(
       ...details,
       ...(['done', 'error'].includes(status) ? { finishedAt: new Date().toISOString() } : {}),
     });
+    if (['done', 'error'].includes(status))
+      log(job.bridgeHome, 'switch.end', {
+        job: job.id,
+        status,
+        elapsedMs,
+        configurationApplied: applied,
+        threads,
+        reload: editorReload?.targets
+          ? require('./client-status.cjs').reloadResults(job.bridgeHome, editorReload.targets)
+          : [],
+      });
   };
   // 每步只记录实际执行结果；桌面打开请求与窗口重载完成分别展示。
   const step = async (id, label, action) => {
@@ -223,15 +236,24 @@ async function runSwitch(
       begin = performance.now();
     steps.push(item);
     report(currentStatus, label + '…');
+    let failure;
     try {
       const result = await action();
       item.status = 'done';
       return result;
     } catch (error) {
       item.status = 'error';
+      failure = { message: error.message, code: error.code ?? null, kind: error.kind ?? null };
       throw error;
     } finally {
       item.durationMs = Math.round(performance.now() - begin);
+      log(job.bridgeHome, 'switch.step', {
+        job: job.id,
+        id,
+        status: item.status,
+        durationMs: item.durationMs,
+        ...(failure ? { error: failure } : {}),
+      });
     }
   };
   const checkEditors = (detected) => {
@@ -251,6 +273,20 @@ async function runSwitch(
           '）。请在“影响范围与其他客户端”核对连接与进程归属；这不等于没有安装伴随扩展。配置尚未修改，客户端未关闭。',
       );
   };
+  const logClients = (phase, status) =>
+    log(job.bridgeHome, 'switch.clients', {
+      job: job.id,
+      phase,
+      clients: require('./client-status.cjs').diagnosticClients(status, status.inventory),
+    });
+  log(job.bridgeHome, 'switch.start', {
+    job: job.id,
+    kind: resume ? 'resume' : api ? 'api' : 'official',
+    target: resume ? '当前来源' : job.target,
+    threadFollow: job.threadFollow,
+    reloadEditors: job.reloadEditors !== false,
+    desktop,
+  });
   report('preparing', api ? '正在检查 API 和模型列表…' : '正在准备目标账号登录…');
   try {
     mode = follow.selectedMode(job.bridgeHome, job.threadFollow);
@@ -267,7 +303,9 @@ async function runSwitch(
         (async () => {
           // 进程归属检查与登录校验互不依赖；全部通过后才允许关闭和写入。
           if (job.reloadEditors === false) return;
-          checkEditors((await clients()).clients);
+          const checked = await clients();
+          logClients('check', checked);
+          checkEditors(checked.clients);
         })(),
       ]);
       if (api && !resume && checks[0].status === 'fulfilled') prepared = checks[0].value;
@@ -276,6 +314,7 @@ async function runSwitch(
       if (job.reloadEditors !== false) {
         // 登录校验可能耗时数秒。关闭前重新核对一次，所有关闭操作共用此刻的进程表。
         const latest = await clients({ force: true });
+        logClients('recheck', latest);
         checkEditors(latest.clients);
         releaseInventory = latest.inventory;
         hasSharedEditors = latest.clients.some((c) => c.kind === 'ide' && c.confirmed && c.shared);

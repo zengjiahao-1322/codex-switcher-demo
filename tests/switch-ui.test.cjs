@@ -180,7 +180,8 @@ test('所有后台都已接入时只显示可自动重载', async () => {
   );
 });
 
-test('旧版伴随扩展和 Remote-SSH 未关联时给出可执行提示', async () => {
+// 朋友是经 SSH 登录到 Windows 后在该机操作；远程标签不能用来推断后端在别的主机。
+test('旧版伴随扩展且带远程标签的窗口未关联时，只陈述事实，不归因到远端', async () => {
   const page = await runPage({
     respond: backend({
       clients: [
@@ -198,10 +199,9 @@ test('旧版伴随扩展和 Remote-SSH 未关联时给出可执行提示', async
   await page.byId('client-details').ontoggle();
   const hint = page.byId('editor-reload-hint').textContent;
   assert.ok(hint.includes('旧版伴随扩展'), hint);
-  assert.ok(hint.includes('Remote-SSH'), hint);
-  // SSH 主机是 Windows / macOS 时可在该主机运行切换器；切换器没有 Linux 版，要如实说明。
-  assert.ok(hint.includes('需在该主机运行同版本切换器'), hint);
-  assert.ok(hint.includes('暂不支持 Linux'), hint);
+  assert.ok(hint.includes('1 个窗口尚未关联到本机可见的 Codex 后端'), hint);
+  for (const word of ['Remote-SSH', 'SSH 主机', '远端', '同一主机'])
+    assert.equal(hint.includes(word), false, '不应归因到远端：' + word);
 });
 
 test('#4 切换成功或没有失败条目时不显示继续同步', async () => {

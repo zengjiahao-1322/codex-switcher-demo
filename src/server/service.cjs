@@ -16,6 +16,7 @@ const core = require('../config/core.cjs'),
 const { createAccounts } = require('../accounts/accounts.cjs'),
   { scheduleSwitch } = require('../clients/desktop-account.cjs');
 const operation = require('../config/switch-state.cjs');
+const eventLog = require('../diagnostics/event-log.cjs');
 const OFFICIAL = 'official',
   MCP_NAME = 'api_switcher';
 const readJson = (p) => {
@@ -51,6 +52,7 @@ function createService({
   const acl = (p) => core.privateAcl(p);
   let listeningPort = null;
   const passed = new Map();
+  const companionStates = new Map();
   const fingerprint = (p, m) =>
     crypto
       .createHash('sha256')
@@ -157,6 +159,19 @@ function createService({
       local: false,
     };
   }
+  function currentSource(c) {
+    const cur = readJson(currentPath);
+    return {
+      type: officialInUse(c) ? 'official' : 'api',
+      name: officialInUse(c)
+        ? official(c).name
+        : c.model_provider === 'hermes_bridge'
+          ? store.list(bridgeHome).find((p) => p.id === cur?.providerId)?.name ||
+            c.model_providers?.hermes_bridge?.name ||
+            '切换器配置'
+          : '其他供应商 ' + c.model_provider,
+    };
+  }
   const provider = (id) => {
     const p = store.list(bridgeHome).find((x) => x.id === id);
     if (!p) throw Error('配置不存在，请刷新');
@@ -218,14 +233,7 @@ function createService({
         'http://127.0.0.1:' + a.port + '/',
       );
     const version = await codexVersion();
-    const cur = readJson(currentPath);
-    const currentName = officialInUse(c)
-      ? official(c).name
-      : bridged
-        ? store.list(bridgeHome).find((p) => p.id === cur?.providerId)?.name ||
-          c.model_providers?.hermes_bridge?.name ||
-          '切换器配置'
-        : '其他供应商 ' + c.model_provider;
+    const currentName = currentSource(c).name;
     // 首次导入提示只返回一次。
     const notice = hermesNote;
     hermesNote = null;
@@ -567,13 +575,27 @@ function createService({
       // 伴随扩展先于官方 Codex 激活。只有新的本机后端已关联，
       // 才把旧窗口的重载请求推进为完成，不能只收到心跳就报成功。
       if (completedReload && ready) result = clients.heartbeat(bridgeHome, input);
+      const connection = {
+        state: ready ? 'ready' : backends.some((c) => c.confirmed) ? 'separate' : 'unmatched',
+        home: codexHome,
+        backendPids: backends.map((c) => c.pid),
+      };
+      const from = companionStates.get(input.id) || null;
+      if (from !== connection.state) {
+        eventLog.log(bridgeHome, 'companion.state', {
+          editor: input.id,
+          editorPid: Number(input.pid),
+          from,
+          to: connection.state,
+          backendPids: connection.backendPids,
+          remote: input.remote || null,
+          companionVersion: input.companionVersion || null,
+        });
+        companionStates.set(input.id, connection.state);
+      }
       return {
         ...result,
-        connection: {
-          state: ready ? 'ready' : backends.some((c) => c.confirmed) ? 'separate' : 'unmatched',
-          home: codexHome,
-          backendPids: backends.map((c) => c.pid),
-        },
+        connection,
       };
     },
     reloadClients: (input) =>
@@ -598,17 +620,63 @@ function createService({
       }),
     exportContext: ({ id }) =>
       require('../diagnostics/diagnostics.cjs').exportContext(codexHome, bridgeHome, id),
+    exportDiagnostics: async () => {
+      const clients = require('../clients/client-status.cjs'),
+        platform = require('../platform/platform.cjs'),
+        os = require('node:os');
+      const [version, inventory] = await Promise.all([
+        codexVersion(),
+        clients.scanAsync({ force: true }),
+      ]);
+      let runtime;
+      try {
+        const exe = findCodex({ dataHome: bridgeHome });
+        runtime = { path: exe, trusted: isTrustedCodex(exe) };
+      } catch (error) {
+        runtime = { path: null, trusted: false, error: error.message };
+      }
+      const header = eventLog.redact({
+        build,
+        platform: process.platform,
+        arch: process.arch,
+        osVersion: os.release(),
+        codexVersion: version,
+        runtime,
+        proxySource: platform.proxySource(codexHome),
+        codexHome,
+        dataDirProtection: { ok: dataDirProtection.ok },
+        threadFollow: require('../config/thread-follow.cjs').mode(bridgeHome),
+        current: currentSource(readConfig()),
+        clients: clients.diagnosticClients(
+          clients.snapshot(codexHome, bridgeHome, { inventory }),
+          inventory,
+        ),
+      });
+      const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+      return {
+        filename: 'codex-switcher-diagnostics-' + stamp + '.txt',
+        text:
+          JSON.stringify(header) +
+          '\n---\n' +
+          eventLog
+            .readRecent(bridgeHome, 2000)
+            .map((row) => JSON.stringify(row))
+            .join('\n') +
+          '\n',
+      };
+    },
     desktopSwitch: (input) =>
       exclusive(async () => {
         if (['starting', 'waiting'].includes(accounts.status().login?.status))
           throw Error('请先完成或取消当前登录');
-        provider(input.id);
+        const target = provider(input.id);
         const threadFollow = require('../config/thread-follow.cjs').selectedMode(
           bridgeHome,
           input.threadFollow,
         );
         return scheduleSwitch({
           id: input.id,
+          target: target.name,
           model: input.model,
           autostart: input.autostart,
           reloadEditors: input.reloadEditors,
@@ -667,6 +735,7 @@ function createService({
         const c = readConfig();
         return scheduleSwitch({
           id,
+          target: saved.email,
           codexHome,
           bridgeHome,
           reloadEditors,
