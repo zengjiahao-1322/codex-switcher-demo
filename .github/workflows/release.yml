@@ -42,10 +42,11 @@ jobs:
         run: |
           npm install --prefix .build-cache/browser-check --no-package-lock --ignore-scripts playwright@1.56.1
           node .build-cache/browser-check/node_modules/playwright/cli.js install chromium
-      - name: Verify direct browser entry and independent quota refresh
-        run: |
-          node scripts/verify-web-entry.cjs
-          node scripts/verify-quota-ui.cjs
+      # 每项独占一步，避免 Windows PowerShell 用后一条命令的成功覆盖前一项失败。
+      - name: Verify direct browser entry
+        run: node scripts/verify-web-entry.cjs
+      - name: Verify independent quota refresh
+        run: node scripts/verify-quota-ui.cjs
       - name: Save regression reports
         if: always()
         uses: actions/upload-artifact@v4

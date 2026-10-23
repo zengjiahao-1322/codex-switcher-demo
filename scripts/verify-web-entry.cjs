@@ -96,7 +96,6 @@ async function loaded(page, url) {
 }
 (async () => {
   try {
-    await service.actions.setThreadFollow({ mode: 'off' });
     await start('fixture-session-one');
     browser = await chromium.launch({
       headless: true,

@@ -156,6 +156,11 @@ test(
       path.join(dirs.codex, 'auth.json'),
       JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'SECRET-TOKEN' } }),
     );
+    // 旧设置直接忽略：即使保存过 ask，也不应拦住默认切换。
+    fs.writeFileSync(
+      path.join(dirs.bridge, 'settings.json'),
+      JSON.stringify({ threadFollow: 'ask' }),
+    );
     const port = await freePort();
     const api = await startMain(t, dirs, port);
     const config = () => toml.parse(fs.readFileSync(path.join(dirs.codex, 'config.toml'), 'utf8'));
