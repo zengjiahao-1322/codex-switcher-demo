@@ -43,6 +43,11 @@ async function api(route, data) {
     throw Error(SESSION_LOST);
   }
   const j = await r.json();
+  // 页面文件每次从磁盘读取，后台只在启动时加载；代码更新后未重启，新页面会调用旧后台没有的接口。
+  if (r.status === 404 && j.error === 'Unknown action')
+    throw Error(
+      '切换器后台仍是更新前的版本，缺少这个功能。请从桌面快捷方式重新打开切换器，会自动换成新版本。',
+    );
   // 结构化 code 用于需要用户确认后重发的请求（未识别的程序、旧对话去向）。
   if (!r.ok) throw Object.assign(Error(j.error || '请求失败'), { code: j.code });
   return j;
@@ -931,7 +936,6 @@ async function refresh() {
     ? ''
     : '未能限制数据目录的访问权限，本机其他用户可能读到保存的登录凭证。建议把切换器放在你自己的用户目录下再启动。\n' +
       protection.error;
-  if (document.activeElement !== $('thread-follow')) $('thread-follow').value = state.threadFollow;
   if (state.notice) providerStatus(state.notice);
 }
 
@@ -1000,37 +1004,9 @@ function detectApi() {
   });
 }
 $('probe').onclick = detectApi;
-// 旧对话跟随设为“每次询问”时，后台返回 409；用户选定后带上本次选择重发。
-function askThreadFollow() {
-  const dialog = $('follow-dialog');
-  $('follow-remember').checked = false;
-  dialog.returnValue = '';
-  dialog.showModal();
-  return new Promise((resolve) => {
-    dialog.onclose = () =>
-      resolve(['off', 'matching', 'all'].includes(dialog.returnValue) ? dialog.returnValue : null);
-  });
-}
-async function switchTo(route, input) {
-  try {
-    return await api(route, input);
-  } catch (e) {
-    if (e.code !== 'thread_follow_required') throw e;
-    const mode = await askThreadFollow();
-    if (!mode) return null;
-    if ($('follow-remember').checked) {
-      await api('setThreadFollow', { mode });
-      $('thread-follow').value = mode;
-    }
-    return api(route, { ...input, threadFollow: mode });
-  }
-}
+// 旧对话一律跟随新来源，由后台默认处理，页面不再询问。
 async function startSwitch(route, input) {
-  const r = await switchTo(route, input);
-  if (!r) {
-    status('已取消切换，配置未修改。');
-    return;
-  }
+  const r = await api(route, input);
   status(r.message);
   accountData.switchJob = { status: 'queued' };
   watchAccounts();
@@ -1056,11 +1032,6 @@ $('switch').onclick = () =>
         reloadEditors,
       });
     }
-  });
-$('thread-follow').onchange = () =>
-  busy($('thread-follow'), async () => {
-    const r = await api('setThreadFollow', { mode: $('thread-follow').value });
-    status(r.message);
   });
 $('threads-resume').onclick = () =>
   busy($('threads-resume'), async () => {

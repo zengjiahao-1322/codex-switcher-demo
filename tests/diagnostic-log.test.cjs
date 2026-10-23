@@ -170,6 +170,22 @@ test('页面导出诊断日志：下载文件名来自后台，并提示内容�
   assert.match(page.byId('status').textContent, /已脱敏/);
 });
 
+// 用户实际遇到：代码已更新但后台未重启，新页面调用旧后台没有的 exportDiagnostics。
+test('后台是旧版本、缺少导出接口时，提示重新打开切换器', async () => {
+  const page = await runPage({
+    respond: (route) =>
+      route === 'exportDiagnostics'
+        ? { status: 404, body: { error: 'Unknown action' } }
+        : route === 'accounts'
+          ? { body: { items: [], switchJob: null } }
+          : { status: 500, body: { error: 'not needed' } },
+  });
+  await page.byId('diagnostics-export').onclick();
+  const text = page.byId('status').textContent;
+  assert.match(text, /后台仍是更新前的版本/);
+  assert.equal(text.includes('Unknown action'), false);
+});
+
 test('切换失败时提示可以导出诊断日志', async () => {
   const failedJob = {
     status: 'error',
