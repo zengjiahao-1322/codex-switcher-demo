@@ -105,7 +105,7 @@ test('同一窗口十次相同心跳只记一次，关联状态改变后才追�
   assert.equal(readRecent(bridgeHome, 1)[0].to, 'separate');
 });
 
-test('官方准备和登录失败落盘，当前账号额度延迟且不泄露秘密', async (t) => {
+test('官方准备、额度和登录失败各自落盘，保留类型与错误码且不泄露秘密', async (t) => {
   const { codexHome, bridgeHome } = fixture(t),
     jwt = (payload) =>
       'eyJhbGciOiJub25lIn0.' +
@@ -129,12 +129,25 @@ test('官方准备和登录失败落盘，当前账号额度延迟且不泄露�
   });
   const id = accounts.status().items[0].id;
   await assert.rejects(accounts.prepare(id), /校验程序不可用/);
-  assert.equal((await accounts.quota(id)).status, 'deferred');
+  // 让额度查询覆盖原来的运行时失败路径：目标账号不再是当前账号，
+  // 因此令牌保护不会提前延迟这次非当前账号查询。
+  fs.writeFileSync(
+    path.join(codexHome, 'auth.json'),
+    JSON.stringify({
+      tokens: {
+        account_id: 'other-account',
+        access_token: jwt({ exp: Math.floor(Date.now() / 1000) + 3600, sub: 'other-user' }),
+        id_token: jwt({ email: 'other@example.test' }),
+        refresh_token: 'other-refresh',
+      },
+    }),
+  );
+  assert.equal((await accounts.quota(id)).status, 'error');
   await assert.rejects(accounts.startLogin({ id }), /missing runtime/);
   const events = readRecent(bridgeHome, 10);
   assert.deepEqual(
     events.map((e) => e.op),
-    ['prepare', 'login'],
+    ['prepare', 'quota', 'login'],
   );
   for (const event of events) {
     assert.equal(event.event, 'official.error');
