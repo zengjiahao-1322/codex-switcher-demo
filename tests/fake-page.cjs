@@ -6,9 +6,19 @@ const fs = require('node:fs'),
 // 任意属性、调用都返回自身的假元素，只记录页面实际写入的属性，供断言读取。
 function element() {
   const props = {};
+  // 与浏览器一致：replaceChildren 替换、append 追加元素的文字内容，后渲染会覆盖先写入的提示。
+  const text = (node) =>
+    typeof node === 'string' ? node : typeof node?.textContent === 'string' ? node.textContent : '';
   const self = new Proxy(function () {}, {
     get: (_, key) => {
       if (key === 'then') return undefined;
+      if (key === 'replaceChildren')
+        return (...nodes) => (props.textContent = nodes.map(text).join(''));
+      if (key === 'append')
+        return (...nodes) =>
+          (props.textContent =
+            (typeof props.textContent === 'string' ? props.textContent : '') +
+            nodes.map(text).join(''));
       if (key === Symbol.toPrimitive) return () => '';
       if (key === Symbol.iterator) return () => [][Symbol.iterator]();
       return key in props ? props[key] : self;

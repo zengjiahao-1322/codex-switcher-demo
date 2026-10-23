@@ -133,6 +133,25 @@ test('首屏同时发出 accounts、state、clients，不互相等待', async ()
   );
 });
 
+// 失败先返回、成功后返回时（Mac CI 上实际出现的顺序），失败提示不能被覆盖。
+for (const [name, slow] of [
+  ['state 后返回', 'state'],
+  ['accounts 后返回', 'accounts'],
+]) {
+  test('首屏 accounts 失败时始终显示读取失败（' + name + '）', async () => {
+    const respond = backend();
+    const page = await runPage({
+      respond: async (route, body) => {
+        if (route === slow) await new Promise((r) => setTimeout(r, 300));
+        if (route === 'accounts') return { status: 500, body: { error: 'fixture load failure' } };
+        return respond(route, body);
+      },
+    });
+    assert.equal(page.byId('summary').textContent, '本机配置读取失败');
+    assert.match(page.byId('status').textContent, /fixture load failure/);
+  });
+}
+
 // 分别覆盖已接入、未关联、独立目录和带远程标签但未确认后端的窗口。
 const editor = (id, extra = {}) => ({ id: 'editor-' + id, editorId: id, kind: 'editor', ...extra });
 const backendProcess = (pid, editorId = null) => ({

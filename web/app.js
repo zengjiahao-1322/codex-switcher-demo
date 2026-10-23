@@ -1517,22 +1517,17 @@ $('threads-refresh').onclick = () =>
   });
 $('diagnosis-thread').onchange = runDiagnosis;
 $('diagnosis-run').onclick = runDiagnosis;
-// 首屏三个请求互不依赖，同时发出；任一先返回都能渲染，另一项到达后会补全界面。
-Promise.all([refreshAccounts(), refresh(), refreshClients()])
-  .then(([data]) => {
-    const current = state.current.official && accountData?.items.find((a) => a.current);
-    if (
-      current &&
-      (!current.quota || Date.now() - Date.parse(current.quota.checkedAt || 0) > 600000)
-    )
-      refreshQuota(current.id).catch((e) => accountStatus(e.message));
-    if (data.login?.status === 'waiting' || switchPending()) watchAccounts();
-  })
-  .catch((e) => {
-    if (sessionLost) {
-      $('summary').textContent = '未连接本机会话';
-      return;
-    }
-    $('summary').textContent = '本机配置读取失败';
-    status(e.message);
-  });
+// 首屏三个请求互不依赖，同时发出。全部结束后再处理失败，
+// 避免先返回的失败提示被后返回的成功渲染覆盖（结果不能取决于返回顺序）。
+Promise.allSettled([refreshAccounts(), refresh(), refreshClients()]).then(([accounts, loaded]) => {
+  const failure = [accounts, loaded].find((r) => r.status === 'rejected');
+  if (failure) {
+    $('summary').textContent = sessionLost ? '未连接本机会话' : '本机配置读取失败';
+    if (!sessionLost) status(failure.reason.message);
+    return;
+  }
+  const current = state.current.official && accountData?.items.find((a) => a.current);
+  if (current && (!current.quota || Date.now() - Date.parse(current.quota.checkedAt || 0) > 600000))
+    refreshQuota(current.id).catch((e) => accountStatus(e.message));
+  if (accounts.value.login?.status === 'waiting' || switchPending()) watchAccounts();
+});
