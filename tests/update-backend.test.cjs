@@ -67,8 +67,9 @@ test('校验和失败时不触碰安装目录', async () => {
 test('安装失败后恢复旧文件，保留 private 内容和权限', async () => {
   const root = temp('rollback'),
     bridge = path.join(root, 'bridge'),
-    target = path.join(root, 'installed'),
-    source = path.join(root, 'source');
+    app = process.platform === 'darwin' ? 'Codex Switcher.app/Contents/Resources' : '',
+    target = path.join(root, 'installed', app),
+    source = path.join(root, 'source', app);
   fs.mkdirSync(path.join(bridge, 'updates'), { recursive: true });
   packageTree(target, ['release-files.json', 'app.txt', 'old.txt'], {
     'app.txt': 'old',
@@ -89,8 +90,8 @@ test('安装失败后恢复旧文件，保留 private 内容和权限', async ()
       bridgeHome: bridge,
       codexHome: path.join(root, 'codex'),
       build: 'bbbbbbbbbbbb',
-      platform: 'win32',
-      arch: 'x64',
+      platform: process.platform,
+      arch: process.arch,
     },
     {
       wait: async () => {},
