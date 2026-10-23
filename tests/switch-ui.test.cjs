@@ -1,4 +1,4 @@
-// 前端验收 #4：切换时询问旧对话去向、取消不改配置、部分失败后继续同步。
+// 前端验收：切换直接发出（旧对话默认跟随，不再询问）、部分失败后继续同步、首屏与多窗口提示。
 const test = require('node:test'),
   assert = require('node:assert/strict'),
   fs = require('node:fs'),
@@ -23,69 +23,28 @@ function backend({ switchJob = null, desktopSwitch, clients = [] } = {}) {
     if (route === 'clients')
       return { body: { home: '', clients, auxiliary: [], editors: [], connectedEditors: 0 } };
     if (route === 'desktopSwitch') return desktopSwitch(body);
-    if (route === 'setThreadFollow') return { body: await service.actions.setThreadFollow(body) };
     return { body: { message: route + ' ok' } };
   };
 }
 
-// 未设置跟随方式时，后台先拒绝；带上用户选择后才开始切换。
-const askFirst = (body) =>
-  body.threadFollow
-    ? { body: { message: '已开始切换' } }
-    : { status: 409, body: { code: 'thread_follow_required', error: '请先选择' } };
-
-async function clickSwitch(page) {
-  page.byId('provider').value = 'api-1';
-  page.byId('model').value = 'model-1';
-  page.byId('reload-editors').checked = true;
-  let shown = 0;
-  page.byId('follow-dialog').showModal = () => shown++;
-  const done = page.byId('switch').onclick();
-  await page.settle();
-  return { done, shown: () => shown };
-}
-
-test('#4 默认先询问旧对话去向，选择并记住后带着选择重新切换', async () => {
-  const page = await runPage({ respond: backend({ desktopSwitch: askFirst }) });
-  assert.equal(page.byId('thread-follow').value, 'ask');
-  const click = await clickSwitch(page);
-  assert.equal(click.shown(), 1);
-  page.byId('follow-dialog').returnValue = 'matching';
-  page.byId('follow-remember').checked = true;
-  page.byId('follow-dialog').onclose();
-  await click.done;
-  const switches = page.calls('desktopSwitch');
-  assert.equal(switches.length, 2);
-  assert.equal(switches[0].body.threadFollow, undefined);
-  assert.deepEqual(switches[1].body, {
-    id: 'api-1',
-    model: 'model-1',
-    reloadEditors: true,
-    threadFollow: 'matching',
-  });
-  assert.deepEqual(page.calls('setThreadFollow')[0].body, { mode: 'matching' });
-  assert.equal(page.byId('thread-follow').value, 'matching');
-});
-
-test('#4 关闭询问框即取消切换，不保存设置也不重发', async () => {
-  const page = await runPage({ respond: backend({ desktopSwitch: askFirst }) });
-  const click = await clickSwitch(page);
-  page.byId('follow-dialog').returnValue = 'cancel';
-  page.byId('follow-dialog').onclose();
-  await click.done;
-  assert.equal(page.calls('desktopSwitch').length, 1);
-  assert.equal(page.calls('setThreadFollow').length, 0);
-  assert.equal(page.byId('status').textContent, '已取消切换，配置未修改。');
-});
-
-test('#4 已设置跟随方式时直接切换，不弹出询问', async () => {
+// 用户决定旧对话一律跟随：点击切换只发一次请求，不弹询问、不带 threadFollow，由后台默认处理。
+test('切换直接发出，不询问旧对话去向', async () => {
   const page = await runPage({
     respond: backend({ desktopSwitch: () => ({ body: { message: '已开始切换' } }) }),
   });
-  const click = await clickSwitch(page);
-  await click.done;
-  assert.equal(click.shown(), 0);
-  assert.equal(page.calls('desktopSwitch').length, 1);
+  let shown = 0;
+  page.byId('follow-dialog').showModal = () => shown++;
+  page.byId('provider').value = 'api-1';
+  page.byId('model').value = 'model-1';
+  page.byId('reload-editors').checked = true;
+  await page.byId('switch').onclick();
+  assert.equal(shown, 0);
+  assert.deepEqual(
+    page.calls('desktopSwitch').map((r) => r.body),
+    [{ id: 'api-1', model: 'model-1', reloadEditors: true }],
+  );
+  assert.equal(page.calls('setThreadFollow').length, 0);
+  assert.equal(page.byId('status').textContent.startsWith('已开始切换'), true);
 });
 
 test('#4 旧对话部分未同步时提供继续同步', async () => {

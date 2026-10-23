@@ -253,7 +253,6 @@ function createService({
     };
     return {
       build,
-      threadFollow: require('../config/thread-follow.cjs').mode(bridgeHome),
       dataDirProtection,
       environment: (() => {
         try {
@@ -532,17 +531,6 @@ function createService({
     return connection;
   }
   const actions = {
-    setThreadFollow: ({ mode }) =>
-      exclusive(async () => {
-        const follow = require('../config/thread-follow.cjs');
-        if (!follow.MODES.includes(mode)) throw Error('旧对话跟随模式无效。');
-        const file = path.join(bridgeHome, 'settings.json');
-        require('../accounts/accounts.cjs').writeJson(file, {
-          ...(readJson(file) || {}),
-          threadFollow: mode,
-        });
-        return { mode, message: '已保存旧对话跟随设置。' };
-      }),
     resumeThreadSync: () =>
       exclusive(async () => {
         const previous = operation.switchJob(bridgeHome);
@@ -675,7 +663,6 @@ function createService({
         proxySource: platform.proxySource(codexHome),
         codexHome,
         dataDirProtection: { ok: dataDirProtection.ok },
-        threadFollow: require('../config/thread-follow.cjs').mode(bridgeHome),
         current: currentSource(readConfig()),
         clients: clients.diagnosticClients(
           clients.snapshot(codexHome, bridgeHome, { inventory }),

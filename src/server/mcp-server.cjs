@@ -41,7 +41,7 @@ const threadFollow = {
   type: 'string',
   enum: ['off', 'matching', 'all'],
   description:
-    '旧对话是否跟随：off 保留原设置，matching 按原 provider 标识筛选，all 全部未归档用户对话。',
+    '可选的旧对话跟随范围：off 保留原设置，matching 按原 provider 标识筛选，all 全部未归档用户对话；未指定时为 all。',
 };
 const TOOLS = [
   {
@@ -86,7 +86,7 @@ const TOOLS = [
   {
     name: 'switch_api_config',
     description:
-      '把 Codex 切换到指定 API 配置与模型（未检测过会先检测）。threadFollow 选择旧对话跟随范围；未指定时采用已保存偏好，尚未选择时要求用户选择。配置写入后请完整重启客户端。config 为“官方”时切回官方登录。',
+      '把 Codex 切换到指定 API 配置与模型（未检测过会先检测）。可选 threadFollow 指定旧对话跟随范围，未指定时全部跟随。配置写入后请完整重启客户端。config 为“官方”时切回官方登录。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -101,7 +101,7 @@ const TOOLS = [
   {
     name: 'switch_to_official',
     description:
-      '切回 Codex 官方登录（ChatGPT 账号）。可指定官方模型。配置写入后请完整重启桌面端。',
+      '切回 Codex 官方登录（ChatGPT 账号）。可指定官方模型和旧对话跟随范围，未指定时全部跟随。配置写入后请完整重启桌面端。',
     inputSchema: {
       type: 'object',
       properties: { model: { type: 'string' }, threadFollow },

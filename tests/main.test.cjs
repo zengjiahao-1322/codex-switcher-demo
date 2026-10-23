@@ -169,6 +169,7 @@ test(
     assert.equal(off.login, 'chatgpt');
     assert.deepEqual(off.models, ['official-model', 'official-2']);
     assert.equal(s.current.official, true);
+    assert.equal(Object.hasOwn(s, 'threadFollow'), false);
     assert.deepEqual(s.usage, { mode: 'official', notice: '' });
     const json = JSON.stringify(s);
     assert.equal(json.includes('hermes-key'), false);
@@ -180,9 +181,8 @@ test(
       'official-2',
     ]);
     assert.deepEqual((await api('models', { id: 'chatonly' })).models, ['m', 'm-large']);
-    // 未检测直接切换：自动检测 → 转换模式。
-    await assert.rejects(api('switch', { id: 'chatonly', model: 'm' }), /请先选择本次/);
-    const sw = await api('switch', { id: 'chatonly', model: 'm', threadFollow: 'off' });
+    // 未检测直接切换：自动检测 → 转换模式；旧对话默认全部跟随。
+    const sw = await api('switch', { id: 'chatonly', model: 'm' });
     assert.equal(sw.mode, 'adapter');
     assert.match(sw.message, /配置已应用/);
     assert.equal((await api('state')).effect.status, 'restart_required');
