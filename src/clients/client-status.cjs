@@ -161,6 +161,7 @@ function heartbeat(bridgeHome, input) {
     wsl: !!input.wsl,
     companionVersion: input.companionVersion || null,
     reloadProtocol: input.reloadProtocol || 0,
+    companionHost: input.companionHost === 'remote' ? 'remote' : 'local',
     seenAt: Date.now(),
     command: prior.command || null,
     lastAck: prior.lastAck || null,
@@ -190,7 +191,9 @@ function heartbeat(bridgeHome, input) {
 }
 function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
   const all = inventory.ancestry,
-    windows = records(bridgeHome).filter((w) => all.some((p) => p.pid === w.pid));
+    // 远程 extension host 的 PID 不在本机进程表中，但心跳仍是已认证的窗口登记。
+    // 本机窗口仍必须通过 PID/祖先链确认，避免过期记录抢占本机后端。
+    windows = records(bridgeHome).filter((w) => w.remote || all.some((p) => p.pid === w.pid));
   const effect = require('../config/switch-state.cjs').readEffect(codexHome, bridgeHome);
   const clients = inventory.processes
     .map((p) => {
@@ -222,7 +225,12 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
       );
       // 通信标识可能属于整个 VS Code 实例；不能先匹配它而抢走另一个窗口的后端。
       const byHook = windows.filter((w) => w.windowKey && w.windowKey === context.windowKey);
-      const companion = byProcess || (byHook.length === 1 ? byHook[0] : null);
+      const byHome = windows.filter(
+        (w) => w.companionHost === 'remote' && sameHome(w.home, context.home),
+      );
+      // 远端窗口和远端后端可能不共享本机 PID 链；只有同一远端目录且唯一窗口时才按目录关联。
+      const companion =
+        byProcess || (byHook.length === 1 ? byHook[0] : byHome.length === 1 ? byHome[0] : null);
       const shared = sameHome(context.home, codexHome),
         layers = configLayers(context.home, context.cwd, context.profile, context.overrides);
       const stale = shared && !!effect && Date.parse(p.startedAt) < Date.parse(effect.at);
@@ -298,6 +306,7 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
       commandPending: !!w.command,
       lastAck: w.lastAck,
       companionVersion: w.companionVersion,
+      companionHost: w.companionHost,
       extensionId: w.extensionId,
       extensionName: w.extensionName,
       editorKind: w.editorKind || w.name,

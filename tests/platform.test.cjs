@@ -119,6 +119,7 @@ test('Win/Mac 伴随扩展按后端关联显示状态，远程窗口标记不阻
     );
     try {
       loaded.exports.activate({
+        extensionUri: { scheme: 'vscode-remote' },
         subscriptions,
         workspaceState: {
           get: (key) => saved.get(key),
@@ -130,6 +131,7 @@ test('Win/Mac 伴随扩展按后端关联显示状态，远程窗口标记不阻
         await new Promise((resolve) => setTimeout(resolve, 10));
       assert.match(status.text, /后端未关联/);
       assert.equal(requests[0].wsl, platform === 'win32');
+      assert.equal(requests[0].companionHost, 'remote');
       state = 'ready';
       command = { id: 'confirmed-local-reload', type: 'reload' };
       await commands.get('codexSwitcher.connect')();

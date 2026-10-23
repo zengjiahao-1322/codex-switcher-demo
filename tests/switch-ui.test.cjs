@@ -134,7 +134,10 @@ test('多窗口提示区分已接入、未关联和独立配置，不凭远程�
   assert.ok(hint.includes('1 个窗口已接入（扩展宿主 PID 900）'), hint);
   assert.ok(hint.includes('2 个共用配置的 Codex 后台（PID 12、13）没有对应到已接入的窗口'), hint);
   assert.ok(hint.includes('1 个窗口使用独立配置目录，不随本机切换'), hint);
-  assert.ok(hint.includes('1 个窗口尚未关联到本机 Codex 后端，暂不能确认是否跟随本机切换'), hint);
+  assert.ok(
+    hint.includes('1 个窗口尚未关联到本机可见的 Codex 后端，暂不能确认是否跟随本机切换'),
+    hint,
+  );
   assert.equal(hint.includes('安装'), false, '原因未确认前不给安装建议');
 });
 
@@ -175,6 +178,27 @@ test('所有后台都已接入时只显示可自动重载', async () => {
     page.byId('editor-reload-hint').textContent,
     '1 个窗口已接入（扩展宿主 PID 900），可自动重载。',
   );
+});
+
+test('旧版伴随扩展和 Remote-SSH 未关联时给出可执行提示', async () => {
+  const page = await runPage({
+    respond: backend({
+      clients: [
+        editor('remote', {
+          pid: 901,
+          remote: 'ssh-remote+server',
+          canReload: false,
+          confirmed: false,
+          reloadProtocol: 0,
+        }),
+        backendProcess(17632),
+      ],
+    }),
+  });
+  await page.byId('client-details').ontoggle();
+  const hint = page.byId('editor-reload-hint').textContent;
+  assert.ok(hint.includes('旧版伴随扩展'), hint);
+  assert.ok(hint.includes('Remote-SSH'), hint);
 });
 
 test('#4 切换成功或没有失败条目时不显示继续同步', async () => {

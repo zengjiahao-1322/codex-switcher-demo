@@ -372,6 +372,40 @@ test('心跳返回真实后端关联结果，已连接不能代替已接入', as
     'unmatched',
   );
 });
+
+test('远端 extension host 心跳保留，并在唯一 CODEX_HOME 下关联远端后端', (t) => {
+  const f = fixture(t),
+    c = require('../src/clients/client-status.cjs'),
+    remoteHome = path.join(f.root, 'remote-home');
+  fs.mkdirSync(remoteHome);
+  c.heartbeat(f.bridge, {
+    id: 'remote-window-1',
+    pid: 987654,
+    remote: 'ssh-remote+fixture',
+    companionHost: 'remote',
+    home: remoteHome,
+    reloadProtocol: 2,
+  });
+  const inventory = {
+    ancestry: [],
+    processes: [
+      {
+        pid: 17632,
+        parentPid: 17631,
+        exe: '/remote/openai.chatgpt/bin/codex',
+        context: { ok: true, home: remoteHome },
+        startedAt: new Date().toISOString(),
+      },
+    ],
+  };
+  const result = c.snapshot(remoteHome, f.bridge, { inventory });
+  const editor = result.clients.find((item) => item.kind === 'editor');
+  assert.equal(editor.editorId, 'remote-window-1');
+  assert.equal(editor.remote, 'ssh-remote+fixture');
+  assert.equal(editor.companionHost, 'remote');
+  assert.equal(editor.canReload, true);
+  assert.equal(result.clients.find((item) => item.pid === 17632).editorId, 'remote-window-1');
+});
 test('桌面壳尚无后端时仍识别 Codex，独立目录不跟随', (t) => {
   const f = fixture(t),
     c = require('../src/clients/client-status.cjs');

@@ -1,6 +1,6 @@
 {
   "name": "codex-api-switcher",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Codex accounts and API switcher for Windows and macOS, with per-window reload and quota display.",
   "license": "MIT",
   "private": true,

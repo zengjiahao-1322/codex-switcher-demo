@@ -2,9 +2,9 @@
 
 管理 Codex 官方账号和自定义 API 的本机工具，支持 Windows 与 macOS。
 
-**0.1.3 Demo · 2026-10-22 替换构建**。版本号不变，旧压缩包不会自动更新，请重新下载。
+**0.1.4 Demo · 2026-10-23 Remote-SSH 修复**。切换器与伴随扩展需要一起更新。
 
-[查看发布说明与全部下载](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/tag/v0.1.3)
+[查看发布说明与全部下载](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/tag/v0.1.4)
 
 ## 下载和安装
 
@@ -12,10 +12,10 @@
 
 | 平台                        | 下载                                                                                                                               | 启动                                                                    |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Windows x64                 | [Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-windows-x64.zip)   | 完整解压，双击文件夹中的 `Start.cmd`；可运行 `install.cmd` 创建快捷方式 |
-| Mac Apple Silicon（M 系列） | [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-arm64.zip) | 解压并运行 `Install.command`，或打开 `Codex Switcher.app`               |
-| Mac Intel                   | [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-x64.zip)   | 同上                                                                    |
-| 编辑器伴随扩展              | [通用 VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-companion.vsix)         | 在编辑器扩展菜单选择“从 VSIX 安装”，或通过切换器接入                    |
+| Windows x64                 | [Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-windows-x64.zip)   | 完整解压，双击文件夹中的 `Start.cmd`；可运行 `install.cmd` 创建快捷方式 |
+| Mac Apple Silicon（M 系列） | [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-macos-arm64.zip) | 解压并运行 `Install.command`，或打开 `Codex Switcher.app`               |
+| Mac Intel                   | [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-macos-x64.zip)   | 同上                                                                    |
+| 编辑器伴随扩展              | [通用 VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-companion.vsix)         | 在编辑器扩展菜单选择“从 VSIX 安装”，或通过切换器接入                    |
 
 不要只取出启动脚本，运行时需要保留完整目录。Windows 安装版默认安装到当前用户目录，无需管理员权限。
 
@@ -26,7 +26,7 @@ Mac 应用使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或公证
 ## 基本使用
 
 1. **添加来源**：通过官方授权页添加账号，或填写自定义 API 的地址、密钥和模型。添加账号不会立即启用它，也不需要把邮箱密码交给本工具。
-2. **接入编辑器**：如需切换已打开的 VS Code、VS Code Insiders、Cursor 或 Windsurf 窗口，先在“影响范围与其他客户端”接入伴随扩展。打开 Codex 后，各窗口状态栏应显示“Codex Switcher · 已接入”；“后端未关联”表示已连到切换器，但尚未确认对应的 Codex 后端。同一台电脑上的多个编辑器和多个窗口会分别登记，只有共用当前 CODEX_HOME 的窗口会一起重载。
+2. **接入编辑器**：如需切换已打开的 VS Code、VS Code Insiders、Cursor 或 Windsurf 窗口，先安装本版伴随 VSIX 并重载窗口。打开 Codex 后，各窗口状态栏应显示“Codex Switcher · 已接入”；仍显示“已连接”表示窗口还在使用旧版 VSIX。“后端未关联”表示已连到切换器，但尚未确认对应的 Codex 后端。同一台电脑上的多个编辑器和多个窗口会分别登记，只有共用当前 CODEX_HOME 的窗口会一起重载。
 3. **应用来源**：选择账号或 API，点击“应用”，按提示选择旧对话是否跟随。工具先完成检查，再更新配置、同步所选范围的旧对话设置，并重新打开目标桌面端或请求编辑器重载。
 4. **查看结果**：切换区显示每一步耗时和逐窗口重载状态。额度可按账号单独刷新，批量刷新也分别显示结果。
 
@@ -36,7 +36,7 @@ Mac 应用使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或公证
 
 - **官方多账号**：保存官方登录副本、切换账号、查看 Codex 服务端额度。额度查询失败时显示原因与上次成功时间，不把缓存数字当作当前额度。
 - **自定义 API**：支持 Responses 检测，以及受限的 Chat Completions／Anthropic Messages 本机转换。检测和实际使用可能产生上游费用；转换模式需要后台持续运行，不保证支持全部 Codex 特性，例如内置网页搜索。
-- **多窗口切换**：按实际本机 Codex 后端的进程归属和配置目录确认重载范围；独立目录及真正运行在 SSH、WSL、容器中的远端后端不跟随。窗口标签不影响已确认共用本机配置的后端。
+- **多窗口切换**：按实际 Codex 后端的进程归属和配置目录确认重载范围；独立目录不跟随。Remote-SSH、WSL、容器窗口要让切换器和伴随扩展运行在同一主机，才能读取该主机的后端并重载；本机切换器不会替远端进程执行切换。窗口标签不影响已确认共用配置的后端。
 - **旧对话跟随**：可选择关闭、只跟随原供应商或全部跟随，默认先询问。通过官方接口更新未归档用户对话的供应商，保留目标支持的原模型和各对话速度；部分失败可继续同步并核对持久结果。不会迁移 ChatGPT 网页的云端聊天。
 - **诊断与导出**：查看本机会话的来源差异和关联错误，导出可见上下文供新会话继续。
 
@@ -46,12 +46,12 @@ Mac 应用使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或公证
 
 ## 更新现有安装
 
-本次替换了同名 `v0.1.3` 下载文件，请以 Release 中的 **2026-10-22** 构建说明区分旧包。
+本次发布 `v0.1.4`，请同时更新切换器和伴随扩展。
 
 - **Windows 安装版**：完整解压新包后运行 `install.cmd`，安装器会停止所管理的旧后台并保留安装目录下的 `private/`。
 - **Windows 解压版**：保留原目录下的 `private/`，停止旧切换器后台后更新程序文件。直接在另一个空目录启动会使用那里的新数据目录。
 - **Mac**：运行新包的 `Install.command`，默认安装到 `~/Applications/`；账号数据单独保存在 Application Support 中。
-- **编辑器**：旧 0.1.3 用户也应通过切换器重新接入伴随扩展，或安装本次 VSIX。已有窗口可能需先手动执行一次“重载窗口”激活新代码。
+- **编辑器**：旧用户必须安装 0.1.4 VSIX。Remote-SSH 窗口要在 SSH 主机的扩展宿主安装；若切换器也运行在 SSH 主机，才能读取远端 Codex 后端。
 
 使用自定义 `BRIDGE_HOME`／`CODEX_HOME` 的用户应继续沿用原目录。只更新切换器程序不需要切换账号；点击“应用”才会触发目标客户端的重启或重载。
 
@@ -68,11 +68,11 @@ Mac 应用使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或公证
 
 ## 兼容性与验证
 
-发布流水线在 **Windows、macOS 15 Apple Silicon 和 macOS 15 Intel** 上运行回归、浏览器、安装包和真实 VS Code 多窗口检查；三平台的六项检查全部通过才上传下载文件。查看 [0.1.3 发布验证](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/workflows/release.yml?query=branch%3Av0.1.3)。
+发布流水线在 **Windows、macOS 15 Apple Silicon 和 macOS 15 Intel** 上运行回归、浏览器、安装包和真实 VS Code 多窗口检查；三平台的六项检查全部通过才上传下载文件。查看 [0.1.4 发布验证](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/workflows/release.yml?query=branch%3Av0.1.4)。
 
 Mac 还检查系统 Bash 安装脚本、首次与重复安装、数据保留、签名完整性和 LaunchServices 启动。编译目标为 macOS 12+，实际 CI 运行系统为 macOS 15；macOS 12 没有实机结果。CI 使用隔离配置和合成数据，不代替使用者 Mac 上的首次 Gatekeeper 授权、个人账号登录与真实额度验收。
 
-部分用户机器的编辑器后端关联，以及 Mac 切换官方账号后仍显示登录页的反馈，尚待原机器复测确认。此版提供已复现缺陷的修复与更准确的关联状态；剩余问题确认修好后再发布 0.1.4。
+Mac 个人官方账号登录和真实额度仍需在实际 Mac 上验收；CI 使用隔离配置和合成账号，不能替代个人账号验收。
 
 VS Code 已进行多窗口 GUI 验证；Insiders、Cursor、Windsurf 使用同一伴随扩展协议，并已加入运行程序发现、窗口归属和重载路径的回归覆盖，仍建议在实际编辑器版本上做一次人工验收。本项目为基础 Demo，仅监听本机地址，未进行正式安全审计。
 

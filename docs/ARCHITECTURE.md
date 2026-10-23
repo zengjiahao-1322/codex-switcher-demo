@@ -16,7 +16,7 @@
 
 `src/platform/runtime.cjs` 独立发现当前编辑器渠道安装的官方运行程序，不通过桌面应用启动才能登录。伴随扩展会从编辑器扩展清单识别 OpenAI 的 Codex/ChatGPT 扩展，不依赖单一扩展 ID；只负责窗口通信与重载，不承担账号登录或额度 RPC。是否参与切换由实际本机 Codex 后端的 PID 归属和配置目录决定，远程工作区或 WSL 设置只是窗口信息，不能否定已确认的本机后端；真正使用远端配置的后端不随本机切换。
 
-心跳成功只代表连接到了本机服务。`clientHeartbeat` 返回 `connection.state`（`ready`、`unmatched`、`separate`）、管理目录和关联后端 PID，伴随扩展据此显示“已接入”“后端未关联”或“独立配置”。重载后必须等新的 Codex 后端关联到共用配置，才确认重载完成；这仍不代表已经通过真实模型请求验证了官方登录或上游额度。
+心跳成功只代表连接到了切换器服务。`clientHeartbeat` 返回 `connection.state`（`ready`、`unmatched`、`separate`）、管理目录和关联后端 PID，伴随扩展据此显示“已接入”“后端未关联”或“独立配置”。Remote-SSH 的伴随扩展在 workspace extension host 中上报 `companionHost=remote`；同一远端切换器按远端 `CODEX_HOME` 且窗口唯一时关联后端，本机切换器不会读取 SSH 主机的 PID。重载后必须等新的 Codex 后端关联到共用配置，才确认重载完成；这仍不代表已经通过真实模型请求验证了官方登录或上游额度。
 
 `src/clients/desktop-account.cjs` 的 `runSwitch()` 统一生成步骤及耗时，`web/app.js` 统一渲染；没有按系统拆分的旧版切换页面。`src/platform/build-info.cjs` 为运行代码生成一次构建标识，新入口只复用同构建后台，避免新包连接旧后台继续显示旧页面。页面底部显示版本和构建标识，便于核对实际运行版本。
 

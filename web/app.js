@@ -1152,6 +1152,8 @@ async function refreshClients() {
     const ready = c.clients.filter((p) => p.kind === 'editor' && p.canReload);
     const separate = c.clients.filter((p) => p.kind === 'editor' && p.confirmed && !p.shared);
     const unmatched = c.clients.filter((p) => p.kind === 'editor' && !p.confirmed);
+    const outdated = c.clients.filter((p) => p.kind === 'editor' && p.reloadProtocol < 2);
+    const remoteUnmatched = unmatched.filter((p) => p.remote);
     // 分别展示可重载、独立配置和未关联的窗口，不从“没有找到”推断远端归属。
     const parts = [];
     const pids = (rows) => 'PID ' + rows.map((p) => p.pid).join('、');
@@ -1166,7 +1168,16 @@ async function refreshClients() {
       );
     if (separate.length) parts.push(separate.length + ' 个窗口使用独立配置目录，不随本机切换');
     if (unmatched.length)
-      parts.push(unmatched.length + ' 个窗口尚未关联到本机 Codex 后端，暂不能确认是否跟随本机切换');
+      parts.push(
+        unmatched.length + ' 个窗口尚未关联到本机可见的 Codex 后端，暂不能确认是否跟随本机切换',
+      );
+    if (outdated.length)
+      parts.push(outdated.length + ' 个窗口使用旧版伴随扩展，请重新安装本版 VSIX 并重载窗口');
+    if (remoteUnmatched.length)
+      parts.push(
+        remoteUnmatched.length +
+          ' 个 Remote-SSH 窗口未关联；若切换器运行在本机，请在 SSH 主机运行同版本切换器和扩展',
+      );
     $('editor-reload-hint').textContent = parts.length
       ? parts.join('；') + '。'
       : '尚无已确认共用配置、可自动重载的编辑器窗口。';
@@ -1207,7 +1218,7 @@ async function refreshClients() {
         (client.error ? '\n进程读取失败：' + client.error : '') +
         (client.workspace ? '\n' + client.workspace : '') +
         (client.kind === 'editor' && !client.confirmed
-          ? '\n本机尚未关联到此窗口的 Codex 后端，暂不能确认是否跟随本机切换。请打开 Codex 扩展；若已打开，请查看其输出是否启动失败。'
+          ? '\n尚未关联到本机可见的 Codex 后端，暂不能确认是否跟随本机切换。请确认伴随扩展与切换器运行在同一主机。'
           : '') +
         (client.kind === 'editor'
           ? '\n客户端：' +
@@ -1218,7 +1229,7 @@ async function refreshClients() {
             (client.companionVersion || '版本未知，可重新接入以更新')
           : '') +
         (client.kind === 'editor' && client.reloadProtocol < 2
-          ? '\n当前伴随扩展较旧，请重新接入以获取重载完成回报。'
+          ? '\n当前伴随扩展较旧（仍可能显示“已连接”），请重新安装本版 VSIX 并重载窗口。'
           : '') +
         (client.commandPending ? '\n重载请求等待窗口接收；请查看编辑器状态栏是否已连接。' : '') +
         (client.lastAck?.status === 'reload_requested'

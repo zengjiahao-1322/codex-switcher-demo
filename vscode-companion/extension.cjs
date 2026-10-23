@@ -43,6 +43,9 @@ function activate(context) {
   status.tooltip = 'Connect to the local Codex switcher';
   status.show();
   context.subscriptions.push(status);
+  // Remote-SSH 窗口的扩展可能运行在远端 extension host；只有这时才能
+  // 读取远端 CODEX_HOME，并由同一主机上的切换器扫描远端 Codex 后端。
+  const runsOnRemoteHost = context.extensionUri?.scheme === 'vscode-remote';
   const report = () => {
     const folders = vscode.workspace.workspaceFolders || [],
       remote =
@@ -87,19 +90,23 @@ function activate(context) {
       id,
       companionVersion: require('./package.json').version,
       reloadProtocol: 2,
+      companionHost: runsOnRemoteHost ? 'remote' : 'local',
       pid: process.pid,
       name: vscode.env.appName,
       editorKind: vscode.env.appName || '编辑器',
       workspace: folders.map((f) => f.uri.fsPath).join(' | '),
       windowKey: process.env.VSCODE_IPC_HOOK_CLI || null,
       home:
-        remote || wsl
+        !runsOnRemoteHost && (remote || wsl)
           ? null
           : path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex')),
-      extensionPath: remote || wsl ? null : extensionPath,
+      extensionPath: !runsOnRemoteHost && (remote || wsl) ? null : extensionPath,
       extensionId: codexExtension?.id || null,
       extensionName: codexExtension?.packageJSON?.displayName || null,
-      codexExe: !remote && !wsl && candidate && fs.existsSync(candidate) ? candidate : null,
+      codexExe:
+        (!runsOnRemoteHost && (remote || wsl)) || !candidate || !fs.existsSync(candidate)
+          ? null
+          : candidate,
       remote,
       wsl,
     };
