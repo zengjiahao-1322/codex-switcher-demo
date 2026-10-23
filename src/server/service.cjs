@@ -15,6 +15,7 @@ const core = require('../config/core.cjs'),
   store = require('../config/providers.cjs');
 const { createAccounts } = require('../accounts/accounts.cjs'),
   { scheduleSwitch } = require('../clients/desktop-account.cjs');
+const { createUpdateManager } = require('./update.cjs');
 const operation = require('../config/switch-state.cjs');
 const eventLog = require('../diagnostics/event-log.cjs');
 const OFFICIAL = 'official',
@@ -50,6 +51,12 @@ function createService({
   const adapterPath = path.join(bridgeHome, 'adapter.json'),
     currentPath = path.join(bridgeHome, 'current.json');
   const acl = (p) => core.privateAcl(p);
+  const updates = createUpdateManager({
+    bridgeHome,
+    projectDir,
+    build: build.id,
+    version: build.version,
+  });
   let listeningPort = null;
   const passed = new Map();
   const companionStates = new Map();
@@ -253,6 +260,7 @@ function createService({
     };
     return {
       build,
+      update: updates.state(),
       dataDirProtection,
       environment: (() => {
         try {
@@ -531,6 +539,23 @@ function createService({
     return connection;
   }
   const actions = {
+    checkUpdate: () => updates.actions.checkUpdate(),
+    installUpdate: () => updates.actions.installUpdate(),
+    updateCompanions: async () => {
+      const integration = require('../clients/editor-integration.cjs'),
+        results = [];
+      for (const editor of integration.editors()) {
+        try {
+          results.push({
+            ...(await integration.install(editor.id, projectDir)),
+            name: editor.name,
+          });
+        } catch (error) {
+          results.push({ name: editor.name, error: error.message });
+        }
+      }
+      return { results };
+    },
     resumeThreadSync: () =>
       exclusive(async () => {
         const previous = operation.switchJob(bridgeHome);

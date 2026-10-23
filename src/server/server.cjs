@@ -127,15 +127,27 @@ function createServer({
         });
       }
     }
-    if (req.method === 'GET' && ['/', '/app.js'].includes(url.pathname)) {
-      const file = url.pathname === '/' ? 'web/index.html' : 'web/app.js';
+    const relativeStatic = url.pathname === '/' ? 'index.html' : url.pathname.slice(1),
+      webRoot = path.resolve(PROJECT_ROOT, 'web'),
+      staticFile = path.resolve(webRoot, relativeStatic),
+      isStatic =
+        req.method === 'GET' &&
+        relativeStatic !== '' &&
+        /\.(?:js|css)$/.test(relativeStatic) &&
+        !relativeStatic.includes('..') &&
+        (staticFile === path.join(webRoot, 'index.html') ||
+          staticFile.startsWith(webRoot + path.sep));
+    if (req.method === 'GET' && (url.pathname === '/' || isStatic)) {
+      const file = url.pathname === '/' ? 'web/index.html' : path.join('web', relativeStatic);
       res.setHeader(
         'Content-Security-Policy',
         "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
       );
       const type = file.endsWith('.html')
         ? 'text/html; charset=utf-8'
-        : 'text/javascript; charset=utf-8';
+        : file.endsWith('.css')
+          ? 'text/css; charset=utf-8'
+          : 'text/javascript; charset=utf-8';
       const stream = fs.createReadStream(path.join(PROJECT_ROOT, file));
       let started = false;
       const start = () => {

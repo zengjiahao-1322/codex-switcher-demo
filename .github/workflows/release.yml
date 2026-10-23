@@ -83,13 +83,17 @@ jobs:
           pattern: package-*
           path: artifacts
           merge-multiple: true
+      - name: Create release metadata
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: node scripts/create-release-json.cjs "$GITHUB_REF_NAME" artifacts release.json
       - name: Publish the platform downloads
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # 用户要求替换同一版本时，更新现有下载；只有本次全部检查通过才会执行。
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
+            gh release upload "$GITHUB_REF_NAME" artifacts/* release.json --clobber
             gh release edit "$GITHUB_REF_NAME" --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file docs/RELEASE.md --latest
           else
             gh release create "$GITHUB_REF_NAME" artifacts/* --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file docs/RELEASE.md --latest

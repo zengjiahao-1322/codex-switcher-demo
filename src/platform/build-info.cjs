@@ -17,7 +17,16 @@ function buildInfo() {
     }
   };
   // 运行代码与页面决定构建标识；文档和用户数据不参与，不随页面轮询重新计算。
-  for (const item of ['src', 'web', 'platform', 'vscode-companion', 'main.cjs', 'package.json'])
+  for (const item of [
+    'src',
+    'web',
+    'platform',
+    'vscode-companion',
+    'scripts/update-worker.cjs',
+    'release-files.json',
+    'main.cjs',
+    'package.json',
+  ])
     visit(item);
   cached = { version: require('../../package.json').version, id: hash.digest('hex').slice(0, 12) };
   return cached;
