@@ -211,7 +211,7 @@ function findCodex(options = {}) {
     } catch {}
   throw Object.assign(
     Error(
-      '未找到 Codex 运行程序。请安装 Codex 官方扩展或桌面版；已有安装可在“影响范围与其他客户端”填写程序路径。',
+      '未找到 Codex 运行程序。请安装 Codex 官方扩展或桌面版；已有安装可在“编辑器与诊断”填写程序路径。',
     ),
     { code: 'CODEX_NOT_FOUND' },
   );

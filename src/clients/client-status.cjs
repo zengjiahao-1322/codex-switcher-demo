@@ -417,7 +417,7 @@ function requestReload(codexHome, bridgeHome, { id, stoppedEditors = [] } = {}) 
       commandId: client.reloadCommandId,
     })),
     message: targets.length
-      ? '已向 ' + targets.length + ' 个共用配置的编辑器窗口发送重载请求，等待窗口执行。'
+      ? '已向 ' + targets.length + ' 个已接入的编辑器窗口发送重载请求，等待窗口执行。'
       : '未向任何编辑器窗口发送重载：请先接入伴随扩展，并在客户端列表确认配置目录。',
   };
 }

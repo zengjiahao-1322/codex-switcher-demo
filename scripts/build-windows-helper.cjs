@@ -13,7 +13,13 @@ const project = path.resolve(__dirname, '..'),
   source = path.join(project, 'platform', 'windows', 'process-context.cs'),
   outputDir = path.join(project, 'bin'),
   output = path.join(outputDir, 'process-context.exe'),
-  compiler = path.join(process.env.WINDIR || 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe');
+  compiler = path.join(
+    process.env.WINDIR || 'C:\\Windows',
+    'Microsoft.NET',
+    'Framework64',
+    'v4.0.30319',
+    'csc.exe',
+  );
 
 if (!fs.existsSync(compiler)) throw Error('未找到 Windows C# 编译器：' + compiler);
 fs.mkdirSync(outputDir, { recursive: true });

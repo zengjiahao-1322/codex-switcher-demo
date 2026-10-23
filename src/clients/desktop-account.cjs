@@ -259,7 +259,7 @@ async function runSwitch(
   const checkEditors = (detected) => {
     if (detected.some((c) => c.kind === 'ide' && !c.confirmed && (!c.home || c.shared)))
       throw Error(
-        '无法确认部分 Codex 插件后端的配置目录，尚未切换。请展开“影响范围与其他客户端”查看进程读取错误。',
+        '无法确认部分 Codex 插件后端的配置目录，尚未切换。请展开“编辑器与诊断”查看进程读取错误。',
       );
     const missing = detected.filter(
       (c) => c.kind === 'ide' && c.confirmed && c.shared && !c.editorId,
@@ -270,7 +270,7 @@ async function runSwitch(
           missing.length +
           ' 个共用配置的 Codex 后端未关联到编辑器窗口（PID ' +
           missing.map((c) => c.pid).join(', ') +
-          '）。请在“影响范围与其他客户端”核对连接与进程归属；这不等于没有安装伴随扩展。配置尚未修改，客户端未关闭。',
+          '）。请在“编辑器与诊断”核对连接与进程归属；这不等于没有安装伴随扩展。配置尚未修改，客户端未关闭。',
       );
   };
   const logClients = (phase, status) =>

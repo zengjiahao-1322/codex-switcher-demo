@@ -96,5 +96,5 @@ jobs:
             gh release upload "$GITHUB_REF_NAME" artifacts/* release.json --clobber
             gh release edit "$GITHUB_REF_NAME" --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file docs/RELEASE.md --latest
           else
-            gh release create "$GITHUB_REF_NAME" artifacts/* --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file docs/RELEASE.md --latest
+            gh release create "$GITHUB_REF_NAME" artifacts/* release.json --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file docs/RELEASE.md --latest
           fi

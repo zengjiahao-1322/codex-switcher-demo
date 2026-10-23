@@ -13,7 +13,7 @@ try {
 const { createServer } = require('../src/server/server.cjs');
 const { createService } = require('../src/server/service.cjs');
 
-// 运行发行包使用的同一份 HTML / app.js，验证刷新时的真实 DOM 状态。
+// 运行发行包使用的同一份 HTML / CSS / ES 模块，验证刷新时的真实 DOM 状态。
 // 此处仅控制测试浏览器，不接触用户桌面或个人账号。
 const root = fs.mkdtempSync(
   path.join(process.env.SWITCHER_VERIFY_HOME || os.tmpdir(), 'switcher-ui-parity-'),
@@ -64,6 +64,13 @@ let officialMode = false,
       actions: {
         ...service.actions,
         accounts: async () => ({ items: accounts }),
+        // 不访问 GitHub。
+        checkUpdate: async () => ({
+          current: { version: '0.1.3', build: 'fixture' },
+          latest: null,
+          checkedAt: null,
+          status: 'idle',
+        }),
         accountSwitch: async () => {
           switches++;
           return {};
@@ -97,9 +104,11 @@ let officialMode = false,
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/#fixture-ui-token`);
-    await page.waitForFunction(() => document.getElementById('provider').disabled === false);
+    await page.waitForFunction(
+      () => document.querySelector('#source-list .source-card')?.disabled === false,
+    );
     await page.locator('#model').fill('draft-kept-during-quota');
-    await page.locator('#account-manager > summary').click();
+    await page.locator('#tab-accounts').click();
     await page.locator('#account-list').getByText('剩余 65%', { exact: true }).waitFor();
     const slowRow = page.locator('.prow').filter({ hasText: 'Slow account' });
     const fastRow = page.locator('.prow').filter({ hasText: 'Fast account' });
@@ -111,15 +120,22 @@ let officialMode = false,
       await fastRow.getByRole('button', { name: '刷新额度', exact: true }).isEnabled(),
       true,
     );
-    for (const id of ['provider', 'model', 'probe', 'switch', 'fetch-models', 'account-add']) {
+    for (const selector of [
+      '#source-list .source-card >> nth=0',
+      '#model',
+      '#probe',
+      '#switch',
+      '#fetch-models',
+      '#account-add',
+    ]) {
       assert.equal(
-        await page.locator('#' + id).isEnabled(),
+        await page.locator(selector).isEnabled(),
         true,
-        `${id} 不应被另一个账号刷新锁住`,
+        `${selector} 不应被另一个账号刷新锁住`,
       );
     }
     assert.equal(await page.locator('#model').inputValue(), 'draft-kept-during-quota');
-    await page.locator('#provider').selectOption('account:fixture-fast');
+    await page.locator('[data-source="account:fixture-fast"]').click();
     assert.equal(await page.locator('#switch').isEnabled(), true);
     assert.ok((await page.locator('#official-quota').innerText()).includes('剩余 65%'));
     report.checks.push('slow-account-does-not-lock-source-model-or-other-account');
@@ -155,12 +171,16 @@ let officialMode = false,
     assert.equal(switches, 0, '额度提醒只选择账号，不自动应用或重启');
     accounts[0].quota.status = 'error';
     await page.reload();
-    await page.waitForFunction(() => document.getElementById('provider').disabled === false);
+    await page.waitForFunction(
+      () => document.querySelector('#source-list .source-card')?.disabled === false,
+    );
     assert.equal(await page.locator('#quota-notice').isHidden(), true);
     accounts[0].quota.status = 'ok';
     accounts[0].quota.buckets[0].windows[0].resetsAt = Math.floor(Date.now() / 1000) - 60;
     await page.reload();
-    await page.waitForFunction(() => document.getElementById('provider').disabled === false);
+    await page.waitForFunction(
+      () => document.querySelector('#source-list .source-card')?.disabled === false,
+    );
     assert.equal(
       await page.locator('#quota-notice').isHidden(),
       true,
@@ -169,7 +189,9 @@ let officialMode = false,
     officialMode = false;
     accounts[0].quota.buckets[0].windows[0].resetsAt = null;
     await page.reload();
-    await page.waitForFunction(() => document.getElementById('provider').disabled === false);
+    await page.waitForFunction(
+      () => document.querySelector('#source-list .source-card')?.disabled === false,
+    );
     assert.equal(
       await page.locator('#quota-notice').isHidden(),
       true,

@@ -76,7 +76,6 @@ async function runtime(platform, arch) {
     });
     entries = sourceEntries('Codex Switcher/');
     entries.push(
-      { name: 'Codex Switcher/release-files.json', file: path.join(project, 'release-files.json') },
       { name: 'Codex Switcher/runtime/node.exe', file: r.exe },
       { name: 'Codex Switcher/runtime/NODE-LICENSE', file: r.license },
       {
@@ -128,10 +127,6 @@ async function runtime(platform, arch) {
         name: bundle + 'MacOS/CodexSwitcher',
         file: launcher,
         mode: 0o100755,
-      },
-      {
-        name: resources + 'platform/macos/mac-launcher.sh',
-        file: path.join(project, 'platform/macos/mac-launcher.sh'),
       },
       {
         name: 'Install.command',

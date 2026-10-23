@@ -1,638 +1,49 @@
 <!doctype html>
 <html lang="zh-CN">
-  <meta charset="utf-8" /><meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
-  /><title>Codex API 切换器</title
-  ><style>
-    :root {
-      color-scheme: light;
-      --ink: #24342d;
-      --muted: #637169;
-      --line: #d9e0da;
-      --accent: #17684b;
-    }
-    * {
-      box-sizing: border-box;
-    }
-    body {
-      margin: 0;
-      background: #f4f5f1;
-      color: var(--ink);
-      font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-      font-size: 15px;
-    }
-    main {
-      max-width: 1020px;
-      margin: 40px auto;
-      padding: 0 28px;
-    }
-    header {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--line);
-      padding-bottom: 24px;
-    }
-    h1 {
-      font-size: 26px;
-      letter-spacing: -0.5px;
-      margin: 0;
-    }
-    header small,
-    p,
-    small {
-      color: var(--muted);
-      line-height: 1.7;
-    }
-    section {
-      display: grid;
-      grid-template-columns: 210px 1fr;
-      gap: 34px;
-      padding: 32px 0;
-      border-bottom: 1px solid var(--line);
-    }
-    h2 {
-      font-size: 17px;
-      margin: 0 0 10px;
-    }
-    h3 {
-      font-size: 15px;
-      margin: 22px 0 12px;
-    }
-    .panel {
-      background: white;
-      padding: 24px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-    }
-    label {
-      display: block;
-      font-size: 13px;
-      font-weight: 600;
-      margin: 0 0 8px;
-    }
-    select,
-    input {
-      font: inherit;
-      width: 100%;
-      padding: 11px 12px;
-      background: #fff;
-      border: 1px solid #bbc8be;
-      border-radius: 5px;
-      margin-bottom: 20px;
-    }
-    button {
-      font: inherit;
-      padding: 10px 16px;
-      min-height: 44px;
-      border-radius: 5px;
-      border: 1px solid #bcc9c0;
-      background: white;
-      color: var(--ink);
-      cursor: pointer;
-    }
-    button.primary {
-      background: var(--accent);
-      color: white;
-      border-color: var(--accent);
-    }
-    button:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-    }
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-    #summary {
-      margin: 12px 0;
-      font-size: 14px;
-    }
-    #summary b {
-      color: var(--accent);
-    }
-    #status,
-    #provider-status {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      background: #eaf0e9;
-      padding: 14px;
-      margin-top: 20px;
-      border-radius: 5px;
-      line-height: 1.65;
-    }
-    #provider-status[hidden] {
-      display: none;
-    }
-    #endpoint {
-      display: block;
-      overflow-wrap: anywhere;
-      margin-top: -8px;
-      margin-bottom: 12px;
-    }
-    .hint {
-      display: block;
-      color: #3f5a4c;
-      background: #eef4f0;
-      padding: 10px 12px;
-      border-radius: 5px;
-      margin: 0 0 18px;
-      line-height: 1.6;
-    }
-    .hint.warn {
-      color: #8a4b12;
-      background: #fbf1e4;
-    }
-    .hint[hidden] {
-      display: none;
-    }
-    #protection-notice {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
-    #threads-resume {
-      margin-top: 10px;
-    }
-    #threads-resume[hidden] {
-      display: none;
-    }
-    .check {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      font-weight: 400;
-      margin: 14px 0 0;
-    }
-    .check input {
-      width: auto;
-      margin: 0;
-    }
-    .tag {
-      display: inline-block;
-      font-size: 12px;
-      padding: 1px 7px;
-      border-radius: 10px;
-      background: #e7ece7;
-      color: var(--muted);
-      margin-left: 6px;
-      white-space: nowrap;
-    }
-    .tag.done {
-      background: #dcefe4;
-      color: var(--accent);
-    }
-    .tag.changed {
-      background: #fbf1e4;
-      color: #8a4b12;
-    }
-    .tag.custom {
-      background: #e4ecf7;
-      color: #2b4f80;
-    }
-    .tag.official {
-      background: #17684b;
-      color: #fff;
-    }
-    .tag.muted {
-      background: #eee;
-      color: #888;
-    }
-    .prow {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      border-bottom: 1px solid var(--line);
-      padding: 10px 0;
-    }
-    .prow small {
-      display: block;
-      overflow-wrap: anywhere;
-    }
-    .prow .actions {
-      flex-wrap: nowrap;
-    }
-    .prow button {
-      min-height: 36px;
-      padding: 6px 12px;
-    }
-    .prow.editing {
-      background: #f3f8f5;
-      margin: 0 -10px;
-      padding: 10px;
-    }
-    #provider-list {
-      max-height: 420px;
-      overflow: auto;
-    }
-    .list-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 6px;
-    }
-    .list-head button {
-      min-height: 36px;
-      padding: 6px 12px;
-    }
-    .inline {
-      display: flex;
-      gap: 10px;
-      align-items: stretch;
-      margin-bottom: 20px;
-    }
-    .inline button {
-      flex: none;
-      min-height: 46px;
-    }
-    .combo {
-      position: relative;
-      flex: 1;
-      min-width: 0;
-    }
-    .combo input {
-      width: 100%;
-      margin: 0;
-      padding-right: 36px;
-    }
-    .combo::after {
-      content: '▾';
-      position: absolute;
-      right: 13px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--muted);
-      pointer-events: none;
-    }
-    .combo-list {
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: calc(100% + 4px);
-      z-index: 30;
-      background: #fff;
-      border: 1px solid #bbc8be;
-      border-radius: 6px;
-      box-shadow: 0 8px 24px rgba(30, 45, 38, 0.14);
-      max-height: 300px;
-      overflow: auto;
-      padding: 4px 0;
-    }
-    .combo-list[hidden] {
-      display: none;
-    }
-    .combo-item {
-      padding: 8px 12px;
-      cursor: pointer;
-      overflow-wrap: anywhere;
-      font-size: 14px;
-      line-height: 1.4;
-    }
-    .combo-item.active {
-      background: #e3ede6;
-    }
-    .combo-item.current {
-      font-weight: 600;
-      color: var(--accent);
-    }
-    .combo-item.current::after {
-      content: '  · 当前';
-      font-weight: 400;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .combo-item b {
-      background: #fff0b8;
-      font-weight: inherit;
-      border-radius: 2px;
-    }
-    .combo-note {
-      padding: 8px 12px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.5;
-    }
-    #pf-picker {
-      border: 1px solid var(--line);
-      border-radius: 5px;
-      padding: 12px;
-      margin: -8px 0 20px;
-    }
-    #pf-picker[hidden] {
-      display: none;
-    }
-    #pf-filter {
-      margin-bottom: 10px;
-    }
-    #pf-picker-list {
-      max-height: 220px;
-      overflow: auto;
-    }
-    .mrow {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 4px 0;
-      border-bottom: 1px solid #eef1ee;
-    }
-    .mrow input {
-      width: auto;
-      margin: 0;
-    }
-    .mrow span {
-      flex: 1;
-      overflow-wrap: anywhere;
-      font-size: 14px;
-    }
-    .mrow button {
-      min-height: 28px;
-      padding: 2px 10px;
-      font-size: 12px;
-    }
-    .mrow.default span {
-      font-weight: 600;
-      color: var(--accent);
-    }
-    #pf-cancel[hidden],
-    #import-hermes[hidden] {
-      display: none;
-    }
-    .account-toolbar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 12px;
-    }
-    .account-toolbar small {
-      font-size: 13px;
-    }
-    .account-info {
-      flex: 1;
-      min-width: 0;
-    }
-    .quota {
-      font-size: 12px;
-      margin-top: 10px;
-      max-width: 420px;
-    }
-    .quota small {
-      display: block;
-    }
-    .quota-window {
-      margin: 8px 0;
-    }
-    .quota-line {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-    }
-    .quota progress {
-      display: block;
-      width: 100%;
-      height: 6px;
-      margin: 5px 0;
-      accent-color: var(--accent);
-    }
-    .quota .quota-error {
-      color: #8a4b12;
-    }
-    .quota-time {
-      font-size: 11px;
-      color: var(--muted);
-    }
-    #official-quota {
-      margin: -10px 0 20px;
-    }
-    #quota-notice {
-      margin: 10px 0;
-    }
-    #quota-notice button {
-      margin-left: 10px;
-    }
-    #switch-progress {
-      margin-top: 10px;
-      font-size: 13px;
-    }
-    #switch-progress > summary {
-      font-weight: 500;
-    }
-    #switch-steps p,
-    #switch-windows p {
-      margin: 6px 0;
-    }
-    .quota-bucket {
-      margin-top: 10px;
-    }
-    #account-list:empty::after {
-      content: '还没有保存的官方账号，点击“添加账号”开始。';
-      color: var(--muted);
-      font-size: 14px;
-    }
-    #account-status {
-      font-size: 13px;
-      color: var(--muted);
-      line-height: 1.7;
-      margin-top: 12px;
-      white-space: pre-wrap;
-    }
-    #login-panel {
-      margin-top: 16px;
-      padding: 14px;
-      background: #eef4f0;
-      border-radius: 6px;
-    }
-    #login-panel[hidden] {
-      display: none;
-    }
-    #login-panel a {
-      color: var(--accent);
-      font-weight: 600;
-      margin-right: 14px;
-    }
-    .workspace {
-      max-width: 760px;
-      margin: 28px auto 0;
-    }
-    .workspace section {
-      display: block;
-      padding: 0;
-      border: 0;
-    }
-    .workspace .panel {
-      padding: 28px;
-    }
-    .workspace h2 {
-      font-size: 19px;
-      margin-bottom: 22px;
-    }
-    .manager {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: white;
-      margin: 14px 0;
-      overflow: hidden;
-    }
-    .manager > summary {
-      padding: 18px 22px;
-      cursor: pointer;
-      font-weight: 600;
-    }
-    .manager > .panel {
-      border: 0;
-      border-top: 1px solid var(--line);
-      border-radius: 0;
-      padding: 22px;
-    }
-    #summary {
-      margin: 22px 0 12px;
-      font-size: 16px;
-    }
-    .context {
-      font-size: 13px;
-      margin: 0 0 22px;
-      line-height: 1.7;
-      color: var(--muted);
-    }
-    #status:empty,
-    #account-status:empty {
-      display: none;
-    }
-    #status {
-      font-size: 14px;
-    }
-    #switch {
-      min-width: 180px;
-    }
-    .technical {
-      margin-top: 22px;
-      border-top: 1px solid var(--line);
-      padding-top: 16px;
-    }
-    .technical > summary {
-      font-size: 13px;
-      color: var(--muted);
-      cursor: pointer;
-    }
-    .technical small {
-      margin-top: 14px;
-    }
-    #usage-notice {
-      font-size: 13px;
-    }
-    .workspace [hidden] {
-      display: none;
-    }
-    .note {
-      font-size: 13px;
-    }
-    .client-row {
-      border-top: 1px solid var(--line);
-      padding: 12px 0;
-      font-size: 13px;
-    }
-    .client-row small {
-      display: block;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      margin: 6px 0;
-    }
-    .client-row details {
-      margin: 8px 0;
-    }
-    .finding {
-      border-left: 3px solid #bbc8be;
-      padding: 8px 12px;
-      margin: 12px 0;
-      background: #f4f6f3;
-    }
-    .finding.error {
-      border-color: #b56a3f;
-    }
-    .finding.warn {
-      border-color: #c5a54a;
-    }
-    .finding.ok {
-      border-color: var(--accent);
-    }
-    .finding p {
-      margin: 5px 0;
-    }
-    footer {
-      padding: 24px 0;
-      font-size: 12px;
-      color: var(--muted);
-    }
-    @media (max-width: 720px) {
-      main {
-        margin: 24px auto;
-        padding: 0 16px;
-      }
-      section {
-        grid-template-columns: 1fr;
-        gap: 12px;
-      }
-      header {
-        display: block;
-      }
-      header small {
-        display: block;
-        margin-top: 8px;
-      }
-      .prow {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-      .inline {
-        flex-direction: column;
-      }
-    }
-  </style>
-  <main>
-    <header>
-      <h1>Codex API 切换器</h1>
-      <small>本机工具 · 不修改 Codex 程序文件</small>
-    </header>
-    <div id="summary">正在读取本机配置…</div>
-    <div id="session-notice" class="hint warn" role="alert" hidden>
-      本机会话已失效，请从桌面快捷方式重新打开切换器。直接输入网址无法取得操作权限。
-    </div>
-    <div id="protection-notice" class="hint warn" role="alert" hidden></div>
-    <div id="effect-notice" class="hint" role="status" hidden></div>
-    <div id="quota-notice" class="hint warn" role="status" hidden></div>
-    <div id="usage-notice" class="hint warn" role="note" hidden></div>
-    <div class="workspace">
-      <section>
-        <div class="panel">
-          <h2>选择使用来源</h2>
-          <label for="provider">官方账号或自定义 API</label
-          ><select id="provider" disabled></select>
-          <p id="source-context" class="context"></p>
-          <div id="official-quota" hidden></div>
-          <div id="model-fields">
-            <label for="model">模型</label>
-            <div class="inline">
-              <div class="combo"><input id="model" autocomplete="off" spellcheck="false" /></div>
-              <button type="button" id="fetch-models">获取模型</button>
-            </div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Codex 切换器</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <header class="topbar">
+        <div class="brand">
+          <span class="logo" aria-hidden="true"></span>
+          <div>
+            <h1>Codex 切换器</h1>
+            <small>官方账号与自定义 API 一键切换</small>
           </div>
-          <div class="actions">
-            <button id="switch" class="primary" disabled>切换并重启</button>
-            <button id="probe" disabled>检测 API</button>
+        </div>
+        <span id="app-version"></span>
+      </header>
+      <div id="update-banner" class="banner" role="status" hidden>
+        <span class="banner-mark" aria-hidden="true"></span>
+        <div class="banner-text">
+          <b id="update-title"></b>
+          <small id="update-detail"></small>
+        </div>
+        <button type="button" id="update-install" class="primary">立即更新</button>
+      </div>
+      <div id="session-notice" class="hint warn" role="alert" hidden>
+        本机会话已失效，请从桌面快捷方式重新打开切换器。直接输入网址无法取得操作权限。
+      </div>
+      <div id="protection-notice" class="hint warn" role="alert" hidden></div>
+      <div id="effect-notice" class="hint" role="status" hidden></div>
+      <div id="quota-notice" class="hint warn" role="status" hidden></div>
+      <div id="usage-notice" class="hint warn" role="note" hidden></div>
+      <div class="workspace">
+        <section class="card status-card" aria-labelledby="status-heading">
+          <div class="status-main">
+            <h2 id="status-heading" class="eyebrow"><span class="live"></span>正在使用</h2>
+            <div id="summary">正在读取本机配置…</div>
+            <p class="editor-line">
+              <span id="editor-summary">正在确认编辑器连接…</span>
+              <a href="#client-details" id="editor-connection">查看编辑器</a>
+            </p>
           </div>
-          <label class="check"
-            ><input type="checkbox" id="reload-editors" checked />
-            同时重载已连接、共用此配置的编辑器窗口（会中断 Codex 任务）</label
-          >
-          <p class="note">
-            <span id="editor-reload-hint">正在确认编辑器连接…</span>
-            <a href="#client-details" id="editor-connection">查看与接入</a>
-          </p>
-          <p class="note">
-            多个窗口共用配置时都会受影响。正在运行任务时，建议等任务结束再切换；已保存的聊天记录不会被切换器删除。
-          </p>
+          <div id="current-quota" hidden></div>
           <div id="status" role="status"></div>
           <details id="switch-progress" hidden>
             <summary id="switch-progress-title">切换进度</summary>
@@ -641,79 +52,80 @@
             <button type="button" id="threads-resume" hidden></button>
             <small class="note">窗口反馈表示重载进度，实际模型请求仍由客户端和上游处理。</small>
           </details>
-          <details id="client-details" class="technical">
-            <summary>影响范围与其他客户端</summary>
-            <p
-              class="note"
-              id="clients-status"
-              style="white-space: pre-wrap; overflow-wrap: anywhere"
-            ></p>
-            <div id="clients-list"></div>
-            <label for="config-home">当前管理的 Codex 配置目录</label
-            ><input id="config-home" list="config-homes" spellcheck="false" /><datalist
-              id="config-homes"
-            ></datalist>
-            <label for="runtime-path">Codex 程序路径（留空自动查找）</label
-            ><input id="runtime-path" spellcheck="false" /><button
-              type="button"
-              id="environment-save"
-            >
-              使用此配置目录
-            </button>
+        </section>
+
+        <section class="chooser" aria-labelledby="sources-heading">
+          <div class="sources">
+            <h2 id="sources-heading" class="eyebrow">切换到</h2>
+            <input type="hidden" id="provider" />
+            <div id="source-list" role="radiogroup" aria-labelledby="sources-heading"></div>
+          </div>
+          <div class="card source-panel" id="source-panel" aria-live="polite">
+            <h3 id="source-title">选择左侧的账号或 API</h3>
+            <p id="source-context" class="context"></p>
+            <div id="official-quota" hidden></div>
+            <div id="model-fields" hidden>
+              <label for="model">模型</label>
+              <div class="inline">
+                <div class="combo"><input id="model" autocomplete="off" spellcheck="false" /></div>
+                <button type="button" id="fetch-models">获取模型</button>
+              </div>
+            </div>
+            <small id="mode-hint" class="hint" hidden></small>
             <div class="actions">
-              <button type="button" id="clients-refresh">刷新运行状态</button
-              ><button type="button" id="companion-download">下载编辑器伴随扩展</button
-              ><span id="companion-install"></span
-              ><button type="button" id="diagnostics-export">导出诊断日志</button>
+              <button id="switch" class="primary" disabled>切换到这里</button>
+              <button id="probe" disabled hidden>检测 API</button>
             </div>
-            <p class="note">
-              配置归属来自运行中 Codex
-              的环境和启动参数。只有确认共用目录的已连接编辑器窗口会收到重载请求；独立目录、WSL
-              和远程窗口不会跟着切换。CLI 请结束当前任务后重新启动。
-            </p>
-          </details>
-          <details id="diagnosis-details" class="technical">
-            <summary>模型或旧会话打不开？</summary>
-            <p class="note">
-              选择具体本机会话，检查供应商绑定、账号归属、模型目录及关联错误。原始会话保持不变。
-            </p>
-            <label for="thread-query">搜索会话标题或 ID</label>
-            <div class="inline">
-              <input id="thread-query" placeholder="留空查看最近会话" /><button
-                id="threads-refresh"
-              >
-                搜索
-              </button>
-            </div>
-            <label for="diagnosis-thread">检查范围</label
-            ><select id="diagnosis-thread">
-              <option value="">当前配置</option>
-            </select>
-            <button id="diagnosis-run">重新诊断</button>
-            <div
-              id="diagnosis-status"
-              class="note"
-              style="white-space: pre-wrap; overflow-wrap: anywhere"
-            ></div>
-            <div id="diagnosis-actions" class="actions"></div>
-          </details>
-          <details id="connection-details" class="technical">
-            <summary>连接信息与检测</summary>
-            <small id="endpoint"></small><small id="mode-hint" class="hint" hidden></small>
-            <p class="note">
-              首次应用会自动检测，可能产生少量 API 费用；已通过的配置会沿用检测结果。
-            </p>
-            <p class="note" id="service"></p>
-            <label class="check"
-              ><input type="checkbox" id="autostart" /> 登录 Windows 后启动转换服务</label
-            >
-          </details>
-        </div>
-      </section>
-      <details class="manager" id="account-manager">
-        <summary>管理官方账号 <small id="account-count"></small></summary>
-        <div class="panel">
-          <div class="account-toolbar">
+          </div>
+        </section>
+
+        <nav class="tabs" role="tablist" aria-label="管理">
+          <button
+            type="button"
+            role="tab"
+            id="tab-accounts"
+            aria-controls="account-manager"
+            aria-selected="false"
+          >
+            账号管理<small id="account-count"></small>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-apis"
+            aria-controls="api-manager"
+            aria-selected="false"
+          >
+            API 配置<small id="api-count"></small>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-editors"
+            aria-controls="client-details"
+            aria-selected="false"
+          >
+            编辑器与诊断
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-settings"
+            aria-controls="settings-panel"
+            aria-selected="false"
+          >
+            设置
+          </button>
+        </nav>
+
+        <section
+          class="card tab-panel"
+          role="tabpanel"
+          id="account-manager"
+          aria-labelledby="tab-accounts"
+          hidden
+        >
+          <div class="toolbar">
             <small id="account-summary">正在读取账号…</small>
             <div class="actions">
               <button type="button" id="quota-refresh">刷新额度</button
@@ -728,15 +140,19 @@
           </div>
           <div id="account-status" role="status"></div>
           <p class="note">
-            添加只保存登录。应用账号后，桌面端会重启、已连接的插件窗口会重载；运行中的任务会中断。本地项目与历史保留。额度显示官方返回的
-            Codex 剩余比例，不代表 ChatGPT 网页聊天次数或 API 余额。
+            添加只保存登录，不会自动启用。额度显示官方返回的 Codex 剩余比例，不代表 ChatGPT
+            网页聊天次数或 API 余额。
           </p>
-        </div>
-      </details>
-      <details class="manager" id="api-manager">
-        <summary>管理 API 配置 <small id="api-count"></small></summary>
-        <div class="panel">
-          <div class="list-head">
+        </section>
+
+        <section
+          class="card tab-panel"
+          role="tabpanel"
+          id="api-manager"
+          aria-labelledby="tab-apis"
+          hidden
+        >
+          <div class="toolbar">
             <small id="list-count"></small
             ><button type="button" id="import-hermes" hidden>从 Hermes 导入</button>
           </div>
@@ -776,10 +192,90 @@
             </div>
           </form>
           <div id="provider-status" role="status" hidden></div>
-        </div>
-      </details>
-      <footer>本机 API 与官方账号切换工具 · Demo <span id="app-version"></span></footer>
-    </div>
-  </main>
-  <script src="/app.js"></script>
+        </section>
+
+        <section
+          class="card tab-panel"
+          role="tabpanel"
+          id="client-details"
+          aria-labelledby="tab-editors"
+          hidden
+        >
+          <p class="hint" id="editor-reload-hint">正在确认编辑器连接…</p>
+          <p class="note pre" id="clients-status"></p>
+          <div id="clients-list"></div>
+          <div class="actions">
+            <button type="button" id="clients-refresh">刷新运行状态</button
+            ><button type="button" id="companions-update">一键更新扩展</button
+            ><button type="button" id="companion-download">下载编辑器伴随扩展</button
+            ><span id="companion-install"></span
+            ><button type="button" id="diagnostics-export">导出诊断日志</button>
+          </div>
+          <p class="note">
+            配置归属来自运行中 Codex
+            的环境和启动参数。只有确认共用目录的已连接编辑器窗口会收到重载请求；独立目录、WSL
+            和远程窗口不会跟着切换。CLI 请结束当前任务后重新启动。
+          </p>
+          <details class="sub">
+            <summary>配置目录与程序路径</summary>
+            <label for="config-home">当前管理的 Codex 配置目录</label
+            ><input id="config-home" list="config-homes" spellcheck="false" /><datalist
+              id="config-homes"
+            ></datalist>
+            <label for="runtime-path">Codex 程序路径（留空自动查找）</label
+            ><input id="runtime-path" spellcheck="false" />
+            <button type="button" id="environment-save">使用此配置目录</button>
+          </details>
+          <details id="diagnosis-details" class="sub">
+            <summary>模型或旧会话打不开？</summary>
+            <p class="note">
+              选择具体本机会话，检查供应商绑定、账号归属、模型目录及关联错误。原始会话保持不变。
+            </p>
+            <label for="thread-query">搜索会话标题或 ID</label>
+            <div class="inline">
+              <input id="thread-query" placeholder="留空查看最近会话" /><button
+                type="button"
+                id="threads-refresh"
+              >
+                搜索
+              </button>
+            </div>
+            <label for="diagnosis-thread">检查范围</label
+            ><select id="diagnosis-thread">
+              <option value="">当前配置</option>
+            </select>
+            <button type="button" id="diagnosis-run">重新诊断</button>
+            <div id="diagnosis-status" class="note pre"></div>
+            <div id="diagnosis-actions" class="actions"></div>
+          </details>
+        </section>
+
+        <section
+          class="card tab-panel"
+          role="tabpanel"
+          id="settings-panel"
+          aria-labelledby="tab-settings"
+          hidden
+        >
+          <label class="check"
+            ><input type="checkbox" id="reload-editors" checked />
+            切换时同时重载已接入、共用此配置的编辑器窗口（会中断编辑器里正在运行的 Codex
+            任务）</label
+          >
+          <label class="check"
+            ><input type="checkbox" id="autostart" /> 开机登录后自动启动转换服务</label
+          >
+          <p class="note" id="service"></p>
+          <p class="note">
+            部分 API 需要经本机转换后才能被 Codex 使用，转换服务需保持运行；可直连的 API 不受影响。
+          </p>
+          <h3 class="settings-title">版本与更新</h3>
+          <p class="note" id="update-status">尚未检查更新。</p>
+          <button type="button" id="update-check">检查更新</button>
+        </section>
+        <footer>本机 API 与官方账号切换工具</footer>
+      </div>
+    </main>
+    <script type="module" src="/js/main.js"></script>
+  </body>
 </html>

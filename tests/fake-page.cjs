@@ -1,4 +1,4 @@
-// 在假页面里执行真实的 web/app.js，供前端行为测试使用（不是测试文件本身）。
+// 在假页面里执行真实的 web/js 页面模块，供前端行为测试使用（不是测试文件本身）。
 const fs = require('node:fs'),
   path = require('node:path'),
   vm = require('node:vm');
@@ -36,8 +36,15 @@ function element() {
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 
+// 页面首屏后会检查更新；测试默认得到“已是最新”，需要时用 update 参数指定。
+const latestUpdate = {
+  current: { version: '0.1.3', build: 'test' },
+  latest: { version: '0.1.3', build: 'test' },
+  checkedAt: '2026-10-23T00:00:00.000Z',
+  status: 'idle',
+};
 // respond(route, body) 返回 { status, body }；route 是去掉 /api/ 的接口名。
-async function runPage({ hash = '', respond, confirm = () => true }) {
+async function runPage({ hash = '', respond, confirm = () => true, update = latestUpdate }) {
   const elements = new Map(),
     requests = [],
     history = [];
@@ -72,9 +79,10 @@ async function runPage({ hash = '', respond, confirm = () => true }) {
       const body = options.body ? JSON.parse(options.body) : undefined;
       requests.push({ url, method: options.method || 'GET', headers: options.headers || {}, body });
       pending++;
-      const reply = await Promise.resolve(respond(url.replace(/^\/api\//, ''), body)).finally(
-        () => pending--,
-      );
+      const route = url.replace(/^\/api\//, '');
+      const reply = await Promise.resolve(
+        route === 'checkUpdate' ? { body: update } : respond(route, body),
+      ).finally(() => pending--);
       const status = reply.status ?? 200;
       return { status, ok: status < 300, json: async () => reply.body ?? {} };
     },
@@ -91,7 +99,22 @@ async function runPage({ hash = '', respond, confirm = () => true }) {
     queueMicrotask,
   };
   context.window = context;
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'web', 'app.js'), 'utf8'), context);
+  vm.createContext(context);
+  // 每个假页面独立加载一套模块（需要 node --experimental-vm-modules），互不共享模块状态。
+  const modules = new Map();
+  const load = (file) => {
+    if (!modules.has(file))
+      modules.set(
+        file,
+        new vm.SourceTextModule(fs.readFileSync(file, 'utf8'), { context, identifier: file }),
+      );
+    return modules.get(file);
+  };
+  const main = load(path.join(__dirname, '..', 'web', 'js', 'main.js'));
+  await main.link((specifier, referrer) =>
+    load(path.resolve(path.dirname(referrer.identifier), specifier)),
+  );
+  await main.evaluate();
   await settle();
   return {
     requests,

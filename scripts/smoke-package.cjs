@@ -51,6 +51,19 @@ const freePort = () =>
           : path.join(app, 'runtime', 'node.exe'),
       home = path.join(root, 'home'),
       bridge = path.join(root, 'private');
+    // 同一份源码的所有发行包和 release.json 必须使用同一个构建号。
+    const packagedBuild = cp
+      .execFileSync(
+        node,
+        ['-e', "console.log(require('./src/platform/build-info.cjs').buildInfo().id)"],
+        { cwd: app, encoding: 'utf8' },
+      )
+      .trim();
+    assert.equal(
+      packagedBuild,
+      require('../src/platform/build-info.cjs').buildInfo().id,
+      '发行包构建号与源码不一致',
+    );
     fs.mkdirSync(home);
     fs.mkdirSync(bridge);
     fs.writeFileSync(path.join(home, 'config.toml'), 'model="package-smoke"\n');

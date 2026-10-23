@@ -34,7 +34,10 @@ function knownActions() {
 test('网页与验收脚本调用的后台接口都存在', () => {
   const known = knownActions();
   const files = [
-    'web/app.js',
+    ...fs
+      .readdirSync(path.join(root, 'web', 'js'), { recursive: true })
+      .filter((name) => name.endsWith('.js'))
+      .map((name) => path.join('web', 'js', name)),
     ...fs
       .readdirSync(path.join(root, 'scripts'))
       .filter((name) => /^verify-.*\.cjs$|^macos-validation\.cjs$/.test(name))

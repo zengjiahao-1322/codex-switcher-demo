@@ -51,6 +51,13 @@ async function start(token) {
     actions: {
       ...service.actions,
       accounts: async () => ({ items: [], switchJob: fixtureJob }),
+      // 不访问 GitHub：固定返回有新构建，验证顶部更新提示。
+      checkUpdate: async () => ({
+        current: { version: '0.1.3', build: 'fixture-old' },
+        latest: { version: '0.1.3', build: 'fixture-new', notes: 'fixture notes' },
+        checkedAt: new Date().toISOString(),
+        status: 'available',
+      }),
       // 这里只替代重启客户端这一步，页面传参和配置读写仍使用实际代码。
       desktopSwitch: async (input) => {
         switchRequests.push(input);
@@ -89,10 +96,15 @@ async function loaded(page, url) {
   // 启动器会打开页面；先离开旧文档，避免仅更换 hash 被浏览器当成页内跳转。
   await page.goto('about:blank');
   await page.goto(url);
-  await page.waitForFunction(() => document.getElementById('provider').options.length > 0);
+  await page.waitForFunction(() => document.querySelector('#source-list .source-card'));
   assert.ok((await page.locator('#summary').innerText()).includes('fixture-api'));
-  assert.equal(await page.locator('#provider').isEnabled(), true);
+  assert.equal(await page.locator('#source-list .source-card').first().isEnabled(), true);
   assert.equal((await page.locator('#status').innerText()).includes('凭证已过期'), false);
+  // 样式表单独加载；类型不对时浏览器会忽略它，页面退回无样式。
+  assert.equal(
+    await page.locator('.status-card').evaluate((el) => getComputedStyle(el).borderTopLeftRadius),
+    '14px',
+  );
 }
 (async () => {
   try {
@@ -115,6 +127,10 @@ async function loaded(page, url) {
     await loaded(page, base + '/#fixture-session-one');
     assert.equal(new URL(page.url()).hash, '');
     checked('current-launch-token-establishes-session');
+    await page.locator('#update-banner').waitFor({ state: 'visible' });
+    assert.ok((await page.locator('#update-detail').innerText()).includes('构建 fixture-new'));
+    assert.equal(await page.locator('#update-install').isVisible(), true);
+    checked('update-banner-shows-newer-build');
     const expiredContext = await browser.newContext();
     const expired = await expiredContext.newPage();
     await expired.goto(base + '/#expired-shortcut-token');
@@ -125,7 +141,7 @@ async function loaded(page, url) {
     const second = await context.newPage();
     await loaded(second, base + '/');
     await second.reload();
-    await second.waitForFunction(() => document.getElementById('provider').options.length > 0);
+    await second.waitForFunction(() => document.querySelector('#source-list .source-card'));
     checked('new-tab-and-refresh');
     const local = await context.newPage();
     await loaded(local, 'http://localhost:' + port + '/#fixture-session-one');
@@ -192,6 +208,18 @@ async function loaded(page, url) {
       fullPage: true,
       timeout: 15000,
     });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      true,
+      '手机宽度不应出现横向滚动',
+    );
+    await page.screenshot({
+      path: path.join(reports, 'web-entry-mobile.png'),
+      fullPage: true,
+      timeout: 15000,
+    });
+    checked('mobile-width-without-horizontal-scroll');
     // 使用独立会话建立当前启动凭证，避免前面 127.0.0.1/localhost 页面
     // 的 Cookie 在不同平台浏览器实现中互相影响错误页面验收。
     const failedContext = await browser.newContext();

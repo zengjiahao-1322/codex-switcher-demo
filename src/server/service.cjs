@@ -39,6 +39,7 @@ function createService({
   projectDir = PROJECT_ROOT,
   defaultPort = 47831,
   startService,
+  shutdownForUpdate,
   dataDirProtection = { ok: true, path: bridgeHome },
 } = {}) {
   const build = require('../platform/build-info.cjs').buildInfo();
@@ -56,6 +57,8 @@ function createService({
     projectDir,
     build: build.id,
     version: build.version,
+    codexHome,
+    shutdown: shutdownForUpdate,
   });
   let listeningPort = null;
   const passed = new Map();
@@ -540,7 +543,7 @@ function createService({
   }
   const actions = {
     checkUpdate: () => updates.actions.checkUpdate(),
-    installUpdate: () => updates.actions.installUpdate(),
+    installUpdate: (input) => updates.actions.installUpdate(input),
     updateCompanions: async () => {
       const integration = require('../clients/editor-integration.cjs'),
         results = [];
@@ -554,7 +557,16 @@ function createService({
           results.push({ name: editor.name, error: error.message });
         }
       }
-      return { results };
+      const clients = require('../clients/client-status.cjs');
+      // 安装的是编辑器级扩展；已接入的独立配置窗口也要重载才能启用本版扩展。
+      const reload = clients.requestReload(codexHome, bridgeHome, {
+        stoppedEditors: clients.records(bridgeHome).map((window) => ({
+          editorId: window.id,
+          name: window.name,
+          workspace: window.workspace,
+        })),
+      });
+      return { results, reload };
     },
     resumeThreadSync: () =>
       exclusive(async () => {

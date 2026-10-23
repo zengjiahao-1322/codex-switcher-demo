@@ -32,13 +32,10 @@ test('切换直接发出，不询问旧对话去向', async () => {
   const page = await runPage({
     respond: backend({ desktopSwitch: () => ({ body: { message: '已开始切换' } }) }),
   });
-  let shown = 0;
-  page.byId('follow-dialog').showModal = () => shown++;
   page.byId('provider').value = 'api-1';
   page.byId('model').value = 'model-1';
   page.byId('reload-editors').checked = true;
   await page.byId('switch').onclick();
-  assert.equal(shown, 0);
   assert.deepEqual(
     page.calls('desktopSwitch').map((r) => r.body),
     [{ id: 'api-1', model: 'model-1', reloadEditors: true }],
@@ -135,7 +132,8 @@ test('多窗口提示区分已接入、未关联和独立配置，不凭远程�
       ],
     }),
   });
-  await page.byId('client-details').ontoggle();
+  page.byId('tab-editors').onclick();
+  await page.settle();
   const hint = page.byId('editor-reload-hint').textContent;
   assert.ok(hint.includes('1 个窗口已接入（扩展宿主 PID 900）'), hint);
   assert.ok(hint.includes('2 个共用配置的 Codex 后台（PID 12、13）没有对应到已接入的窗口'), hint);
@@ -163,7 +161,8 @@ test('带远程标签但后端共用本机配置的窗口算作已接入', async
       ],
     }),
   });
-  await page.byId('client-details').ontoggle();
+  page.byId('tab-editors').onclick();
+  await page.settle();
   assert.equal(
     page.byId('editor-reload-hint').textContent,
     '1 个窗口已接入（扩展宿主 PID 900），可自动重载。',
@@ -179,7 +178,8 @@ test('所有后台都已接入时只显示可自动重载', async () => {
       ],
     }),
   });
-  await page.byId('client-details').ontoggle();
+  page.byId('tab-editors').onclick();
+  await page.settle();
   assert.equal(
     page.byId('editor-reload-hint').textContent,
     '1 个窗口已接入（扩展宿主 PID 900），可自动重载。',
@@ -202,7 +202,8 @@ test('旧版伴随扩展且带远程标签的窗口未关联时，只陈述事�
       ],
     }),
   });
-  await page.byId('client-details').ontoggle();
+  page.byId('tab-editors').onclick();
+  await page.settle();
   const hint = page.byId('editor-reload-hint').textContent;
   assert.ok(hint.includes('旧版伴随扩展'), hint);
   assert.ok(hint.includes('1 个窗口尚未关联到本机可见的 Codex 后端'), hint);

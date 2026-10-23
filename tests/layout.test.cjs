@@ -79,9 +79,14 @@ test('仅复制发布清单也能从稳定入口启动并提供网页，不依�
   const html = await fetch(base);
   assert.equal(html.status, 200);
   assert.match(await html.text(), /Codex/);
-  const script = await fetch(base + '/app.js');
+  // 页面由入口模块和 views 下的子模块组成，发布清单必须带上全部模块和样式表。
+  const script = await fetch(base + '/js/views/accounts.js');
   assert.equal(script.status, 200);
+  assert.match(script.headers.get('content-type'), /^text\/javascript/);
   assert.match(await script.text(), /renderAccounts/);
+  const style = await fetch(base + '/style.css');
+  assert.equal(style.status, 200);
+  assert.match(style.headers.get('content-type'), /^text\/css/);
   assert.equal(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), config);
   assert.equal(fs.existsSync(path.join(home, 'auth.json')), false);
   assert.equal(fs.existsSync(path.join(root, 'accounts.cjs')), false);

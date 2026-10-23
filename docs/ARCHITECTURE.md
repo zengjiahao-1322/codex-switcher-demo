@@ -18,11 +18,11 @@
 
 心跳成功只代表连接到了切换器服务。`clientHeartbeat` 返回 `connection.state`（`ready`、`unmatched`、`separate`）、管理目录和关联后端 PID，伴随扩展据此显示“已接入”“后端未关联”或“独立配置”。`companionHost` 由扩展实际运行位置上报，窗口标签或使用 SSH 连接电脑的方式都不能代替进程归属证据。关联优先使用 PID/祖先链，其次使用唯一通信标识；实际运行于远端宿主的扩展还可按唯一配置目录关联。重载后必须等新的 Codex 后端关联到共用配置，才确认重载完成；这仍不代表已经通过真实模型请求验证了官方登录或上游额度。
 
-`src/clients/desktop-account.cjs` 的 `runSwitch()` 统一生成步骤及耗时，`web/app.js` 统一渲染；没有按系统拆分的旧版切换页面。`src/platform/build-info.cjs` 为运行代码生成一次构建标识，新入口只复用同构建后台，避免新包连接旧后台继续显示旧页面。页面底部显示版本和构建标识，便于核对实际运行版本。
+`src/clients/desktop-account.cjs` 的 `runSwitch()` 统一生成步骤及耗时，`web/js/` 模块负责渲染；没有按系统拆分的旧版切换页面。`src/platform/build-info.cjs` 为运行代码生成一次构建标识，新入口只复用同构建后台，避免新包连接旧后台继续显示旧页面。页面底部显示版本和构建标识，便于核对实际运行版本。
 
 ```mermaid
 flowchart LR
-  UI[浏览器界面\nindex.html + app.js]
+  UI[浏览器界面\nindex.html + web/js 模块]
   S[本地 HTTP 服务\nmain.cjs + server.cjs]
   H[业务路由\nservice.cjs]
   CORE[配置切换核心\ncore.cjs + switch-state.cjs]
@@ -110,6 +110,14 @@ Mac 的心跳与客户端列表通过异步 `ps` 枚举进程，再并行调用�
 
 伴随扩展协议 3 使用长轮询：支持的服务会声明 `longPoll:true`，扩展收到回复后继续发起最长 10 秒的等待。服务只在等待期间每 250 ms 检查登记文件的修改时间，发现重载命令立即回复；结束等待后按原有缓存期限确认连接状态，避免返回等待前的旧状态。HTTP 连接关闭时通过 AbortSignal 清理检查与超时定时器。确认和完成回报立即返回，重载语义不变；完成确认尚未接入时保留 2 秒节奏，防止忙循环。旧服务继续使用 2 秒节奏，连接失败后等待 5 秒；请求超时为 15 秒，登记有效期仍为 15 秒。
 
+## 程序升级与页面模块（0.1.3）
+
+`src/server/update.cjs` 只处理固定仓库的发布查询、下载、SHA-256 校验与安装调度；下载使用官方会话相同的环境或系统代理。发布清单定义实际运行文件，构建号按文件名与统一换行后的内容计算，使 Windows、两种 Mac 包和 `release.json` 使用同一标识。
+
+校验完成后，从新包启动 `scripts/update-worker.cjs` 与对应 Node。独立进程就绪后旧后台退出，升级进程等待它结束，再备份并替换：Windows 按发行清单及运行时目录处理，保留 `private/`；Mac 通过应用包改名替换，账号数据仍留在 Application Support。健康检查在 30 秒内验证新后台的 `/api/runtime` 构建号，失败恢复旧版并重新启动。数据目录的 `updates/previous/` 只保留一份备份，诊断日志记录检查、下载、安装和回滚。
+
+页面由 `web/style.css` 与原生 `web/js/` ES 模块组成。`api.js` 处理会话，`store.js` 保存共享状态，各 `views/` 模块负责分区交互；`main.js` 编排首屏读取。服务仅提供 `.js`、`.css` 和主页，保持同源 CSP。升级状态通过轮询更新，旧后台退出后提示使用新打开的会话页面。
+
 ## 代码入口
 
 | 层       | 文件                                                                    | 责任                                                         |
@@ -123,4 +131,5 @@ Mac 的心跳与客户端列表通过异步 `ps` 枚举进程，再并行调用�
 | 客户端   | `src/clients/client-status.cjs`、`vscode-companion/`                    | 发现窗口、确认配置归属、请求重载和记录结果                   |
 | 会话诊断 | `src/diagnostics/diagnostics.cjs`、`src/diagnostics/thread-routing.cjs` | 旧会话错误证据、来源同步和可见上下文导出                     |
 | 事件日志 | `src/diagnostics/event-log.cjs`                                         | 切换事件脱敏落盘、轮换和诊断导出读取                         |
-| 页面     | `web/index.html`、`web/app.js`                                          | 来源选择、账号列表、额度和客户端状态展示                     |
+| 程序升级 | `src/server/update.cjs`、`scripts/update-worker.cjs`                    | 发布查询、校验下载、独立替换、健康检查和失败回滚             |
+| 页面     | `web/index.html`、`web/js/`                                             | 来源选择、账号列表、额度和客户端状态展示                     |

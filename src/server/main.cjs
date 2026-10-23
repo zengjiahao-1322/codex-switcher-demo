@@ -154,6 +154,11 @@ async function existing() {
     projectDir: PROJECT_ROOT,
     defaultPort: Number(process.env.BRIDGE_PORT) || 47831,
     dataDirProtection,
+    shutdownForUpdate: () => {
+      server.close();
+      server.closeAllConnections();
+      process.exit(0);
+    },
   });
   phases.createService = Math.round(performance.now() - phaseStarted);
   const token = crypto.randomBytes(32).toString('hex'),
