@@ -281,6 +281,17 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
           )
         ),
     );
+  // 旧版 UI 伴随扩展在 Remote-SSH 窗口中没有上报 CODEX_HOME，
+  // 且扩展宿主与 Codex 后端可能不在同一条本机父进程链。截图中的真实场景是
+  // 一个远程窗口和一个共用后端；只有两边都唯一时才按窗口补关联，多窗口继续保持未确认。
+  const legacyRemoteWindows = windows.filter(
+      (w) => w.remote && !w.home && w.companionHost !== 'remote',
+    ),
+    unmatchedShared = clients.filter(
+      (c) => c.kind === 'ide' && c.confirmed && c.shared && !c.editorId,
+    );
+  if (legacyRemoteWindows.length === 1 && unmatchedShared.length === 1)
+    unmatchedShared[0].editorId = legacyRemoteWindows[0].id;
   for (const w of windows) {
     // 伴随扩展的环境只是候选信息；重载归属必须由真实 Codex 后端进程确认，
     // 否则可能把独立 CODEX_HOME 的窗口误判为共享配置。

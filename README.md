@@ -2,9 +2,9 @@
 
 管理 Codex 官方账号和自定义 API 的本机工具，支持 Windows 与 macOS。
 
-**0.1.4 Demo · 2026-10-23 Remote-SSH 修复**。切换器与伴随扩展需要一起更新。
+**0.1.3 Demo · 2026-10-23 Remote-SSH 修复**。切换器与伴随扩展需要一起更新。
 
-[查看发布说明与全部下载](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/tag/v0.1.4)
+[查看发布说明与全部下载](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/tag/v0.1.3)
 
 ## 下载和安装
 
@@ -12,10 +12,10 @@
 
 | 平台                        | 下载                                                                                                                               | 启动                                                                    |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Windows x64                 | [Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-windows-x64.zip)   | 完整解压，双击文件夹中的 `Start.cmd`；可运行 `install.cmd` 创建快捷方式 |
-| Mac Apple Silicon（M 系列） | [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-macos-arm64.zip) | 解压并运行 `Install.command`，或打开 `Codex Switcher.app`               |
-| Mac Intel                   | [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-macos-x64.zip)   | 同上                                                                    |
-| 编辑器伴随扩展              | [通用 VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-companion.vsix)         | 在编辑器扩展菜单选择“从 VSIX 安装”，或通过切换器接入                    |
+| Windows x64                 | [Windows 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-windows-x64.zip)   | 完整解压，双击文件夹中的 `Start.cmd`；可运行 `install.cmd` 创建快捷方式 |
+| Mac Apple Silicon（M 系列） | [Mac M 系列安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-arm64.zip) | 解压并运行 `Install.command`，或打开 `Codex Switcher.app`               |
+| Mac Intel                   | [Mac Intel 安装包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-macos-x64.zip)   | 同上                                                                    |
+| 编辑器伴随扩展              | [通用 VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.3/codex-switcher-companion.vsix)         | 在编辑器扩展菜单选择“从 VSIX 安装”，或通过切换器接入                    |
 
 不要只取出启动脚本，运行时需要保留完整目录。Windows 安装版默认安装到当前用户目录，无需管理员权限。
 
@@ -46,12 +46,12 @@ Mac 应用使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或公证
 
 ## 更新现有安装
 
-本次发布 `v0.1.4`，请同时更新切换器和伴随扩展。
+本次发布 `v0.1.3`，请同时更新切换器和伴随扩展。
 
 - **Windows 安装版**：完整解压新包后运行 `install.cmd`，安装器会停止所管理的旧后台并保留安装目录下的 `private/`。
 - **Windows 解压版**：保留原目录下的 `private/`，停止旧切换器后台后更新程序文件。直接在另一个空目录启动会使用那里的新数据目录。
 - **Mac**：运行新包的 `Install.command`，默认安装到 `~/Applications/`；账号数据单独保存在 Application Support 中。
-- **编辑器**：旧用户必须安装 0.1.4 VSIX。Remote-SSH 窗口要在 SSH 主机的扩展宿主安装；若切换器也运行在 SSH 主机，才能读取远端 Codex 后端。
+- **编辑器**：旧用户必须安装 0.1.3 VSIX。Remote-SSH 窗口要在 SSH 主机的扩展宿主安装；若切换器也运行在 SSH 主机，才能读取远端 Codex 后端。
 
 使用自定义 `BRIDGE_HOME`／`CODEX_HOME` 的用户应继续沿用原目录。只更新切换器程序不需要切换账号；点击“应用”才会触发目标客户端的重启或重载。
 
@@ -68,7 +68,7 @@ Mac 应用使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或公证
 
 ## 兼容性与验证
 
-发布流水线在 **Windows、macOS 15 Apple Silicon 和 macOS 15 Intel** 上运行回归、浏览器、安装包和真实 VS Code 多窗口检查；三平台的六项检查全部通过才上传下载文件。查看 [0.1.4 发布验证](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/workflows/release.yml?query=branch%3Av0.1.4)。
+发布流水线在 **Windows、macOS 15 Apple Silicon 和 macOS 15 Intel** 上运行回归、浏览器、安装包和真实 VS Code 多窗口检查；三平台的六项检查全部通过才上传下载文件。查看 [0.1.3 发布验证](https://github.com/zengjiahao-1322/codex-switcher-demo/actions/workflows/release.yml?query=branch%3Av0.1.3)。
 
 Mac 还检查系统 Bash 安装脚本、首次与重复安装、数据保留、签名完整性和 LaunchServices 启动。编译目标为 macOS 12+，实际 CI 运行系统为 macOS 15；macOS 12 没有实机结果。CI 使用隔离配置和合成数据，不代替使用者 Mac 上的首次 Gatekeeper 授权、个人账号登录与真实额度验收。
 

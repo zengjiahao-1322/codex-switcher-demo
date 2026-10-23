@@ -1,4 +1,4 @@
-# 0.1.4 — Remote-SSH 与伴随扩展修复（2026-10-23）
+# 0.1.3 — Remote-SSH 与伴随扩展修复（2026-10-23）
 
 - 伴随扩展声明为 workspace extension，Remote-SSH 窗口在远端 extension host 运行并上报远端 `CODEX_HOME`。
 - 远端心跳不再被本机 PID 表过滤；同一远端切换器能看到唯一对应后端时，按配置目录关联并执行重载。

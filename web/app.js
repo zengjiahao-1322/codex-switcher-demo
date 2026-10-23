@@ -1176,7 +1176,7 @@ async function refreshClients() {
     if (remoteUnmatched.length)
       parts.push(
         remoteUnmatched.length +
-          ' 个 Remote-SSH 窗口未关联；若切换器运行在本机，请在 SSH 主机运行同版本切换器和扩展',
+          ' 个 Remote-SSH 窗口没有关联到本机的 Codex 后端；本机切换器只切换本机的 Codex，要切换 SSH 主机上的 Codex，需在该主机运行同版本切换器（目前支持 Windows 和 macOS 主机，暂不支持 Linux）',
       );
     $('editor-reload-hint').textContent = parts.length
       ? parts.join('；') + '。'

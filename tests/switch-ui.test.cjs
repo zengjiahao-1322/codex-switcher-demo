@@ -199,6 +199,9 @@ test('旧版伴随扩展和 Remote-SSH 未关联时给出可执行提示', async
   const hint = page.byId('editor-reload-hint').textContent;
   assert.ok(hint.includes('旧版伴随扩展'), hint);
   assert.ok(hint.includes('Remote-SSH'), hint);
+  // SSH 主机是 Windows / macOS 时可在该主机运行切换器；切换器没有 Linux 版，要如实说明。
+  assert.ok(hint.includes('需在该主机运行同版本切换器'), hint);
+  assert.ok(hint.includes('暂不支持 Linux'), hint);
 });
 
 test('#4 切换成功或没有失败条目时不显示继续同步', async () => {
