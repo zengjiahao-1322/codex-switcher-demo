@@ -102,13 +102,13 @@ function writeSecrets(bridgeHome) {
 function assertNoSecrets(text) {
   for (const [name, value] of Object.entries(secrets))
     assert.equal(text.includes(value), false, name + ' 未脱敏');
-  assert.equal(text.includes('itcribifredmo'), false, '邮箱未脱敏');
+  assert.equal(text.includes('fixture@example.test'), false, '邮箱未脱敏');
   for (const home of [os.homedir(), JSON.stringify(os.homedir()).slice(1, -1)])
     assert.equal(text.includes(home), false, '用户目录未替换为 ~');
 }
 // 含有该邮箱的记录里，邮箱应保留前两位和域名。
 const assertMaskedEmail = (text) =>
-  assert.ok(text.includes('it***@mail.com'), '邮箱应保留前两位和域名');
+  assert.ok(text.includes('fi***@example.test'), '邮箱应保留前两位和域名');
 
 test('令牌、密钥、授权头、回调参数和邮箱在日志文件中都已脱敏', backend, () => {
   const { bridgeHome } = dirs();
