@@ -1,8 +1,9 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const path = require('node:path');
 const toml = require('smol-toml');
-const { identity } = require('./accounts.cjs');
+const { identity, readJson } = require('./accounts.cjs');
 const remote = require('../clients/remote-servers.cjs');
 const { log } = require('../diagnostics/event-log.cjs');
 const refreshed = (auth) => Date.parse(auth?.last_refresh) || 0;
@@ -13,8 +14,9 @@ function createRemoteCredentials({ bridgeHome, getAccounts }) {
   const tasks = new Map();
   async function synchronizeAccount(id) {
     const accounts = getAccounts();
+    const saved = readJson(path.join(bridgeHome, 'accounts', 'index.json'), []);
+    if (!saved.some((row) => row.id === id)) return null;
     await accounts.syncCurrent();
-    if (!accounts.status().items.some((row) => row.id === id)) return null;
     let latest = accounts.getAuth(id),
       direction = 'remote→saved',
       target = '已连接的同账号目录';
@@ -134,10 +136,7 @@ function createRemoteCredentials({ bridgeHome, getAccounts }) {
   function observe(id) {
     synchronize(id).catch((error) => console.error('官方登录互通失败：' + error.message));
   }
-  function observeAll() {
-    for (const account of getAccounts().status().items) observe(account.id);
-  }
-  return { synchronize, observe, observeAll };
+  return { synchronize, observe };
 }
 
 module.exports = { createRemoteCredentials };

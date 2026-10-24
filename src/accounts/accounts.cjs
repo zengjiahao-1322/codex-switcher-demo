@@ -244,10 +244,9 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
     captureCurrent();
     const row = load().find((a) => a.id === id);
     if (!row) throw Error('账号不存在，请重新选择');
-    const auth = readJson(authFile(id)),
-      live = identity(currentAuth());
+    const auth = readJson(authFile(id));
     if (!identity(auth)) throw Error('登录记录不完整，请重新登录 ' + row.label);
-    if (live?.id === id && !row.pendingLogin) {
+    if (!row.pendingLogin) {
       const exp = claims(auth.tokens.access_token).exp;
       // 访问令牌过期时仍可能通过刷新令牌恢复；由官方服务确认，不能仅凭 exp 要求重新登录。
       if (!exp || exp * 1000 > Date.now()) return row;

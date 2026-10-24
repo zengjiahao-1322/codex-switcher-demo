@@ -596,7 +596,6 @@ function createService({
       const clients = require('../clients/client-status.cjs'),
         inventory = await clients.scanAsync(),
         status = clients.clientStatus(codexHome, bridgeHome, { inventory });
-      remoteCredentials.observeAll();
       let runtime = null;
       try {
         runtime = findCodex({ dataHome: bridgeHome });
@@ -641,7 +640,6 @@ function createService({
           bridgeHome,
           codexExe: () => findCodex({ dataHome: bridgeHome }),
         });
-        remoteCredentials.observeAll();
         versionCache = null;
         companionConnections.clear();
         return { message: '已改为读取 ' + home + '，后续切换只应用到此目录。' };
@@ -650,6 +648,9 @@ function createService({
       const clients = require('../clients/client-status.cjs');
       const { completedReload, ...registration } = input;
       let result = clients.heartbeat(bridgeHome, registration);
+      // 登记通过后按服务器正在使用的账号同步，不依赖网页是否打开。
+      if (input.remoteType === 'ssh-remote' && input.remoteAgent?.account?.id)
+        remoteCredentials.observe(input.remoteAgent.account.id);
       let connection = await connectionFor(input);
       // 新后端已关联后才推进完成确认；心跳连通本身不能代表重载成功。
       if (

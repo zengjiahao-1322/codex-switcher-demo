@@ -412,7 +412,7 @@ test('远端 extension host 心跳保留，并在唯一 CODEX_HOME 下关联远�
   assert.equal(result.clients.find((item) => item.pid === 17632).editorId, 'remote-window-1');
 });
 
-test('旧版 Remote-SSH 心跳没有 CODEX_HOME 时，唯一共用后端仍能关联', (t) => {
+test('旧版 Remote-SSH 心跳没有 CODEX_HOME 时，不把本机后端误关联到远程窗口', (t) => {
   const f = fixture(t),
     c = require('../src/clients/client-status.cjs');
   c.heartbeat(f.bridge, {
@@ -436,8 +436,8 @@ test('旧版 Remote-SSH 心跳没有 CODEX_HOME 时，唯一共用后端仍能�
       ],
     },
   });
-  assert.equal(result.clients.find((item) => item.pid === 17632).editorId, 'legacy-remote-window');
-  assert.equal(result.clients.find((item) => item.kind === 'editor').canReload, true);
+  assert.equal(result.clients.find((item) => item.pid === 17632).editorId, null);
+  assert.equal(result.clients.find((item) => item.kind === 'editor').canReload, false);
 });
 test('桌面壳尚无后端时仍识别 Codex，独立目录不跟随', (t) => {
   const f = fixture(t),

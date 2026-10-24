@@ -79,6 +79,41 @@ function ownsOldService(pid, entry) {
   const main = entry ? path.basename(entry) : 'main.cjs';
   return command.includes(main) && /(?:^|[\\/])main\.cjs(?:\s|"|$)/.test(command);
 }
+function listeningPid(port) {
+  if (process.platform === 'darwin') {
+    let output;
+    try {
+      output = cp
+        .execFileSync('/usr/sbin/lsof', ['-nP', '-iTCP:' + port, '-sTCP:LISTEN', '-t'], {
+          encoding: 'utf8',
+        })
+        .trim();
+    } catch (error) {
+      if (error.status === 1) return null;
+      throw error;
+    }
+    return Number(output.split(/\s+/)[0]) || null;
+  }
+  const output = require('../clients/desktop-account.cjs').powershell(
+    '$c=Get-NetTCPConnection -LocalPort $env:SWITCHER_PORT -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess;if($c){$c}else{""}',
+    { SWITCHER_PORT: String(port) },
+  );
+  return Number(output) || null;
+}
+async function waitPortFree(port) {
+  const deadline = Date.now() + 1000;
+  while (listeningPid(port)) {
+    if (Date.now() >= deadline) throw Error('旧切换器已退出但固定端口仍被占用。');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+async function reclaimFixedPort(port) {
+  const pid = listeningPid(port);
+  if (!pid || !ownsOldService(pid, runtimeInfo.entry)) return false;
+  await require('../platform/process-stop.cjs').stopProcesses([pid]);
+  await waitPortFree(port);
+  return true;
+}
 // 只复用相同构建；更新应用不能继续打开仍在内存中的旧后台和旧页面。
 async function existing() {
   const r = readJson(runningPath);
@@ -201,9 +236,15 @@ async function existing() {
     console.log('BRIDGE_READY http://127.0.0.1:' + port);
     openUrl(url);
   };
-  // 固定端口被其他程序占用时退回随机端口：界面仍可用，但转换模式不可用。
-  server.once('error', async (e) => {
+  const handleListenError = async (e) => {
     if (e.code !== 'EADDRINUSE') throw e;
+    if (await reclaimFixedPort(a.port)) {
+      console.log('BRIDGE_RECLAIMED_OLD_SERVICE ' + a.port);
+      server.once('error', handleListenError);
+      server.listen(a.port, '127.0.0.1');
+      return;
+    }
+    // 固定端口被其他程序占用时退回随机端口：界面仍可用，但转换模式不可用。
     const prior = await existing();
     if (prior) {
       console.log('BRIDGE_ALREADY_RUNNING ' + new URL(prior.url).origin);
@@ -212,7 +253,8 @@ async function existing() {
     }
     console.log('BRIDGE_PORT_IN_USE ' + a.port);
     server.listen(0, '127.0.0.1');
-  });
+  };
+  server.once('error', handleListenError);
   // 端口回落时仍只执行一次 ready，避免重复打开页面及覆盖正在读取的连接记录。
   server.once('listening', ready);
   phaseStarted = performance.now();

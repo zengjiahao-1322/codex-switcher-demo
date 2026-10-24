@@ -325,6 +325,35 @@ test('“全部刷新额度”一次读取所有已保存账号', async () => {
   );
 });
 
+test('批量刷新额度最多同时读 3 个账号，全部读完', async () => {
+  const accounts = Array.from({ length: 7 }, (_, i) => ({
+    id: 'a' + i,
+    label: 'a' + i + '@example.com',
+    email: 'a' + i + '@example.com',
+    plan: 'plus',
+    current: i === 0,
+    quota: null,
+  }));
+  let running = 0,
+    peak = 0;
+  const base = backend({ accounts });
+  const page = await runPage({
+    respond: async (route, body) => {
+      if (route !== 'accountQuota') return base(route, body);
+      peak = Math.max(peak, ++running);
+      await new Promise((r) => setTimeout(r, 15));
+      running--;
+      return { body: { items: [{ id: body.id, ...quota(50) }] } };
+    },
+  });
+  // 账号超过 5 个时显示搜索框；假页面里先给它一个真实的空值。
+  page.byId('source-search').value = '';
+  page.byId('quota-refresh').onclick();
+  await page.settle();
+  assert.equal(peak, 3);
+  assert.equal(new Set(page.calls('accountQuota').map((r) => r.body.id)).size, 7);
+});
+
 test('来源不多时不显示搜索和筛选', async () => {
   const page = await runPage({ respond: backend() });
   assert.equal(page.byId('source-search').hidden, true);

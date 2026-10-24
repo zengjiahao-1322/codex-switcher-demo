@@ -315,3 +315,73 @@ test('changing the managed home immediately reads the selected config and preser
   );
   assert.equal(fs.readFileSync(path.join(other, 'config.toml'), 'utf8'), 'model="second-model"\n');
 });
+
+test(
+  '固定端口被旧切换器占用时接管旧服务而不退回随机端口',
+  { timeout: 60000, skip: !['win32', 'darwin'].includes(process.platform) },
+  async (t) => {
+    const oldDirs = makeDirs('switcher-port-old-'),
+      newDirs = makeDirs('switcher-port-new-'),
+      port = await freePort();
+    const launch = (dirs) => {
+      const child = spawn(process.execPath, [path.join(PROJECT_ROOT, 'main.cjs'), '--no-open'], {
+        env: {
+          ...process.env,
+          BRIDGE_HERMES_HOME: dirs.hermes,
+          BRIDGE_CODEX_HOME: dirs.codex,
+          BRIDGE_HOME: dirs.bridge,
+          BRIDGE_PORT: String(port),
+        },
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const output = [];
+      child.stdout.on('data', (chunk) => output.push(String(chunk)));
+      child.stderr.on('data', (chunk) => output.push(String(chunk)));
+      const closed = new Promise((resolve) => child.once('close', resolve));
+      t.after(async () => {
+        child.kill();
+        await closed;
+      });
+      return { child, output, closed };
+    };
+    const old = launch(oldDirs);
+    const waitReady = (item) =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(Error('固定端口测试启动超时：' + item.output.join(''))),
+          15000,
+        );
+        const check = () => {
+          if (item.output.join('').includes('BRIDGE_READY')) {
+            clearTimeout(timer);
+            resolve();
+          }
+        };
+        item.output.push = (
+          (push) =>
+          (...values) => {
+            const result = push(...values);
+            check();
+            return result;
+          }
+        )(item.output.push.bind(item.output));
+        item.child.once('exit', (code) => {
+          clearTimeout(timer);
+          reject(Error('固定端口测试进程退出：' + code + '\n' + item.output.join('')));
+        });
+        check();
+      });
+    await waitReady(old);
+    const oldRecord = JSON.parse(fs.readFileSync(path.join(oldDirs.bridge, 'running.json')));
+    fs.writeFileSync(
+      path.join(newDirs.bridge, 'running.json'),
+      JSON.stringify({ pid: oldRecord.pid, url: 'http://127.0.0.1:9/#stale' }),
+    );
+    const next = launch(newDirs);
+    await waitReady(next);
+    const nextRecord = JSON.parse(fs.readFileSync(path.join(newDirs.bridge, 'running.json')));
+    assert.equal(new URL(nextRecord.url).port, String(port));
+    await old.closed;
+  },
+);

@@ -265,18 +265,9 @@ async function syncAccountInfo(ids) {
   }
   renderAccounts();
 }
-export async function refreshQuota(id, sync = true) {
-  // 批量刷新拆成多个账号请求，谁先返回就先更新谁，全部结束后统一同步一次账号信息；
-  // 不触发全局“切换中”状态，避免覆盖用户正在编辑的模型或来源。
-  if (!id) {
-    const ids = (accountData?.items || []).map((a) => a.id);
-    await Promise.all(ids.map((one) => refreshQuota(one, false)));
-    await syncAccountInfo(ids);
-    return;
-  }
-  if (quotaRefreshing.has(id)) return;
-  quotaRefreshing.add(id);
-  renderAccounts();
+// 每读一个账号，后台都要启动一个官方 Codex 进程；批量时最多同时读 3 个，避免一次拉起几十个进程。
+const QUOTA_PARALLEL = 3;
+async function readQuota(id) {
   try {
     const r = await api('accountQuota', { id }),
       row = accountData?.items.find((a) => a.id === id);
@@ -288,7 +279,24 @@ export async function refreshQuota(id, sync = true) {
     quotaRefreshing.delete(id);
     renderAccounts();
   }
-  if (sync) await syncAccountInfo([id]);
+}
+export async function refreshQuota(id) {
+  // 批量刷新拆成多个账号请求，谁先返回就先更新谁，全部结束后统一同步一次账号信息；
+  // 不触发全局“切换中”状态，避免覆盖用户正在编辑的模型或来源。
+  const ids = (id ? [id] : (accountData?.items || []).map((a) => a.id)).filter(
+    (one) => !quotaRefreshing.has(one),
+  );
+  if (!ids.length) return;
+  // 排队中的账号也算“正在刷新”，按钮和“正在刷新 N 个”按全部待读数量显示。
+  for (const one of ids) quotaRefreshing.add(one);
+  renderAccounts();
+  const queue = [...ids];
+  await Promise.all(
+    Array.from({ length: Math.min(QUOTA_PARALLEL, queue.length) }, async () => {
+      while (queue.length) await readQuota(queue.shift());
+    }),
+  );
+  await syncAccountInfo(ids);
 }
 export function renderAccounts() {
   if (!accountData) return;

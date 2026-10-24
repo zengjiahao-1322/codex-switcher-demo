@@ -303,6 +303,32 @@ test('当前账号访问令牌过期时，先向官方服务刷新而非直接�
   );
 });
 
+test('非当前官方账号的有效令牌直接准备，不启动额外 app-server', async (t) => {
+  const f = configured(t),
+    initial = createAccounts(f);
+  initial.status();
+  const valid = auth('bob');
+  valid.tokens.access_token = jwt({
+    ...JSON.parse(Buffer.from(valid.tokens.access_token.split('.')[1], 'base64url')),
+    exp: Math.floor(Date.now() / 1000) + 3600,
+  });
+  writeJson(path.join(f.codexHome, 'auth.json'), valid);
+  const bob = initial.status().items.find((row) => row.current);
+  writeJson(path.join(f.codexHome, 'auth.json'), auth('alice'));
+  initial.status();
+  let launches = 0;
+  const accounts = createAccounts({
+    ...f,
+    codexExe: process.execPath,
+    spawnProcess: () => {
+      launches++;
+      throw Error('不应启动额外官方进程');
+    },
+  });
+  await accounts.prepare(bob.id);
+  assert.equal(launches, 0);
+});
+
 test('相同模型切换官方账号仍会停止旧插件后端', async (t) => {
   const f = configured(t),
     a = loginFixture(f);
@@ -790,6 +816,12 @@ test('preparation failure preserves the running desktop and active configuration
   a.status();
   writeJson(path.join(f.codexHome, 'auth.json'), auth('bob'));
   const bob = a.status().items.find((x) => x.current);
+  const expiredBob = auth('bob');
+  expiredBob.tokens.access_token = jwt({
+    ...JSON.parse(Buffer.from(expiredBob.tokens.access_token.split('.')[1], 'base64url')),
+    exp: 1,
+  });
+  writeJson(path.join(f.bridgeHome, 'accounts', bob.id, 'auth.json'), expiredBob);
   writeJson(path.join(f.codexHome, 'auth.json'), auth('alice'));
   const authBefore = fs.readFileSync(path.join(f.codexHome, 'auth.json'), 'utf8'),
     configBefore = fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8');
