@@ -402,8 +402,26 @@ async function initializeHome(executable, home) {
             apply: () => ({ label: 'Fixture' }),
           },
           syncThreads: async () => {
+            report.recoveryExitStates = [];
             for (const entry of beforeRecovery.slice(0, 2)) {
-              assert.throws(() => process.kill(entry.backendPid, 0));
+              if (process.platform === 'darwin') {
+                // 已退出但尚未被父进程回收的 Z 状态不会再执行；kill(0) 仍可能成功。
+                const exited = cp.spawnSync(
+                  '/bin/ps',
+                  ['-p', String(entry.backendPid), '-o', 'state='],
+                  { encoding: 'utf8' },
+                );
+                report.recoveryExitStates.push({
+                  pid: entry.backendPid,
+                  status: exited.status,
+                  state: exited.stdout.trim(),
+                });
+                assert.ok(
+                  (exited.status === 1 && !exited.stdout.trim() && !exited.stderr.trim()) ||
+                    (exited.status === 0 && /^Z/.test(exited.stdout.trim())),
+                  '共享后端仍可执行：' + JSON.stringify(report.recoveryExitStates.at(-1)),
+                );
+              } else assert.throws(() => process.kill(entry.backendPid, 0));
             }
             assert.doesNotThrow(() => process.kill(beforeRecovery[2].backendPid, 0));
             throw Error('fixture sync failure');
