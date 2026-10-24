@@ -10,6 +10,17 @@ const { test } = require('node:test'),
   { once } = require('node:events');
 const { PROJECT_ROOT } = require('../src/paths.cjs');
 
+test('应用与两份VSIX的版本一致，伴随manifest与package同步', () => {
+  const version = require('../package.json').version;
+  assert.equal(require('../vscode-companion/package.json').version, version);
+  assert.equal(require('../vscode-remote-agent/package.json').version, version);
+  const manifest = fs.readFileSync(
+    path.join(PROJECT_ROOT, 'vscode-companion/extension.vsixmanifest'),
+    'utf8',
+  );
+  assert.equal(manifest.match(/<Identity[^>]*\bVersion="([^"]+)"/)?.[1], version);
+});
+
 test('仅复制发布清单也能从稳定入口启动并提供网页，不依赖旧根目录源码', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-layout-'));
   let child, closed;

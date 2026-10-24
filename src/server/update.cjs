@@ -4,9 +4,8 @@ const fs = require('node:fs'),
   crypto = require('node:crypto'),
   cp = require('node:child_process');
 const { log } = require('../diagnostics/event-log.cjs');
-const REPOSITORY = 'zengjiahao-1322/codex-switcher-demo',
-  RELEASE_TAG = 'v0.1.3';
-const releaseUrl = `https://github.com/${REPOSITORY}/releases/download/${RELEASE_TAG}/`;
+const REPOSITORY = 'zengjiahao-1322/codex-switcher-demo';
+const releaseUrl = `https://github.com/${REPOSITORY}/releases/latest/download/`;
 
 function assetName(platform = process.platform, arch = process.arch) {
   if (platform === 'win32') return 'codex-switcher-windows-x64.zip';
@@ -282,6 +281,5 @@ module.exports = {
   packageRoot,
   validatePackage,
   transportFor,
-  RELEASE_TAG,
   REPOSITORY,
 };

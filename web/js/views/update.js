@@ -15,7 +15,7 @@ const pollState = () =>
 export function renderUpdate(u) {
   update = u;
   const latest = u.latest,
-    // 版本号固定为 0.1.3 期间，用只增不减的发布序号区分新旧。
+    // 新旧按只增不减的发布序号判断，版本号相同时也能区分。
     target = latest && latest.version + '（第 ' + latest.sequence + ' 版）';
   // 发布说明按纯文本显示，去掉 Markdown 标题符号。
   const notes = latest?.notes ? '\n' + latest.notes.replace(/^#+\s*/gm, '') : '';

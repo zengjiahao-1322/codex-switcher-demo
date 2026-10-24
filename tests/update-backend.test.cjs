@@ -320,15 +320,70 @@ test('包内构建信息与 release.json 使用同一工作流序号和构建号
   write(path.join(artifacts, 'codex-switcher-windows-x64.zip'), 'fixture package');
   cp.execFileSync(
     process.execPath,
-    [path.join(__dirname, '../scripts/create-release-json.cjs'), 'v0.1.3', artifacts, output],
+    [
+      path.join(__dirname, '../scripts/create-release-json.cjs'),
+      'v' + require('../package.json').version,
+      artifacts,
+      output,
+    ],
     {
       env: { ...process.env, GITHUB_RUN_NUMBER: String(sequence), GITHUB_SHA: 'c'.repeat(40) },
     },
   );
   const metadata = JSON.parse(fs.readFileSync(output, 'utf8'));
   assert.equal(metadata.sequence, packaged.sequence);
+  assert.equal(metadata.version, packaged.version);
   assert.equal(metadata.build, packaged.id);
   assert.ok(!metadata.notes.startsWith('#'), '公开摘要使用纯文本');
+});
+
+test('更新元数据和资产只从固定仓库latest入口读取，不绑定旧版本', async () => {
+  const root = temp('latest'),
+    bridge = path.join(root, 'bridge'),
+    target = path.join(root, 'installed'),
+    urls = [];
+  fs.mkdirSync(bridge);
+  fs.mkdirSync(target);
+  const manager = createUpdateManager({
+    bridgeHome: bridge,
+    codexHome: path.join(root, 'codex'),
+    projectDir: target,
+    build: 'a'.repeat(12),
+    version: '0.1.4',
+    sequence: 1,
+    platform: 'win32',
+    arch: 'x64',
+    transport: {
+      readJson: async (url) => {
+        urls.push(url);
+        return {
+          version: '0.1.5',
+          build: 'b'.repeat(12),
+          sequence: 2,
+          commit: 'c'.repeat(40),
+          publishedAt: new Date().toISOString(),
+          notes: 'fixture future release',
+          assets: { 'codex-switcher-windows-x64.zip': 'd'.repeat(64) },
+        };
+      },
+      download: async (url, file) => {
+        urls.push(url);
+        write(file, 'fixture bad archive');
+      },
+    },
+    extract: async () => assert.fail('错误校验值不能解压'),
+  });
+  assert.equal((await manager.actions.checkUpdate()).status, 'available');
+  await manager.actions.installUpdate({});
+  await manager.finished();
+  assert.deepEqual(urls, [
+    'https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest/download/release.json',
+    'https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest/download/codex-switcher-windows-x64.zip',
+  ]);
+  const { REPOSITORY, transportFor } = require('../src/server/update.cjs');
+  assert.equal(REPOSITORY, 'zengjiahao-1322/codex-switcher-demo');
+  assert.match(transportFor.toString(), /--location/);
+  assert.doesNotMatch(transportFor.toString(), /--insecure|['"]-k['"]/);
 });
 
 test(

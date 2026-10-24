@@ -79,7 +79,7 @@ function dispatch(bridgeHome, id, fields, { timeout = 30000 } = {}) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(key);
-      reject(Error('等待远端窗口确认命令超时'));
+      reject(Object.assign(Error('等待远端窗口确认命令超时'), { code: 'REMOTE_TIMEOUT' }));
     }, timeout);
     pending.set(key, {
       command: { id: crypto.randomUUID(), ...fields },
@@ -128,7 +128,15 @@ async function apply(bridgeHome, authority, source) {
   return Promise.all(
     targets.map(async (group) => {
       const result = { codexHome: group.codexHome, status: 'skipped' };
-      const skip = (reason) => ({ ...result, reason });
+      const skip = (reason) => {
+        log(bridgeHome, 'remote.sync', {
+          host: group.host,
+          codexHome: group.codexHome,
+          status: 'skipped',
+          reason,
+        });
+        return { ...result, reason };
+      };
       if (!group.agentVersion) return skip('尚未接入远端代理');
       const window = rows.find(
         (row) =>
@@ -138,7 +146,8 @@ async function apply(bridgeHome, authority, source) {
           row.remoteAgent.agentVersion === row.companionVersion,
       );
       if (!window) return skip('请更新远端代理，使其版本与伴随扩展一致');
-      let original = '';
+      let original = '',
+        step = 'read';
       try {
         const read = await dispatch(bridgeHome, window.id, { type: 'remoteApply', step: 'read' });
         if (typeof read?.text !== 'string' || digest(read.text) !== read.sha256)
@@ -154,14 +163,16 @@ async function apply(bridgeHome, authority, source) {
             source.model,
             catalogPath,
           ),
-          written = await dispatch(bridgeHome, window.id, {
+          write = {
             type: 'remoteApply',
             step: 'write',
             text,
             expectedSha256: read.sha256,
             catalog: source.catalog,
             reload: true,
-          });
+          };
+        step = 'write';
+        const written = await dispatch(bridgeHome, window.id, write);
         if (written?.ok !== true || written.sha256 !== digest(text))
           throw Error('远端未确认写入目标配置');
         const others = group.windows.filter((item) => item.id !== window.id);
@@ -176,6 +187,8 @@ async function apply(bridgeHome, authority, source) {
           });
         log(bridgeHome, 'remote.sync', {
           host: group.host,
+          codexHome: group.codexHome,
+          step,
           sha256: written.sha256.slice(0, 8),
           status: 'synced',
         });
@@ -185,8 +198,15 @@ async function apply(bridgeHome, authority, source) {
         let reason = String(error.message);
         for (const value of [original, source.provider.apiKey])
           if (value) reason = reason.split(value).join('[已隐藏]');
-        log(bridgeHome, 'remote.sync', { host: group.host, status: 'failed' });
-        return { ...result, status: 'failed', reason: redact(reason) };
+        reason = redact(reason);
+        log(bridgeHome, 'remote.sync', {
+          host: group.host,
+          codexHome: group.codexHome,
+          step: error.code === 'REMOTE_TIMEOUT' ? 'timeout' : step,
+          status: 'failed',
+          reason,
+        });
+        return { ...result, status: 'failed', reason };
       }
     }),
   );

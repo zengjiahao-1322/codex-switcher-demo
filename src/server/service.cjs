@@ -670,13 +670,26 @@ function createService({
           .find((row) => row.id === id);
       if (window?.remoteType !== 'ssh-remote') throw Error('请选择已连接的 Remote-SSH 窗口');
       if (window.remoteProtocol !== 1) throw Error('请先更新本机伴随扩展并重载这个窗口');
-      const file = require('../clients/editor-integration.cjs').buildRemote(projectDir, bridgeHome);
-      return remote.dispatch(
-        bridgeHome,
-        id,
-        { type: 'installRemoteAgent', base64: fs.readFileSync(file).toString('base64') },
-        { timeout: 60000 },
-      );
+      const host = window.remoteAgent?.host || window.authority;
+      try {
+        const file = require('../clients/editor-integration.cjs').buildRemote(
+            projectDir,
+            bridgeHome,
+          ),
+          result = await remote.dispatch(
+            bridgeHome,
+            id,
+            { type: 'installRemoteAgent', base64: fs.readFileSync(file).toString('base64') },
+            { timeout: 60000 },
+          );
+        if (result?.installed !== true) throw Error('编辑器未确认远端代理安装成功');
+        eventLog.log(bridgeHome, 'remote.install', { host, status: 'installed' });
+        return result;
+      } catch (error) {
+        const reason = eventLog.redact(error.message);
+        eventLog.log(bridgeHome, 'remote.install', { host, status: 'failed', reason });
+        throw Error(reason);
+      }
     },
     remoteSwitch: async ({ authority, providerId, model }) => {
       if (providerId === OFFICIAL) throw Error('远程服务器只支持可直连的自定义 API');
@@ -752,6 +765,19 @@ function createService({
           clients.snapshot(codexHome, bridgeHome, { inventory }),
           inventory,
         ),
+        remotes: require('../clients/remote-servers.cjs')
+          .groups(bridgeHome)
+          .map((group) => ({
+            host: group.host,
+            platform: group.platform,
+            arch: group.arch,
+            codexHome: group.codexHome,
+            agentVersion: group.agentVersion,
+            companionVersion: [...new Set(group.windows.map((w) => w.companionVersion))].join(', '),
+            current: group.current
+              ? { modelProvider: group.current.modelProvider, model: group.current.model }
+              : null,
+          })),
       });
       const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
       return {

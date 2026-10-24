@@ -3,7 +3,7 @@
   "publisher": "codex-switcher-demo",
   "displayName": "Codex Switcher Remote Agent",
   "description": "Runs on the Remote-SSH server so the local Codex switcher can switch the server's Codex configuration.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "engines": {
     "vscode": "^1.85.0"
   },

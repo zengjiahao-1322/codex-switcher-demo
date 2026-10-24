@@ -210,6 +210,11 @@ test('读回sha不符不写入；写入失败只记录脱敏原因，不影响�
   assert.match(result.reason, /文件已被手动修改/);
   assert.equal(JSON.stringify(result).includes(secret), false);
   assert.equal(fileText(home).includes(secret), false);
+  const events = require('../src/diagnostics/event-log.cjs').readRecent(home, 10);
+  assert.equal(events.at(-1).step, 'write');
+  assert.equal(events.at(-1).codexHome, input.remoteAgent.codexHome);
+  assert.match(events.at(-1).reason, /文件已被手动修改/);
+  assert.equal(events.at(-1).reason.includes(secret), false);
 });
 
 test('远程请求超时后释放内存命令，不重试也不写磁盘', async (t) => {
@@ -388,4 +393,48 @@ test('独立remoteSwitch经真实HTTP应用所选API，拒绝官方和转换，�
   assert.equal('syncRemoteServers' in service.actions, false);
   for (const dir of ['clients', 'logs'])
     assert.equal(fileText(path.join(home, dir)).includes(secret), false);
+});
+
+test('代理安装与诊断导出记录脱敏原因和远端概况，不导出正文、密钥或URL查询', async (t) => {
+  const home = fixture(t),
+    codexHome = path.join(home, 'codex');
+  fs.mkdirSync(codexHome);
+  fs.writeFileSync(path.join(codexHome, 'config.toml'), 'model="local-keep"\n');
+  t.mock.method(clients, 'scanAsync', async () => ({ ancestry: [], processes: [] }));
+  const service = require('../src/server/service.cjs').createService({
+      codexHome,
+      bridgeHome: home,
+    }),
+    input = registration('remote-install-log-window');
+  input.remoteAgent.current.baseUrl = 'https://api.example.test/v1?token=sk-fixture-install-secret';
+  clients.heartbeat(home, input);
+  let pending = service.actions.installRemoteAgent({ id: input.id }),
+    command = await nextCommand(home, input.id);
+  assert.equal(command.type, 'installRemoteAgent');
+  assert.ok(Buffer.from(command.base64, 'base64').byteLength > 1000);
+  ack(home, input, command, { installed: true });
+  assert.equal((await pending).installed, true);
+  pending = service.actions.installRemoteAgent({ id: input.id });
+  command = await nextCommand(home, input.id);
+  clients.heartbeat(home, {
+    ...input,
+    ack: command.id,
+    ackStatus: 'failed',
+    ackError: '安装被拒绝 sk-fixture-install-secret',
+  });
+  await assert.rejects(pending, /安装被拒绝.*已隐藏/);
+  const exported = await service.actions.exportDiagnostics(),
+    header = JSON.parse(exported.text.split('\n---\n')[0]),
+    last = require('../src/diagnostics/event-log.cjs').readRecent(home, 2);
+  assert.deepEqual(
+    last.map((row) => row.status),
+    ['installed', 'failed'],
+  );
+  assert.match(last[1].reason, /安装被拒绝/);
+  assert.equal(header.remotes[0].agentVersion, '0.1.3');
+  assert.equal(header.remotes[0].companionVersion, '0.1.3');
+  assert.deepEqual(header.remotes[0].current, { modelProvider: 'openai', model: 'old' });
+  assert.equal(exported.text.includes('sk-fixture-install-secret'), false);
+  assert.equal(exported.text.includes('ackResult'), false);
+  assert.equal(fileText(path.join(home, 'clients')).includes('sk-fixture-install-secret'), false);
 });
