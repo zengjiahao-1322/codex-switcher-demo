@@ -78,13 +78,15 @@ flowchart LR
 
 ## 独立的远程服务器切换（0.1.4，待实机验收）
 
-`vscode-companion` 固定运行在本机 UI 宿主，`vscode-remote-agent` 运行在 Remote-SSH 的 workspace 宿主。两者通过 VS Code 命令通道通信，切换器不建立 SSH 连接。远端代理只注册 status、read、write 三个命令，不主动联网；状态仅返回模型、provider、API 地址和配置目录。
+`vscode-companion` 固定运行在本机 UI 宿主，`vscode-remote-agent` 运行在 Remote-SSH 的 workspace 宿主。两者通过 VS Code 命令通道通信，切换器不建立 SSH 连接。远端代理注册 status、read、readAuth、write 命令，不主动联网；状态返回模型、provider、API 地址、配置目录、协议号 2 和无令牌的账号摘要。同版本替换发行时，后台和页面通过协议号识别旧代理。
 
-`src/clients/remote-servers.cjs` 根据心跳中的 authority 与 codexHome 分组。独立的 `remoteSwitch` 先校验所选 API 已确认直连且有密钥，再为每组选择版本一致的窗口，执行 read、复用 `core.prepareConfig`、write。模型目录数据在内存生成，路径按远端系统拼接；不写本机配置、不进入本机切换 worker，也没有自动跟随开关。同目录只写一次，其余窗口使用既有重载命令。
+`src/clients/remote-servers.cjs` 根据心跳中的 authority 与 codexHome 分组。独立的 `remoteSwitch` 接受 `accountId` 或 `providerId` 二选一：API 必须已确认直连且有密钥；官方账号必须已保存，远端凭证存储不能是显式 keyring/ephemeral。每组选择版本一致且协议号为 2 的窗口，执行 read，再复用 `core.prepareConfig` 或 `core.prepareOfficialConfig`，最后 write。官方切换同时写 auth.json 与配置，保留旧 API 的 provider 定义供历史使用。模型目录数据在内存生成，路径按远端系统拼接；不进入本机切换 worker，没有自动跟随开关。同目录只写一次，其余窗口使用既有重载命令。
+
+`src/accounts/remote-credentials.cjs` 按与本机账号相同的身份哈希及 `last_refresh` 比较文件登录，回收较新的远端登录并同步到已使用该账号的本机和其他在线服务器。`readAuth` 和只含 auth 的 write 复用内存命令通道；只同步 auth.json，不改配置、不重载窗口。周期同步不是跨机器刷新锁，仍需实际续期验收。
 
 远端命令与 ackResult 使用常驻服务内存通道，客户端文件只存公开状态与确认元数据。心跳长轮询同时检查该通道，配置回执请求上限为 1 MiB，其他 HTTP 动作仍为 16 KiB。读、写各等待最多 30 秒，不重试；各组独立返回 synced、skipped 或 failed。synced 代表写入已确认、重载已请求；新宿主带 completedReload，后台核对原命令、authority、目录与版本后才返回 reloadConfirmed，随后淘汰旧窗口登记。
 
-远端写入只允许 config.toml 与 switcher-model-catalog.json，写前核对读取时的 SHA-256，首次备份原配置，以临时文件加改名写入并设为 0600。配置正文与密钥不进入本机客户端记录、任务或日志；远端日志记录主机、配置目录、SHA前八位、阶段、结果及脱敏原因，代理安装单独记录结果。导出头只含远端系统、扩展版本、目录和模型概况。独立 VSIX 与平台包源码一起构建，smoke 验证包内生成及下载，原生编辑器检查验证两份 VSIX 可离线安装；这些检查不能替代真实 Remote-SSH Linux 切换验收。
+远端写入只允许 config.toml、auth.json 与 switcher-model-catalog.json，写前核对读取时的 SHA-256，首次分别备份原配置与登录，以临时文件加改名写入并设为 0600。配置正文、登录令牌与密钥不进入本机客户端记录、任务或日志；远端日志记录主机、配置目录、SHA 前八位、阶段、结果及脱敏原因，代理安装单独记录结果。导出头只含远端系统、扩展版本、协议号、目录、模型和脱敏账号摘要。独立 VSIX 与平台包源码一起构建，smoke 验证包内生成及下载，原生编辑器检查验证两份 VSIX 可离线安装；这些检查不能替代真实 Remote-SSH Linux 切换验收。
 
 ## 一次额度刷新
 
