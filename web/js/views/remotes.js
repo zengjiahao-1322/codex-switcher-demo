@@ -17,10 +17,14 @@ let rendered = '',
   server = null;
 const hostOf = (url) => url.replace(/^https?:\/\//, '').split('/')[0];
 const sameUrl = (x, y) => x.replace(/\/+$/, '') === y.replace(/\/+$/, '');
+// 协议号 2 起带官方登录读写；同版本号重新发布时，旧代理只能靠协议号认出。
 const agentState = (rows) =>
   rows.some((r) => !r.agentVersion)
     ? ['未安装远端代理', 'changed']
-    : rows.some((r) => r.windows.some((w) => w.agentVersion !== w.companionVersion))
+    : rows.some(
+          (r) =>
+            r.agentProtocol !== 2 || r.windows.some((w) => w.agentVersion !== w.companionVersion),
+        )
       ? ['远端代理需更新', 'changed']
       : ['已接入', 'done'];
 // 服务器连不到本机的转换服务，所以只有可直连且有密钥的 API 能用；官方账号的登录会写到服务器上。

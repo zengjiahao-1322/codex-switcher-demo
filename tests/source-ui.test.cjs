@@ -19,12 +19,12 @@ const quota = (remainingPercent) => ({
   checkedAt: now,
   buckets: [{ id: 'codex', name: 'Codex', windows: [{ minutes: 300, remainingPercent }] }],
 });
-function backend({ accounts, clients = [] } = {}) {
+function backend({ accounts, clients = [], official = true } = {}) {
   return async (route) => {
     if (route === 'state')
       return {
         body: {
-          current: { official: true, model: '' },
+          current: { official, model: '' },
           providers: [{ id: 'official', name: '官方', baseUrl: '' }, api],
           adapter: { autostart: false, ready: true, port: 1 },
           dataDirProtection: { ok: true },
@@ -63,6 +63,25 @@ function backend({ accounts, clients = [] } = {}) {
     return { body: { message: route + ' ok', items: [] } };
   };
 }
+test('本机用 API 时，auth.json 里的账号标为“本机登录”并说明为何不能移除', async () => {
+  const page = await runPage({ respond: backend({ official: false }) });
+  const spans = page.created.filter((c) => c.tag === 'span').map((c) => c.node.textContent);
+  assert.ok(spans.includes('本机登录'));
+  assert.equal(spans.includes('正在使用'), false);
+  assert.ok(
+    page.created.some(
+      (c) =>
+        c.tag === 'small' &&
+        c.node.textContent ===
+          'a1@example.com · 本机 Codex 保存的是这个账号的登录，切换到其他官方账号后才能移除',
+    ),
+  );
+  // 列表可能渲染多轮；每轮两个账号都有“改名”，只有另一个账号有“移除”。
+  const count = (text) =>
+    page.created.filter((c) => c.tag === 'button' && c.node.textContent === text).length;
+  assert.equal(count('改名'), count('移除') * 2);
+});
+
 const cards = (page) =>
   page.created.filter((c) => c.tag === 'button' && c.node.className === 'source-card');
 // 卡片每次渲染都会重建，只看最后一轮（数量 = 账号数 + API 数）。

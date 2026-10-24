@@ -38,6 +38,7 @@ function registration(id, extra = {}) {
     authority: 'ssh-remote+fixture-server',
     remote: 'ssh-remote+fixture-server',
     remoteAgent: {
+      protocol: 2,
       agentVersion: '0.1.3',
       host: 'fixture-server',
       platform: 'linux',

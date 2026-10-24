@@ -11,6 +11,7 @@ const group = (extra = {}) => ({
   platform: 'linux',
   arch: 'x64',
   agentVersion: '0.1.3',
+  agentProtocol: 2,
   current: {
     model: 'gpt-5.5',
     modelProvider: 'hermes_bridge',
@@ -383,6 +384,14 @@ test('未安装或需更新远端代理时给安装按钮，不给切换卡；�
   });
   await openTab(old);
   assert.ok(created(old, 'button', (n) => n.textContent === '更新远端代理').length);
+
+  // 同一版本号重新发布：版本相同但缺少协议号的旧代理也要提示更新。
+  const sameVersion = await runPage({
+    respond: backend({ remotes: () => [group({ agentProtocol: null })] }),
+  });
+  await openTab(sameVersion);
+  assert.ok(created(sameVersion, 'button', (n) => n.textContent === '更新远端代理').length);
+  assert.equal(applyButton(sameVersion), undefined);
 });
 
 test('定时刷新时内容没变就不重绘，不打断正在选择的来源和模型', async () => {

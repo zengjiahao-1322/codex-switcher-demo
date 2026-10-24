@@ -35,6 +35,7 @@ function agentStatus(value) {
   }
   return {
     agentVersion: string(value.agentVersion),
+    protocol: Number(value.protocol || 0),
     host: string(value.host),
     platform,
     arch: string(value.arch),
@@ -70,6 +71,7 @@ function groups(bridgeHome) {
         platform: agent?.platform || null,
         arch: agent?.arch || null,
         agentVersion: agent?.agentVersion || null,
+        agentProtocol: agent?.protocol || 0,
         current: agent?.current || null,
         account: agent?.account
           ? { ...agent.account, id: known.has(agent.account.id) ? agent.account.id : null }
@@ -81,6 +83,7 @@ function groups(bridgeHome) {
       name: row.name,
       workspace: row.workspace,
       agentVersion: agent?.agentVersion || null,
+      agentProtocol: agent?.protocol || 0,
       companionVersion: row.companionVersion,
     });
   }
@@ -142,7 +145,8 @@ function windowFor(bridgeHome, group) {
         row.authority === group.authority &&
         row.remoteType === 'ssh-remote' &&
         row.remoteAgent?.codexHome === group.codexHome &&
-        row.remoteAgent.agentVersion === row.companionVersion,
+        row.remoteAgent.agentVersion === row.companionVersion &&
+        row.remoteAgent.protocol === 2,
     );
 }
 function redactReason(error, ...secrets) {

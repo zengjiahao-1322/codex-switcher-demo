@@ -63,6 +63,7 @@ function activate(context) {
       // 只转发约定字段，远端代理多给的内容不上报。
       remoteAgent = {
         agentVersion: s.agentVersion,
+        protocol: s.protocol,
         host: s.host,
         platform: s.platform,
         arch: s.arch,

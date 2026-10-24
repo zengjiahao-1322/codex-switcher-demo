@@ -10,6 +10,8 @@ const CONFIG = 'config.toml',
   AUTH = 'auth.json',
   BACKUP = '.switcher-backup';
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
+// 协议号：同一版本号重新发布时，靠它认出缺少登录读写的旧代理（2 = 带 readAuth 和登录写入）。
+const PROTOCOL = 2;
 
 const claims = (token) => JSON.parse(Buffer.from(token.split('.')[1], 'base64url'));
 // 只取账号身份、邮箱、套餐和登录刷新时间，令牌本身不读出。
@@ -78,6 +80,7 @@ function createAgent({ home, version }) {
       const exists = fs.existsSync(file(CONFIG));
       return {
         agentVersion: version,
+        protocol: PROTOCOL,
         host: os.hostname(),
         platform: process.platform,
         arch: process.arch,

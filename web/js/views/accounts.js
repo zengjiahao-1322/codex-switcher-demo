@@ -304,12 +304,17 @@ export function renderAccounts() {
     const info = document.createElement('div');
     info.className = 'account-info';
     info.append(document.createTextNode(a.label), tag(a.plan));
+    // 本机 Codex 的 auth.json 保存的是这个账号：用 API 时它不算“正在使用”，但刷新时会被重新收录，所以不能移除。
+    const local = a.current && !state?.current.official;
     if (a.current && state?.current.official)
       info.append(
         tag(a.pendingLogin ? '登录已更新 · 待应用' : '正在使用', a.pendingLogin ? 'muted' : 'done'),
       );
+    if (local) info.append(tag('本机登录', 'muted'));
     const email = document.createElement('small');
-    email.textContent = a.label === a.email ? 'ChatGPT 官方账号' : a.email;
+    email.textContent =
+      (a.label === a.email ? 'ChatGPT 官方账号' : a.email) +
+      (local ? ' · 本机 Codex 保存的是这个账号的登录，切换到其他官方账号后才能移除' : '');
     info.append(email);
     const acts = document.createElement('div');
     acts.className = 'actions';

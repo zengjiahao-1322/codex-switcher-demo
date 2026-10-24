@@ -792,7 +792,16 @@ function createService({
             arch: group.arch,
             codexHome: group.codexHome,
             agentVersion: group.agentVersion,
+            agentProtocol: group.agentProtocol,
             companionVersion: [...new Set(group.windows.map((w) => w.companionVersion))].join(', '),
+            account: group.account
+              ? {
+                  id: group.account.id,
+                  email: group.account.email,
+                  plan: group.account.plan,
+                  lastRefresh: group.account.lastRefresh,
+                }
+              : null,
             current: group.current
               ? { modelProvider: group.current.modelProvider, model: group.current.model }
               : null,

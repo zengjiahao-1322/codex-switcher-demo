@@ -144,8 +144,10 @@ test('SSH 窗口心跳附带远端代理状态（约定字段、不含密钥）�
     'current',
     'host',
     'platform',
+    'protocol',
   ]);
   assert.equal(first.remoteAgent.account, null);
+  assert.equal(first.remoteAgent.protocol, 2);
   assert.deepEqual(first.remoteAgent.current, {
     model: 'gpt-5.5',
     modelProvider: 'hermes_bridge',
