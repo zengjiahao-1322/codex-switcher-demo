@@ -26,6 +26,123 @@ const packageTree = (root, files, values) => {
   for (const dir of ['runtime', 'bin', 'node_modules']) fs.mkdirSync(path.join(root, dir));
 };
 
+test('Windows检查与下载启用吊销离线best-effort，Mac不加且均保留TLS验证', async () => {
+  const { transportFor } = require('../src/server/update.cjs');
+  for (const platform of ['win32', 'darwin']) {
+    const calls = [],
+      transport = transportFor(temp('curl-args'), {
+        platform,
+        execute: async (exe, args, options) => {
+          calls.push({ exe, args, options });
+          return { stdout: Buffer.from('{"ok":true}') };
+        },
+      });
+    assert.deepEqual(await transport.readJson('https://github.com/fixture/release.json'), {
+      ok: true,
+    });
+    await transport.download('https://github.com/fixture/package.zip', 'fixture-output.zip');
+    assert.equal(calls.length, 2);
+    for (const call of calls) {
+      assert.equal(call.exe, platform === 'win32' ? 'curl.exe' : '/usr/bin/curl');
+      assert.equal(call.args.includes('--ssl-revoke-best-effort'), platform === 'win32');
+      assert.ok(call.args.includes('--location'));
+      for (const unsafe of ['-k', '--insecure', '--ssl-no-revoke'])
+        assert.equal(call.args.includes(unsafe), false);
+      assert.equal(call.options.encoding, null, '原始stderr必须以Buffer读取');
+    }
+    assert.ok(calls[1].args.includes('--output'));
+  }
+});
+
+test('Schannel错误在人机界面显示中文，检查和下载日志只记录退出码与英文诊断', async () => {
+  const { transportFor } = require('../src/server/update.cjs');
+  for (const stage of ['check', 'download']) {
+    const root = temp('schannel-' + stage),
+      bridge = path.join(root, 'bridge'),
+      project = path.join(root, 'installed');
+    fs.mkdirSync(bridge);
+    fs.mkdirSync(project);
+    let calls = 0;
+    const metadata = {
+        version: '0.1.5',
+        build: 'b'.repeat(12),
+        sequence: 2,
+        commit: 'c'.repeat(40),
+        publishedAt: new Date().toISOString(),
+        notes: 'fixture',
+        assets: { 'codex-switcher-windows-x64.zip': 'd'.repeat(64) },
+      },
+      transport = transportFor(path.join(root, 'codex'), {
+        platform: 'win32',
+        execute: async () => {
+          calls++;
+          if (stage === 'download' && calls === 1)
+            return { stdout: Buffer.from(JSON.stringify(metadata)) };
+          throw Object.assign(
+            Error('Command failed: curl.exe --output PRIVATE-PATH https://github.com/fixture'),
+            {
+              code: 35,
+              stderr: Buffer.concat([
+                Buffer.from(
+                  'curl: (35) schannel: InitializeSecurityContext failed: CRYPT_E_REVOCATION_OFFLINE (0x80092013)\n',
+                ),
+                Buffer.from([0xce, 0xde, 0xb7, 0xa8, 0xc1, 0xac, 0xbd, 0xd3]),
+              ]),
+            },
+          );
+        },
+      }),
+      manager = createUpdateManager({
+        bridgeHome: bridge,
+        codexHome: path.join(root, 'codex'),
+        projectDir: project,
+        build: 'a'.repeat(12),
+        version: '0.1.4',
+        sequence: 1,
+        platform: 'win32',
+        arch: 'x64',
+        transport,
+      });
+    await manager.actions.checkUpdate();
+    if (stage === 'download') {
+      await manager.actions.installUpdate({});
+      await manager.finished();
+    }
+    assert.match(manager.state().error, /证书吊销检查无法完成/);
+    assert.doesNotMatch(manager.state().error, /curl\.exe|--output|PRIVATE-PATH|\ufffd/);
+    const events = require('../src/diagnostics/event-log.cjs').readRecent(bridge, 10),
+      failure = events.find((row) => row.event === 'update.' + stage && row.curl);
+    assert.equal(failure.curl.code, 35);
+    assert.match(failure.curl.detail, /CRYPT_E_REVOCATION_OFFLINE/);
+    assert.match(failure.curl.detail, /^[\x20-\x7e]*$/);
+    assert.doesNotMatch(JSON.stringify(events), /PRIVATE-PATH|curl\.exe|--output|\ufffd/);
+  }
+});
+
+test('其他curl错误使用退出码中文提示，不展示命令行或stderr', async () => {
+  const { transportFor } = require('../src/server/update.cjs');
+  for (const [code, message] of [
+    [28, /超时/],
+    [60, /证书验证未通过/],
+    [7, /退出码 7/],
+  ]) {
+    const transport = transportFor(temp('curl-error'), {
+      platform: 'win32',
+      execute: async () => {
+        throw Object.assign(Error('Command failed: curl.exe SECRET-COMMAND'), {
+          code,
+          stderr: Buffer.from('curl: network error'),
+        });
+      },
+    });
+    await assert.rejects(transport.readJson('https://github.com/fixture'), (error) => {
+      assert.match(error.message, message);
+      assert.doesNotMatch(error.message, /curl\.exe|SECRET-COMMAND|network error/);
+      return true;
+    });
+  }
+});
+
 test('校验和失败时不触碰安装目录', async () => {
   const root = temp('checksum'),
     bridge = path.join(root, 'bridge'),

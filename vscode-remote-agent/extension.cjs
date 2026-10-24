@@ -1,14 +1,33 @@
 'use strict';
 // 远端代理：装在 Remote-SSH 服务器一侧，只供本机伴随扩展经 VS Code 命令调用。
-// 不联网、不主动做任何事；只读写服务器 CODEX_HOME 下两个固定文件。
+// 不联网、不主动做任何事；只读写服务器 CODEX_HOME 下三个固定文件（配置、模型目录、官方登录）。
 const fs = require('node:fs'),
   os = require('node:os'),
   path = require('node:path'),
   crypto = require('node:crypto');
 const CONFIG = 'config.toml',
   CATALOG = 'switcher-model-catalog.json',
-  BACKUP = 'config.toml.switcher-backup';
+  AUTH = 'auth.json',
+  BACKUP = '.switcher-backup';
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
+
+const claims = (token) => JSON.parse(Buffer.from(token.split('.')[1], 'base64url'));
+// 只取账号身份、邮箱、套餐和登录刷新时间，令牌本身不读出。
+// id 与切换器保存账号的编号算法相同（账号 ID + 用户 ID），本机据此认出是哪个已保存账号。
+function account(text) {
+  const auth = JSON.parse(text);
+  if (!auth.tokens?.access_token || !auth.tokens.account_id) return null;
+  const access = claims(auth.tokens.access_token),
+    id = auth.tokens.id_token ? claims(auth.tokens.id_token) : {},
+    a = access['https://api.openai.com/auth'] || id['https://api.openai.com/auth'] || {};
+  const userId = a.chatgpt_user_id || a.user_id || access.sub || id.sub || '';
+  return {
+    id: sha256(auth.tokens.account_id + '\0' + userId).slice(0, 20),
+    email: id.email || access['https://api.openai.com/profile']?.email || '',
+    plan: a.chatgpt_plan_type || 'unknown',
+    lastRefresh: auth.last_refresh || null,
+  };
+}
 
 // 只取状态展示需要的模型、provider 和 base_url；密钥等其他键不读出。
 function summarize(text) {
@@ -43,11 +62,20 @@ function writeAtomic(file, text) {
 }
 
 function createAgent({ home, version }) {
-  const config = path.join(home, CONFIG);
-  const current = () => (fs.existsSync(config) ? fs.readFileSync(config, 'utf8') : '');
+  const file = (name) => path.join(home, name);
+  const content = (name) => (fs.existsSync(file(name)) ? fs.readFileSync(file(name), 'utf8') : '');
+  const snapshot = (name) => {
+    const text = content(name);
+    return { text, sha256: sha256(text) };
+  };
+  // 第一次改某个文件前留一份原始备份，以后不再覆盖。
+  const backup = (name) => {
+    if (fs.existsSync(file(name)) && !fs.existsSync(file(name + BACKUP)))
+      writeAtomic(file(name + BACKUP), content(name));
+  };
   return {
     status() {
-      const exists = fs.existsSync(config);
+      const exists = fs.existsSync(file(CONFIG));
       return {
         agentVersion: version,
         host: os.hostname(),
@@ -55,31 +83,54 @@ function createAgent({ home, version }) {
         arch: process.arch,
         codexHome: home,
         configExists: exists,
-        current: exists ? summarize(current()) : null,
+        current: exists ? summarize(content(CONFIG)) : null,
+        account: fs.existsSync(file(AUTH)) ? account(content(AUTH)) : null,
       };
     },
-    read() {
-      const text = current();
-      return { text, sha256: sha256(text) };
-    },
+    read: () => snapshot(CONFIG),
+    readAuth: () => snapshot(AUTH),
+    // text 为 null 时只写登录（同步较新的登录），auth 缺省时只写配置。
     write(input) {
       const keys = Object.keys(input || {});
-      if (keys.some((key) => !['text', 'expectedSha256', 'catalog'].includes(key)))
-        throw Error('远端代理只接受 text、expectedSha256、catalog。');
-      if (typeof input.text !== 'string' || typeof input.expectedSha256 !== 'string')
+      if (keys.some((key) => !['text', 'expectedSha256', 'catalog', 'auth'].includes(key)))
+        throw Error('远端代理只接受 text、expectedSha256、catalog、auth。');
+      const config = input.text !== null;
+      if (config && (typeof input.text !== 'string' || typeof input.expectedSha256 !== 'string'))
         throw Error('缺少新配置或原配置校验值。');
-      if (input.catalog !== null && typeof input.catalog !== 'string')
+      if (input.catalog != null && typeof input.catalog !== 'string')
         throw Error('模型目录必须是文本或 null。');
-      // 读取到写入之间配置被改过（用户手动或其他工具），不覆盖，交给下一次切换重新读取。
-      if (sha256(current()) !== input.expectedSha256)
+      const auth = input.auth ?? null;
+      if (
+        auth &&
+        (Object.keys(auth).some((key) => !['text', 'expectedSha256'].includes(key)) ||
+          typeof auth.text !== 'string' ||
+          typeof auth.expectedSha256 !== 'string')
+      )
+        throw Error('登录只接受 text 和 expectedSha256。');
+      if (!config && !auth) throw Error('没有要写入的配置或登录。');
+      // 读取到写入之间文件被改过（用户手动、其他工具或 Codex 续期），不覆盖，交给下一次重新读取。
+      // 两个文件都先核对再写，任何一个不符都不写。
+      if (config && sha256(content(CONFIG)) !== input.expectedSha256)
         throw Error('服务器上的配置在读取后被修改过，未写入；请重新切换。');
+      if (auth && sha256(content(AUTH)) !== auth.expectedSha256)
+        throw Error('服务器上的登录在读取后被修改过，未写入；请重新切换。');
       fs.mkdirSync(home, { recursive: true, mode: 0o700 });
-      const backup = path.join(home, BACKUP);
-      if (fs.existsSync(config) && !fs.existsSync(backup)) writeAtomic(backup, current());
-      // 先写模型目录，配置引用它时文件已存在。
-      if (input.catalog !== null) writeAtomic(path.join(home, CATALOG), input.catalog);
-      writeAtomic(config, input.text);
-      return { ok: true, sha256: sha256(input.text) };
+      // 先写登录再写配置：配置改成官方登录时，登录文件已是目标账号。
+      if (auth) {
+        backup(AUTH);
+        writeAtomic(file(AUTH), auth.text);
+      }
+      if (config) {
+        backup(CONFIG);
+        // 先写模型目录，配置引用它时文件已存在。
+        if (input.catalog != null) writeAtomic(file(CATALOG), input.catalog);
+        writeAtomic(file(CONFIG), input.text);
+      }
+      return {
+        ok: true,
+        sha256: config ? sha256(input.text) : null,
+        authSha256: auth ? sha256(auth.text) : null,
+      };
     },
   };
 }
@@ -90,7 +141,7 @@ function activate(context) {
     home: path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex')),
     version: require('./package.json').version,
   });
-  for (const name of ['status', 'read', 'write'])
+  for (const name of ['status', 'read', 'readAuth', 'write'])
     context.subscriptions.push(
       vscode.commands.registerCommand('codexSwitcherRemote.' + name, (input) => agent[name](input)),
     );

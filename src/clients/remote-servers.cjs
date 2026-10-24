@@ -41,10 +41,23 @@ function agentStatus(value) {
     codexHome,
     configExists: !!value.configExists,
     current,
+    account: value.account
+      ? {
+          id: string(value.account.id),
+          email: string(value.account.email),
+          plan: string(value.account.plan),
+          lastRefresh: value.account.lastRefresh == null ? null : string(value.account.lastRefresh),
+        }
+      : null,
   };
 }
 function groups(bridgeHome) {
-  const found = new Map();
+  const found = new Map(),
+    known = new Set(
+      require('../accounts/accounts.cjs')
+        .readJson(path.join(bridgeHome, 'accounts', 'index.json'), [])
+        .map((row) => row.id),
+    );
   for (const row of require('./client-status.cjs').records(bridgeHome)) {
     if (!row.authority) continue;
     const agent = row.remoteAgent,
@@ -58,6 +71,9 @@ function groups(bridgeHome) {
         arch: agent?.arch || null,
         agentVersion: agent?.agentVersion || null,
         current: agent?.current || null,
+        account: agent?.account
+          ? { ...agent.account, id: known.has(agent.account.id) ? agent.account.id : null }
+          : null,
         windows: [],
       });
     found.get(key).windows.push({
@@ -118,11 +134,47 @@ function confirmsReload(input, previous) {
     !!input.remoteAgent
   );
 }
+function windowFor(bridgeHome, group) {
+  return require('./client-status.cjs')
+    .records(bridgeHome)
+    .find(
+      (row) =>
+        row.authority === group.authority &&
+        row.remoteType === 'ssh-remote' &&
+        row.remoteAgent?.codexHome === group.codexHome &&
+        row.remoteAgent.agentVersion === row.companionVersion,
+    );
+}
+function redactReason(error, ...secrets) {
+  let reason = String(error.message);
+  for (const value of secrets.flatMap((item) =>
+    typeof item === 'string'
+      ? [item]
+      : item
+        ? [item.OPENAI_API_KEY, ...Object.values(item.tokens || {})]
+        : [],
+  ))
+    if (typeof value === 'string' && value) reason = reason.split(value).join('[已隐藏]');
+  return redact(reason);
+}
+async function readAuth(bridgeHome, windowId) {
+  const result = await dispatch(bridgeHome, windowId, { type: 'remoteApply', step: 'readAuth' });
+  if (typeof result?.text !== 'string' || digest(result.text) !== result.sha256)
+    throw Error('远端登录读取结果或校验值无效');
+  let auth = null;
+  if (result.text) {
+    try {
+      auth = JSON.parse(result.text);
+    } catch {
+      throw Error('远端auth.json无法解析，未修改登录');
+    }
+  }
+  return { ...result, auth };
+}
 async function apply(bridgeHome, authority, source) {
   if (typeof authority !== 'string' || !/^ssh-remote\+[^\s/\\?#]{1,240}$/.test(authority))
     throw Error('请选择已连接的 Remote-SSH 服务器');
   const clients = require('./client-status.cjs'),
-    rows = clients.records(bridgeHome),
     targets = groups(bridgeHome).filter((group) => group.authority === authority);
   if (!targets.length) throw Error('这台服务器当前没有已连接的窗口');
   return Promise.all(
@@ -138,16 +190,11 @@ async function apply(bridgeHome, authority, source) {
         return { ...result, reason };
       };
       if (!group.agentVersion) return skip('尚未接入远端代理');
-      const window = rows.find(
-        (row) =>
-          row.authority === group.authority &&
-          row.remoteType === 'ssh-remote' &&
-          row.remoteAgent?.codexHome === group.codexHome &&
-          row.remoteAgent.agentVersion === row.companionVersion,
-      );
+      const window = windowFor(bridgeHome, group);
       if (!window) return skip('请更新远端代理，使其版本与伴随扩展一致');
       let original = '',
-        step = 'read';
+        step = 'read',
+        previousAuth = null;
       try {
         const read = await dispatch(bridgeHome, window.id, { type: 'remoteApply', step: 'read' });
         if (typeof read?.text !== 'string' || digest(read.text) !== read.sha256)
@@ -156,25 +203,54 @@ async function apply(bridgeHome, authority, source) {
         const paths = group.platform === 'win32' ? path.win32 : path.posix,
           catalogPath = source.catalog
             ? paths.join(group.codexHome, 'switcher-model-catalog.json')
-            : undefined,
+            : undefined;
+        let text;
+        if (source.auth) {
+          let config;
+          try {
+            config = require('smol-toml').parse(original);
+          } catch {
+            throw Error('服务器配置无法解析，未写入官方登录');
+          }
+          if (['keyring', 'ephemeral'].includes(config.cli_auth_credentials_store))
+            throw Error(
+              '服务器使用' +
+                config.cli_auth_credentials_store +
+                '凭证存储，写入auth.json不会生效；未修改配置或登录',
+            );
+          step = 'readAuth';
+          previousAuth = await readAuth(bridgeHome, window.id);
+          const official = !config.model_provider || config.model_provider === 'openai',
+            ownCatalog = paths.join(group.codexHome, 'switcher-model-catalog.json');
+          text = require('../config/core.cjs').prepareOfficialConfig(
+            original,
+            source.model ?? (official ? config.model : undefined),
+            config.model_catalog_json !== ownCatalog ? config.model_catalog_json : undefined,
+            'file',
+          );
+        } else
           text = require('../config/core.cjs').prepareConfig(
             original,
             source.provider,
             source.model,
             catalogPath,
-          ),
+          );
+        const authText = source.auth ? JSON.stringify(source.auth, null, 2) : null,
           write = {
             type: 'remoteApply',
             step: 'write',
             text,
             expectedSha256: read.sha256,
-            catalog: source.catalog,
+            catalog: source.catalog || null,
             reload: true,
+            ...(authText ? { auth: { text: authText, expectedSha256: previousAuth.sha256 } } : {}),
           };
         step = 'write';
         const written = await dispatch(bridgeHome, window.id, write);
         if (written?.ok !== true || written.sha256 !== digest(text))
           throw Error('远端未确认写入目标配置');
+        if (authText && written.authSha256 !== digest(authText))
+          throw Error('远端未确认写入目标登录');
         const others = group.windows.filter((item) => item.id !== window.id);
         if (others.length)
           clients.requestReload(null, bridgeHome, {
@@ -195,10 +271,14 @@ async function apply(bridgeHome, authority, source) {
         return { ...result, status: 'synced' };
       } catch (error) {
         // 远端错误可能引用配置；不把正文或本次密钥写入任务、日志和诊断。
-        let reason = String(error.message);
-        for (const value of [original, source.provider.apiKey])
-          if (value) reason = reason.split(value).join('[已隐藏]');
-        reason = redact(reason);
+        const reason = redactReason(
+          error,
+          original,
+          source.provider?.apiKey,
+          source.auth,
+          previousAuth?.text,
+          previousAuth?.auth,
+        );
         log(bridgeHome, 'remote.sync', {
           host: group.host,
           codexHome: group.codexHome,
@@ -219,5 +299,8 @@ module.exports = {
   dispatch,
   acknowledge,
   confirmsReload,
+  windowFor,
+  readAuth,
+  redactReason,
   apply,
 };

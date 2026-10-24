@@ -128,7 +128,6 @@
             id="tab-remotes"
             aria-controls="remote-panel"
             aria-selected="false"
-            hidden
           >
             远程服务器<small id="remote-count"></small>
           </button>
@@ -283,10 +282,9 @@
           hidden
         >
           <p class="note">
-            用 VS Code Remote-SSH 打开服务器时，服务器上的 Codex
-            使用服务器自己的配置，和本机切换互不影响。在这里给每台服务器单独选择
-            API。只能选检测为“直连”且填了密钥的自定义 API；官方账号和需要本机转换的 API
-            服务器用不了。
+            用 VS Code Remote-SSH 打开服务器时，服务器上的 Codex 使用服务器自己的配置。账号和 API
+            与本机共用同一份列表，但每台服务器单独切换，和本机互不跟随。需要本机转换的 API
+            服务器连不到，不能选。
           </p>
           <div id="remote-list"></div>
         </section>

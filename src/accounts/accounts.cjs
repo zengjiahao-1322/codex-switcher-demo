@@ -120,6 +120,8 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
     const rows = load(),
       index = rows.findIndex((a) => a.id === info.id),
       old = rows[index];
+    const saved = old && readJson(authFile(info.id));
+    if (saved && Date.parse(saved.last_refresh) > Date.parse(auth.last_refresh)) return old;
     const row = {
       ...old,
       ...info,
@@ -166,6 +168,35 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
       login: login ? { ...login } : null,
       switchJob: switchJob(bridgeHome),
     };
+  }
+  // 仅供后台互通模块使用；这些方法不作为HTTP动作，不向网页返回登录正文。
+  function getAuth(id) {
+    if (!load().some((row) => row.id === id)) throw Error('账号不存在，请重新选择');
+    return readJson(authFile(id));
+  }
+  function mergeAuth(auth) {
+    const info = identity(auth),
+      saved = getAuth(info.id);
+    if ((Date.parse(auth.last_refresh) || 0) <= (Date.parse(saved?.last_refresh) || 0))
+      return false;
+    remember(auth);
+    return true;
+  }
+  function syncLocalAuth(auth) {
+    const live = currentAuth();
+    if (identity(live)?.id !== identity(auth).id) return false;
+    let mode;
+    try {
+      mode = require('smol-toml').parse(
+        fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8'),
+      ).cli_auth_credentials_store;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw Error('本机配置无法解析，未同步登录');
+    }
+    if (['keyring', 'ephemeral'].includes(mode) || (keychainMode && keychainAuth)) return false;
+    if ((Date.parse(auth.last_refresh) || 0) <= (Date.parse(live?.last_refresh) || 0)) return false;
+    writeJson(liveFile, auth);
+    return true;
   }
   function apply(id, model, catalog) {
     const selected = load().find((a) => a.id === id);
@@ -376,6 +407,9 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
     status,
     syncCurrent,
     captureCurrent,
+    getAuth,
+    mergeAuth,
+    syncLocalAuth,
     apply,
     prepare,
     rename,

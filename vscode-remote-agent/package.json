@@ -11,6 +11,7 @@
   "activationEvents": [
     "onCommand:codexSwitcherRemote.status",
     "onCommand:codexSwitcherRemote.read",
+    "onCommand:codexSwitcherRemote.readAuth",
     "onCommand:codexSwitcherRemote.write"
   ],
   "extensionKind": [

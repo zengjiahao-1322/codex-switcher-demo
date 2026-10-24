@@ -10,6 +10,7 @@
   "install.ps1",
   "uninstall.ps1",
   "src/accounts/accounts.cjs",
+  "src/accounts/remote-credentials.cjs",
   "src/server/adapter.cjs",
   "web/js/main.js",
   "web/js/api.js",

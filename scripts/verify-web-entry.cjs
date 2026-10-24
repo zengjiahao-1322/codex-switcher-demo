@@ -131,6 +131,14 @@ async function loaded(page, url) {
     assert.ok((await page.locator('#update-detail').innerText()).includes('第 9 版'));
     assert.equal(await page.locator('#update-install').isVisible(), true);
     checked('update-banner-shows-newer-build');
+    // 远程服务器分页一直在；没有 SSH 窗口时打开就能看到接入步骤。
+    await page.locator('#tab-remotes').click();
+    await page
+      .locator('#remote-list')
+      .getByText('还没有检测到 Remote-SSH 窗口', { exact: false })
+      .waitFor({ state: 'visible' });
+    await page.locator('#tab-remotes').click();
+    checked('remote-tab-shows-guide-without-ssh-window');
     const expiredContext = await browser.newContext();
     const expired = await expiredContext.newPage();
     await expired.goto(base + '/#expired-shortcut-token');

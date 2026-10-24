@@ -13,7 +13,10 @@ function assetName(platform = process.platform, arch = process.arch) {
   throw Error('当前平台不支持一键升级。');
 }
 // 系统 curl 使用与官方会话相同的代理环境，不增加网络依赖。
-function transportFor(codexHome) {
+function transportFor(
+  codexHome,
+  { platform = process.platform, execute = require('node:util').promisify(cp.execFile) } = {},
+) {
   const request = async (url, output) => {
     const env = require('../platform/platform.cjs').codexEnv(codexHome);
     const args = [
@@ -26,16 +29,42 @@ function transportFor(codexHome) {
       '--max-time',
       '240',
     ];
+    // Schannel可访问吊销服务器时仍检查；仅忽略其离线状态，保留证书链和主机名验证。
+    if (platform === 'win32') args.push('--ssl-revoke-best-effort');
     if (output) args.push('--output', output);
     args.push(url);
-    const { stdout } = await require('node:util').promisify(cp.execFile)(
-      process.platform === 'win32' ? 'curl.exe' : '/usr/bin/curl',
-      args,
-      { env, encoding: 'utf8', windowsHide: true, timeout: 250000, maxBuffer: 2 * 1024 * 1024 },
-    );
-    return stdout;
+    try {
+      const { stdout } = await execute(platform === 'win32' ? 'curl.exe' : '/usr/bin/curl', args, {
+        env,
+        encoding: null,
+        windowsHide: true,
+        timeout: 250000,
+        maxBuffer: 2 * 1024 * 1024,
+      });
+      return stdout;
+    } catch (error) {
+      // Windows stderr可能是GBK；不把execFile附带的整条命令或乱码交给页面。
+      const detail = (error.stderr?.toString('latin1').match(/[\x20-\x7e]{5,}/g) || [])
+          .filter((text) =>
+            /curl:|schannel|CRYPT_|SSL|TLS|certificate|connect|resolve|timed out/i.test(text),
+          )
+          .join(' ')
+          .slice(0, 800),
+        code = error.code ?? null;
+      const message = /CRYPT_E_REVOCATION_OFFLINE/.test(detail)
+        ? '连接 GitHub 失败：证书吊销检查无法完成（网络无法访问吊销服务器）。'
+        : code === 28 || error.killed
+          ? '连接 GitHub 超时，请检查网络或代理后重试。'
+          : code === 60
+            ? '连接 GitHub 失败：服务器证书验证未通过。'
+            : '连接 GitHub 失败（curl 退出码 ' + code + '），请检查网络或代理。';
+      throw Object.assign(Error(message), { curl: { code, detail } });
+    }
   };
-  return { readJson: async (url) => JSON.parse(await request(url)), download: request };
+  return {
+    readJson: async (url) => JSON.parse((await request(url)).toString('utf8')),
+    download: request,
+  };
 }
 function extractArchive(archive, destination, platform = process.platform) {
   fs.mkdirSync(destination, { recursive: true });
@@ -183,6 +212,7 @@ function createUpdateManager({
           build,
           durationMs: Math.round(performance.now() - started),
           error: error.message,
+          ...(error.curl ? { curl: error.curl } : {}),
         });
       }
       return snapshot();
@@ -259,6 +289,7 @@ function createUpdateManager({
             build: metadata.build,
             durationMs: Math.round(performance.now() - started),
             error: error.message,
+            ...(error.curl ? { curl: error.curl } : {}),
           });
           throw error;
         }

@@ -24,12 +24,14 @@ async function runCompanion({
   commandsFor = () => null,
   confirmFor = () => false,
   pendingReload,
+  authText,
   until,
 }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-companion-remote-'));
   const home = path.join(root, 'server-codex');
   fs.mkdirSync(home);
   fs.writeFileSync(path.join(home, 'config.toml'), original);
+  if (authText) fs.writeFileSync(path.join(home, 'auth.json'), authText);
   const agent = createAgent({ home, version: '0.1.3' });
   const requests = [],
     executed = [],
@@ -134,6 +136,7 @@ test('SSH 窗口心跳附带远端代理状态（约定字段、不含密钥）�
   assert.equal(first.remoteType, 'ssh-remote');
   assert.equal(first.authority, 'ssh-remote+gpu-box');
   assert.deepEqual(Object.keys(first.remoteAgent).sort(), [
+    'account',
     'agentVersion',
     'arch',
     'codexHome',
@@ -142,6 +145,7 @@ test('SSH 窗口心跳附带远端代理状态（约定字段、不含密钥）�
     'host',
     'platform',
   ]);
+  assert.equal(first.remoteAgent.account, null);
   assert.deepEqual(first.remoteAgent.current, {
     model: 'gpt-5.5',
     modelProvider: 'hermes_bridge',
@@ -193,7 +197,7 @@ test('read → write：回执带结果，写入服务器配置，记下待确认
   assert.deepEqual(readResult, { text: original, sha256: sha(original) });
   const write = requests.find((r) => r.ack === 'cmd-write');
   assert.equal(write.ackStatus, 'completed');
-  assert.deepEqual(write.ackResult, { ok: true, sha256: sha(next) });
+  assert.deepEqual(write.ackResult, { ok: true, sha256: sha(next), authSha256: null });
   assert.equal(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), next);
   // 写入成功只回 completed，后台据此记为已请求重载；不再另发 reload_requested。
   assert.equal(requests.filter((r) => r.ack === 'cmd-write').length, 1);
@@ -238,6 +242,73 @@ test('写入被拒绝时回执 failed 和原因，不重载、不改文件', asy
   assert.equal(write.ackResult, undefined);
   assert.equal(executed.includes('workbench.action.reloadWindow'), false);
   assert.equal(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), original);
+});
+
+// 假的官方登录：令牌是只含声明的 JWT，内容不是真实凭证。
+const jwt = (payload) =>
+  ['e30', Buffer.from(JSON.stringify(payload)).toString('base64url'), 'sig'].join('.');
+const login = (refresh) =>
+  JSON.stringify({
+    tokens: {
+      id_token: jwt({
+        email: 'team@example.com',
+        'https://api.openai.com/auth': { chatgpt_plan_type: 'team' },
+      }),
+      access_token: jwt({ 'https://api.openai.com/auth': { chatgpt_plan_type: 'team' } }),
+      refresh_token: 'rt-remote-secret',
+      account_id: 'acct-1',
+    },
+    last_refresh: refresh,
+  });
+
+test('服务器有官方登录时心跳带账号摘要，不带令牌', async () => {
+  const { requests } = await runCompanion({
+    authText: login('2026-10-24T10:00:00Z'),
+    until: (r) => r.length >= 1,
+  });
+  const { account } = requests[0].remoteAgent;
+  assert.deepEqual(Object.keys(account).sort(), ['email', 'id', 'lastRefresh', 'plan']);
+  assert.equal(account.email, 'team@example.com');
+  assert.equal(account.lastRefresh, '2026-10-24T10:00:00Z');
+  assert.equal(JSON.stringify(requests).includes('rt-remote-secret'), false);
+});
+
+test('readAuth → 只写登录：回执带登录正文和结果，配置不动，不重载', async () => {
+  const older = login('2026-10-24T10:00:00Z'),
+    newer = login('2026-10-25T10:00:00Z');
+  const { requests, executed, home } = await runCompanion({
+    authText: older,
+    commandsFor: (reqs) => {
+      const read = reqs.find((r) => r.ack === 'cmd-read-auth');
+      if (!read)
+        return reqs.length === 1
+          ? { id: 'cmd-read-auth', type: 'remoteApply', step: 'readAuth' }
+          : null;
+      return reqs.some((r) => r.ack === 'cmd-sync')
+        ? null
+        : {
+            id: 'cmd-sync',
+            type: 'remoteApply',
+            step: 'write',
+            text: null,
+            expectedSha256: null,
+            catalog: null,
+            auth: { text: newer, expectedSha256: read.ackResult.sha256 },
+            reload: false,
+          };
+    },
+    until: acked('cmd-sync'),
+  });
+  assert.deepEqual(requests.find((r) => r.ack === 'cmd-read-auth').ackResult, {
+    text: older,
+    sha256: sha(older),
+  });
+  const sync = requests.find((r) => r.ack === 'cmd-sync');
+  assert.equal(sync.ackStatus, 'completed');
+  assert.deepEqual(sync.ackResult, { ok: true, sha256: null, authSha256: sha(newer) });
+  assert.equal(fs.readFileSync(path.join(home, 'auth.json'), 'utf8'), newer);
+  assert.equal(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), original);
+  assert.equal(executed.includes('workbench.action.reloadWindow'), false);
 });
 
 test('安装远端代理：写临时 VSIX 交给编辑器安装，装完删除临时文件', async () => {

@@ -254,17 +254,15 @@ function applySwitch(codexHome, provider, model, bridgeHome, catalogPath) {
 }
 // 切换到 Codex 官方登录（内置 openai provider，使用 auth.json 中的登录），可指定官方模型；保留 hermes_bridge 定义以便旧对话继续。
 // catalog：切回官方后 model_catalog_json 的值（用户原有设置；通常为空，即使用官方模型列表）。
-function applyOfficial(codexHome, model, catalog, credentialsStore) {
+function prepareOfficialConfig(current, model, catalog, credentialsStore) {
   // 新安装的插件可能尚无模型缓存；移除自定义模型后，由官方客户端选择默认模型。
   if (
     model !== undefined &&
     (typeof model !== 'string' || model.length > 200 || /[\r\n"]/.test(model))
   )
     throw new Error('官方模型名称无效');
-  const configPath = path.join(codexHome, 'config.toml');
-  const current = readOptional(configPath);
   const parsed = parseToml(current || '');
-  const next = editSelection(
+  return editSelection(
     current || '',
     {
       model: model?.trim() || undefined,
@@ -273,6 +271,11 @@ function applyOfficial(codexHome, model, catalog, credentialsStore) {
     },
     parsed.model_providers?.hermes_bridge,
   );
+}
+function applyOfficial(codexHome, model, catalog, credentialsStore) {
+  const configPath = path.join(codexHome, 'config.toml');
+  const current = readOptional(configPath);
+  const next = prepareOfficialConfig(current, model, catalog, credentialsStore);
   fs.mkdirSync(codexHome, { recursive: true });
   atomicWrite(configPath, next, current === null ? undefined : current);
   return { ok: true, model: model?.trim() || null, modelProvider: 'openai', configPath };
@@ -361,6 +364,7 @@ module.exports = {
   discoverProviders,
   publicProviders,
   prepareConfig,
+  prepareOfficialConfig,
   privateAcl,
   applySwitch: (home, p, m, b, cat) => withLock(home, () => applySwitch(home, p, m, b, cat)),
   restoreOfficial: (home, b) => withLock(home, () => restoreOfficial(home, b)),

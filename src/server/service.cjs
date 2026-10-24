@@ -13,7 +13,7 @@ const core = require('../config/core.cjs'),
   { findCodex, isTrustedCodex } = require('../platform/runtime.cjs'),
   autostart = require('../clients/autostart.cjs'),
   store = require('../config/providers.cjs');
-const { createAccounts } = require('../accounts/accounts.cjs'),
+const { createAccounts, identity } = require('../accounts/accounts.cjs'),
   { scheduleSwitch } = require('../clients/desktop-account.cjs');
 const { createUpdateManager } = require('./update.cjs');
 const operation = require('../config/switch-state.cjs');
@@ -48,6 +48,10 @@ function createService({
     codexHome,
     bridgeHome,
     codexExe: () => findCodex({ dataHome: bridgeHome }),
+  });
+  const remoteCredentials = require('../accounts/remote-credentials.cjs').createRemoteCredentials({
+    bridgeHome,
+    getAccounts: () => accounts,
   });
   const adapterPath = path.join(bridgeHome, 'adapter.json'),
     currentPath = path.join(bridgeHome, 'current.json');
@@ -592,6 +596,7 @@ function createService({
       const clients = require('../clients/client-status.cjs'),
         inventory = await clients.scanAsync(),
         status = clients.clientStatus(codexHome, bridgeHome, { inventory });
+      remoteCredentials.observeAll();
       let runtime = null;
       try {
         runtime = findCodex({ dataHome: bridgeHome });
@@ -636,6 +641,7 @@ function createService({
           bridgeHome,
           codexExe: () => findCodex({ dataHome: bridgeHome }),
         });
+        remoteCredentials.observeAll();
         versionCache = null;
         companionConnections.clear();
         return { message: '已改为读取 ' + home + '，后续切换只应用到此目录。' };
@@ -691,19 +697,32 @@ function createService({
         throw Error(reason);
       }
     },
-    remoteSwitch: async ({ authority, providerId, model }) => {
-      if (providerId === OFFICIAL) throw Error('远程服务器只支持可直连的自定义 API');
-      const p = provider(providerId);
-      if (store.access(bridgeHome, p).mode !== 'direct' || !p.apiKey)
-        throw Error('请选择已确认可直连且有密钥的自定义 API');
-      model = String(model || '').trim();
-      if (!model || model.length > 200) throw Error('请选择或填写模型');
-      const catalog = await catalogData(p, model);
-      const results = await require('../clients/remote-servers.cjs').apply(bridgeHome, authority, {
-        provider: p,
-        model,
-        catalog: catalog?.text || null,
-      });
+    remoteSwitch: async ({ authority, providerId, accountId, model }) => {
+      if ((providerId ? 1 : 0) + (accountId ? 1 : 0) !== 1)
+        throw Error('请选择一个官方账号或自定义 API');
+      let source;
+      if (accountId) {
+        const saved = accounts.status().items.find((row) => row.id === accountId);
+        if (!saved) throw Error('请选择已保存的官方账号');
+        const auth = accounts.getAuth(accountId);
+        if (!auth || identity(auth)?.id !== accountId) throw Error('官方账号登录记录不完整');
+        source = { auth, catalog: null };
+      } else {
+        if (providerId === OFFICIAL) throw Error('请选择一个已保存的官方账号');
+        const p = provider(providerId);
+        if (store.access(bridgeHome, p).mode !== 'direct' || !p.apiKey)
+          throw Error('请选择已确认可直连且有密钥的自定义 API');
+        model = String(model || '').trim();
+        if (!model || model.length > 200) throw Error('请选择或填写模型');
+        const catalog = await catalogData(p, model);
+        source = { provider: p, model, catalog: catalog?.text || null };
+      }
+      const results = await require('../clients/remote-servers.cjs').apply(
+        bridgeHome,
+        authority,
+        source,
+      );
+      if (accountId) remoteCredentials.observe(accountId);
       return { results };
     },
     reloadClients: (input) =>

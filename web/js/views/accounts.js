@@ -208,7 +208,7 @@ export function membership(a) {
     ? '会员已于 ' + day(a.subscriptionUntil) + ' 到期'
     : '会员到期 ' + day(a.subscriptionUntil);
 }
-function accountFacts(a) {
+export function accountFacts(a) {
   const facts = document.createElement('dl');
   facts.className = 'facts';
   const fact = (name, value, cls = '') => {

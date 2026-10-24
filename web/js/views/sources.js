@@ -89,13 +89,15 @@ let sourceFilter = 'all';
 const filterLabels = { all: '全部', account: '官方账号', api: 'API' };
 // 同一名称总是得到同一颜色，便于在长列表里区分首字母相同的来源。
 const hue = (text) => [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
-function sourceCard(o) {
+// 来源卡片由主界面和远程服务器页共用：using 是“正在使用”一类标签，blocked 是不能选的原因。
+export function sourceCard(o, { checked, using = null, model, blocked = '', onPick }) {
   const card = document.createElement('button');
   card.type = 'button';
   card.className = 'source-card';
   card.setAttribute('role', 'radio');
-  card.setAttribute('aria-checked', String(o.value === $('provider').value));
+  card.setAttribute('aria-checked', String(checked));
   card.dataset.source = o.value;
+  card.disabled = Boolean(blocked);
   // 首字母图标 + 名称行（名称与标签）+ 说明行 + 行尾额度。
   const avatar = document.createElement('span'),
     body = document.createElement('span'),
@@ -114,10 +116,7 @@ function sourceCard(o) {
   const a = o.account,
     p = o.provider;
   if (a) {
-    if (a.current && state.current.official)
-      head.append(
-        tag(a.pendingLogin ? '登录已更新 · 待应用' : '正在使用', a.pendingLogin ? 'muted' : 'done'),
-      );
+    if (using) head.append(using);
     if (membershipExpired(a)) head.append(tag('会员已到期', 'changed'));
     detail.textContent = [
       (a.label === a.email ? 'ChatGPT ' : a.email + ' · ') + a.plan,
@@ -144,19 +143,36 @@ function sourceCard(o) {
   } else if (p) {
     head.append(accessTag(p));
     if (!p.hasKey && !p.local) head.append(tag('缺少密钥', 'changed'));
-    if (p.inUse) head.append(tag('正在使用', 'done'));
-    detail.textContent =
-      p.baseUrl.replace(/^https?:\/\//, '') + ' · ' + ((p.inUse && state.current.model) || p.model);
+    if (using) head.append(using);
+    detail.textContent = blocked || p.baseUrl.replace(/^https?:\/\//, '') + ' · ' + model;
   } else detail.textContent = '还没有保存的账号，选中后可添加';
   body.append(head, detail);
-  card.onclick = () => {
-    status('');
-    $('provider').value = o.value;
-    selected();
-    // 窄屏上详情在列表下方；宽屏时详情固定在旁边，不会滚动。
-    $('source-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  };
+  card.onclick = onPick;
   return card;
+}
+function localCard(o) {
+  const a = o.account,
+    p = o.provider;
+  return sourceCard(o, {
+    checked: o.value === $('provider').value,
+    using:
+      a?.current && state.current.official
+        ? tag(
+            a.pendingLogin ? '登录已更新 · 待应用' : '正在使用',
+            a.pendingLogin ? 'muted' : 'done',
+          )
+        : p?.inUse
+          ? tag('正在使用', 'done')
+          : null,
+    model: p && ((p.inUse && state.current.model) || p.model),
+    onPick: () => {
+      status('');
+      $('provider').value = o.value;
+      selected();
+      // 窄屏上详情在列表下方；宽屏时详情固定在旁边，不会滚动。
+      $('source-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    },
+  });
 }
 export function renderSources() {
   const items = accountData?.items || [],
@@ -215,7 +231,7 @@ export function renderSources() {
       }
       $('source-list').append(label);
     }
-    $('source-list').append(sourceCard(o));
+    $('source-list').append(localCard(o));
   }
   if (!shown.length) {
     const empty = document.createElement('p');

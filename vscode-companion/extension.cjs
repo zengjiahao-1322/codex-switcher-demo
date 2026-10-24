@@ -73,6 +73,12 @@ function activate(context) {
           modelProvider: s.current.modelProvider,
           baseUrl: s.current.baseUrl,
         },
+        account: s.account && {
+          id: s.account.id,
+          email: s.account.email,
+          plan: s.account.plan,
+          lastRefresh: s.account.lastRefresh,
+        },
       };
     } catch {
       remoteAgent = null;
@@ -176,17 +182,23 @@ function activate(context) {
     }, 200);
   }
   // 远端读写：转调服务器端远端代理的命令，结果只放在回执里交给后台。
+  // read 读配置，readAuth 读官方登录；write 可同时带配置和登录，text 为 null 时只写登录。
   async function remoteApply(c, data, command) {
     let result;
     try {
       result =
-        command.step === 'read'
-          ? await vscode.commands.executeCommand('codexSwitcherRemote.read')
-          : await vscode.commands.executeCommand('codexSwitcherRemote.write', {
+        command.step === 'write'
+          ? await vscode.commands.executeCommand('codexSwitcherRemote.write', {
               text: command.text,
               expectedSha256: command.expectedSha256,
               catalog: command.catalog,
-            });
+              auth: command.auth ?? null,
+            })
+          : await vscode.commands.executeCommand(
+              command.step === 'readAuth'
+                ? 'codexSwitcherRemote.readAuth'
+                : 'codexSwitcherRemote.read',
+            );
     } catch (error) {
       await ack(c, data, command.id, 'failed', { ackError: error.message });
       return;

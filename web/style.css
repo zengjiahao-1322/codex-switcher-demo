@@ -176,9 +176,15 @@ h1 {
 .banner button.primary:hover:not(:disabled) {
   background: #e4e4e7;
 }
+/* 远程服务器：顶部服务器标签，每台一张和主界面同样的切换卡。 */
+.remote-servers {
+  margin-bottom: 16px;
+  max-width: 100%;
+  overflow-x: auto;
+}
 .remote-card {
   border-top: 1px solid var(--hairline);
-  padding: 16px 0;
+  padding: 16px 0 0;
 }
 .remote-card > div:first-child {
   display: flex;
@@ -193,21 +199,35 @@ h1 {
 .remote-card > button {
   margin-top: 10px;
 }
-.remote-form {
+.remote-chooser {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: 8px;
-  margin-top: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 20px;
+  align-items: start;
+  margin-top: 16px;
 }
-.remote-form select,
-.remote-form input {
-  margin: 0;
+.remote-sources {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: var(--radius);
+  box-shadow: var(--ring);
 }
-.remote-form small {
-  grid-column: 1 / -1;
+.remote-detail h3 {
+  font-size: 18px;
+  font-weight: 650;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
 }
-.remote-form button {
-  height: 40px;
+.remote-detail input {
+  margin-top: 6px;
+}
+.remote-detail .hint {
+  display: block;
+  margin: 12px 0;
 }
 .settings-title {
   font-size: 14px;
@@ -1145,8 +1165,11 @@ footer {
   #source-list {
     max-height: none;
   }
-  .remote-form {
-    grid-template-columns: 1fr;
+  .remote-chooser {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .remote-sources {
+    max-height: none;
   }
   .source-panel {
     position: static;

@@ -438,3 +438,89 @@ test('代理安装与诊断导出记录脱敏原因和远端概况，不导出�
   assert.equal(exported.text.includes('ackResult'), false);
   assert.equal(fileText(path.join(home, 'clients')).includes('sk-fixture-install-secret'), false);
 });
+
+test('官方remoteSwitch读写auth与config，显式keyring服务器拒绝且不改服务器文件', async (t) => {
+  const home = fixture(t),
+    auth = {
+      auth_mode: 'chatgpt',
+      tokens: {
+        account_id: 'workspace-official',
+        access_token:
+          'x.' +
+          Buffer.from(
+            JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_user_id: 'official-user' } }),
+          ).toString('base64url') +
+          '.x',
+        id_token:
+          'x.' +
+          Buffer.from(
+            JSON.stringify({
+              email: 'official@example.test',
+              'https://api.openai.com/auth': { chatgpt_user_id: 'official-user' },
+            }),
+          ).toString('base64url') +
+          '.x',
+        refresh_token: 'refresh-official',
+      },
+      last_refresh: new Date().toISOString(),
+    },
+    accountId = require('../src/accounts/accounts.cjs').identity(auth).id;
+  fs.mkdirSync(path.join(home, 'accounts', accountId), { recursive: true });
+  writeJson(path.join(home, 'accounts', 'index.json'), [
+    { id: accountId, email: 'official@example.test' },
+  ]);
+  writeJson(path.join(home, 'accounts', accountId, 'auth.json'), auth);
+  const input = registration('remote-official-window');
+  input.remoteAgent.account = {
+    id: accountId,
+    email: 'official@example.test',
+    plan: 'plus',
+    lastRefresh: auth.last_refresh,
+  };
+  clients.heartbeat(home, input);
+  const original =
+    'model="remote-api-model"\nmodel_provider="hermes_bridge"\n\n[model_providers.hermes_bridge]\nname="Remote API"\nbase_url="https://api.example.test/v1"\nexperimental_bearer_token="old-secret"\n';
+  let pending = remote.apply(home, input.authority, { auth }),
+    command = await nextCommand(home, input.id);
+  assert.equal(command.step, 'read');
+  ack(home, input, command, { text: original, sha256: sha(original) });
+  command = await nextCommand(home, input.id);
+  assert.equal(command.step, 'readAuth');
+  ack(home, input, command, { text: JSON.stringify(auth), sha256: sha(JSON.stringify(auth)) });
+  command = await nextCommand(home, input.id);
+  assert.equal(command.step, 'write');
+  assert.equal(command.reload, true);
+  assert.equal(command.text.includes('model_provider = "hermes_bridge"'), false);
+  assert.equal(command.text.includes('remote-api-model'), false);
+  assert.equal(command.text.includes('model_providers.hermes_bridge'), true);
+  assert.equal(command.auth.text.includes('refresh-official'), true);
+  assert.equal(command.auth.expectedSha256, sha(JSON.stringify(auth)));
+  ack(home, input, command, {
+    ok: true,
+    sha256: sha(command.text),
+    authSha256: sha(command.auth.text),
+  });
+  assert.deepEqual(await pending, [{ codexHome: input.remoteAgent.codexHome, status: 'synced' }]);
+  // 常驻服务动作再次覆盖账号 id 边界，不能按邮箱或工作区猜测。
+  const service = require('../src/server/service.cjs').createService({
+      codexHome: path.join(home, 'local-codex'),
+      bridgeHome: home,
+    }),
+    second = registration('remote-official-service-window');
+  second.remoteAgent.account = input.remoteAgent.account;
+  clients.heartbeat(home, second);
+  const serviceRun = service.actions.remoteSwitch({ authority: second.authority, accountId });
+  command = await nextCommand(home, second.id);
+  ack(home, second, command, { text: original, sha256: sha(original) });
+  command = await nextCommand(home, second.id);
+  ack(home, second, command, { text: JSON.stringify(auth), sha256: sha(JSON.stringify(auth)) });
+  command = await nextCommand(home, second.id);
+  ack(home, second, command, {
+    ok: true,
+    sha256: sha(command.text),
+    authSha256: sha(command.auth.text),
+  });
+  assert.deepEqual(await serviceRun, {
+    results: [{ codexHome: second.remoteAgent.codexHome, status: 'synced' }],
+  });
+});
