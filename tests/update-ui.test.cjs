@@ -3,8 +3,8 @@ const test = require('node:test'),
   assert = require('node:assert/strict');
 const { runPage } = require('./fake-page.cjs');
 
-const current = { version: '0.1.3', build: 'old' };
-const newer = { version: '0.1.3', build: 'new', notes: '修复切换失败' };
+const current = { version: '0.1.3', build: 'old', sequence: 120 };
+const newer = { version: '0.1.3', build: 'new', sequence: 128, notes: '修复切换失败' };
 function backend(update, calls = {}) {
   return async (route) => {
     if (route === 'state')
@@ -38,9 +38,12 @@ test('有新构建时顶部提示，点“立即更新”后显示正在安装',
   });
   assert.equal(page.byId('update-banner').hidden, false);
   assert.equal(page.byId('update-title').textContent, '有新版本可用');
-  assert.equal(page.byId('update-detail').textContent, '0.1.3 · 构建 new\n修复切换失败');
+  assert.equal(page.byId('update-detail').textContent, '0.1.3（第 128 版）\n修复切换失败');
   assert.equal(page.byId('update-install').hidden, false);
-  assert.match(page.byId('update-status').textContent, /^有新版本：0\.1\.3 · 构建 new · 检查于 /);
+  assert.match(
+    page.byId('update-status').textContent,
+    /^当前第 120 版，有新版本：0\.1\.3（第 128 版） · 检查于 /,
+  );
 
   await page.byId('update-install').onclick();
   assert.equal(page.calls('installUpdate').length, 1);
@@ -71,7 +74,7 @@ test('已是最新或检查失败时不占用首屏，只在设置里说明', as
     respond: backend(() => ({ current, latest: null, status: 'idle' })),
   });
   assert.equal(latest.byId('update-banner').hidden, true);
-  assert.match(latest.byId('update-status').textContent, /^已是最新版本 · 检查于 /);
+  assert.match(latest.byId('update-status').textContent, /^已是最新版本（第 \d+ 版） · 检查于 /);
 
   const offline = {
     current,
@@ -85,6 +88,37 @@ test('已是最新或检查失败时不占用首屏，只在设置里说明', as
   assert.equal(
     failed.byId('update-status').textContent,
     '检查或安装更新失败：更新信息请求失败（HTTP 503）',
+  );
+});
+
+// 用户在开发目录里看到“有新版本”并点了更新，结果报“开发目录请用 git 更新”。
+test('开发目录不提示一键升级，只在设置里说明用 git 更新', async () => {
+  const dev = {
+    current,
+    latest: newer,
+    checkedAt: new Date().toISOString(),
+    status: 'idle',
+    dev: true,
+  };
+  const page = await runPage({ update: dev, respond: backend(() => dev) });
+  assert.equal(page.byId('update-banner').hidden, true);
+  assert.match(
+    page.byId('update-status').textContent,
+    /^这是开发目录，请用 git 更新，不使用一键升级。 最新发布：0\.1\.3（第 128 版） · 检查于 /,
+  );
+});
+
+test('发布说明按纯文本显示，不露出 Markdown 标题符号', async () => {
+  const update = {
+    current,
+    latest: { ...newer, notes: '# Codex Switcher 0.1.3\n## 新功能' },
+    checkedAt: new Date().toISOString(),
+    status: 'available',
+  };
+  const page = await runPage({ update, respond: backend(() => update) });
+  assert.equal(
+    page.byId('update-detail').textContent,
+    '0.1.3（第 128 版）\nCodex Switcher 0.1.3\n新功能',
   );
 });
 

@@ -23,15 +23,32 @@ const sharedEditors = () => ({
 });
 const jwt = (payload) =>
   'fixture.' + Buffer.from(JSON.stringify(payload)).toString('base64url') + '.signature';
-function auth(user, refresh = 'refresh-' + user, account = 'workspace-' + user) {
+function auth(user, refresh = 'refresh-' + user, account = 'workspace-' + user, declaration = {}) {
   return {
     auth_mode: 'chatgpt',
     tokens: {
       account_id: account,
       access_token: jwt({
-        'https://api.openai.com/auth': { chatgpt_user_id: user, chatgpt_plan_type: 'plus' },
+        'https://api.openai.com/auth': {
+          amr: ['pwd'],
+          chatgpt_account_id: account,
+          chatgpt_account_user_id: user,
+          chatgpt_compute_residency: 'test',
+          chatgpt_user_id: user,
+          chatgpt_plan_type: declaration.chatgpt_plan_type || 'plus',
+          poid: user,
+          user_id: user,
+        },
       }),
-      id_token: jwt({ email: user + '@example.test' }),
+      id_token: jwt({
+        email: user + '@example.test',
+        'https://api.openai.com/auth': {
+          chatgpt_plan_type: declaration.chatgpt_plan_type || 'plus',
+          chatgpt_subscription_active_start: declaration.chatgpt_subscription_active_start,
+          chatgpt_subscription_active_until: declaration.chatgpt_subscription_active_until,
+          chatgpt_subscription_last_checked: declaration.chatgpt_subscription_last_checked,
+        },
+      }),
       refresh_token: refresh,
     },
     last_refresh: new Date().toISOString(),
@@ -86,6 +103,31 @@ test('account list captures current login, distinguishes workspaces, and never r
   assert.equal(s.items.filter((x) => x.current).length, 1);
   a.remove(aliceId);
   assert.equal(a.status().items.length, 1);
+});
+
+test('status reads the latest saved declarations for a non-current account', (t) => {
+  const f = configured(t),
+    a = createAccounts(f);
+  const alice = a.status().items[0];
+  writeJson(path.join(f.codexHome, 'auth.json'), auth('bob'));
+  const bob = a.status().items.find((row) => row.current);
+  writeJson(path.join(f.codexHome, 'auth.json'), auth('alice'));
+  const until = '2026-11-30T00:00:00.000Z',
+    checked = '2026-10-24T10:03:00.000Z',
+    bobAuth = auth('bob', 'new-refresh-bob', 'workspace-bob', {
+      chatgpt_plan_type: 'free',
+      chatgpt_subscription_active_until: until,
+      chatgpt_subscription_last_checked: checked,
+    });
+  writeJson(path.join(f.bridgeHome, 'accounts', bob.id, 'auth.json'), bobAuth);
+  const rows = a.status().items,
+    saved = rows.find((row) => row.id === bob.id);
+  assert.equal(rows.find((row) => row.id === alice.id).current, true);
+  assert.equal(saved.plan, 'free');
+  assert.equal(saved.subscriptionUntil, until);
+  assert.equal(saved.subscriptionCheckedAt, checked);
+  assert.equal(saved.refreshedAt, bobAuth.last_refresh);
+  assert.equal(JSON.stringify(saved).includes('new-refresh-bob'), false);
 });
 
 test('switch waits for desktop exit, preserves refreshed outgoing credentials, and restores official model/catalog', async (t) => {

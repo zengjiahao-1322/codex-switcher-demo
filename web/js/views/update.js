@@ -15,16 +15,21 @@ const pollState = () =>
 export function renderUpdate(u) {
   update = u;
   const latest = u.latest,
-    target = latest && latest.version + ' · 构建 ' + latest.build;
+    // 版本号固定为 0.1.3 期间，用只增不减的发布序号区分新旧。
+    target = latest && latest.version + '（第 ' + latest.sequence + ' 版）';
+  // 发布说明按纯文本显示，去掉 Markdown 标题符号。
+  const notes = latest?.notes ? '\n' + latest.notes.replace(/^#+\s*/gm, '') : '';
   const texts = {
-    available: ['有新版本可用', target + (latest?.notes ? '\n' + latest.notes : '')],
+    available: ['有新版本可用', target + notes],
     downloading: ['正在下载更新…', '下载并校验完成后会自动安装，期间可以继续使用。'],
     installing: ['正在安装更新', '切换器会自动重启并打开新页面，这个页面随后可以关闭。'],
     error: ['更新失败', u.error],
   };
-  // 检查失败但没有可装的新版本时，只在设置里说明，不占用首屏。
+  // 开发目录用 git 更新，不提示安装；检查失败但没有可装的新版本时，只在设置里说明，不占用首屏。
   const shown =
-    texts[u.status] && (u.status !== 'error' || (latest && latest.build !== u.current.build));
+    !u.dev &&
+    texts[u.status] &&
+    (u.status !== 'error' || (latest && latest.build !== u.current.build));
   $('update-banner').hidden = !shown;
   if (shown) {
     $('update-title').textContent = texts[u.status][0];
@@ -32,13 +37,17 @@ export function renderUpdate(u) {
     $('update-install').hidden = !['available', 'error'].includes(u.status);
     $('update-install').textContent = u.status === 'error' ? '重试' : '立即更新';
   }
-  $('update-status').textContent =
-    u.status === 'checking'
+  $('update-status').textContent = u.dev
+    ? '这是开发目录，请用 git 更新，不使用一键升级。' +
+      (latest ? ' 最新发布：' + target + ' · 检查于 ' + time(u.checkedAt) : '')
+    : u.status === 'checking'
       ? '正在检查更新…'
       : u.status === 'error'
         ? '检查或安装更新失败：' + u.error
         : latest
-          ? (u.status === 'available' ? '有新版本：' + target : '已是最新版本') +
+          ? (u.status === 'available'
+              ? '当前第 ' + u.current.sequence + ' 版，有新版本：' + target
+              : '已是最新版本（第 ' + u.current.sequence + ' 版）') +
             ' · 检查于 ' +
             time(u.checkedAt)
           : '尚未检查更新。';

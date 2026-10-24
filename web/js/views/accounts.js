@@ -180,24 +180,98 @@ export function quotaNode(q, compact = false) {
     );
   return box;
 }
+const day = (iso) =>
+  new Date(iso).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+const stamp = (iso) =>
+  new Date(iso).toLocaleString('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+export function ago(iso) {
+  const minutes = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  return minutes < 1
+    ? '刚刚'
+    : minutes < 60
+      ? minutes + ' 分钟前'
+      : minutes < 1440
+        ? Math.round(minutes / 60) + ' 小时前'
+        : Math.round(minutes / 1440) + ' 天前';
+}
+// 会员到期时间来自登录令牌（官方最近一次核对订阅时写入）；没有这项时不显示。
+export const membershipExpired = (a) =>
+  !!a.subscriptionUntil && Date.parse(a.subscriptionUntil) < Date.now();
+export function membership(a) {
+  if (!a.subscriptionUntil) return '';
+  return membershipExpired(a)
+    ? '会员已于 ' + day(a.subscriptionUntil) + ' 到期'
+    : '会员到期 ' + day(a.subscriptionUntil);
+}
+function accountFacts(a) {
+  const facts = document.createElement('dl');
+  facts.className = 'facts';
+  const fact = (name, value, cls = '') => {
+    const dt = document.createElement('dt'),
+      dd = document.createElement('dd');
+    dt.textContent = name;
+    dd.textContent = value;
+    dd.className = cls;
+    facts.append(dt, dd);
+  };
+  fact('套餐', a.plan);
+  if (a.subscriptionUntil)
+    fact(
+      '会员到期',
+      stamp(a.subscriptionUntil) +
+        (membershipExpired(a)
+          ? '（已到期）'
+          : '（还剩 ' +
+            Math.ceil((Date.parse(a.subscriptionUntil) - Date.now()) / 86400000) +
+            ' 天）'),
+      membershipExpired(a) ? 'warn' : '',
+    );
+  fact(
+    '额度读取',
+    a.quota?.checkedAt
+      ? stamp(a.quota.checkedAt) + '（' + ago(a.quota.checkedAt) + '）'
+      : '尚未读取',
+  );
+  if (a.refreshedAt) fact('登录刷新', stamp(a.refreshedAt) + '（' + ago(a.refreshedAt) + '）');
+  return facts;
+}
 export function renderSelectedQuota() {
   const a = selectedAccount(),
     box = $('official-quota');
   box.hidden = !officialTarget() || !a;
   box.replaceChildren();
   if (a) {
-    box.append(quotaNode(a.quota));
+    box.append(accountFacts(a), quotaNode(a.quota));
     const busy = quotaRefreshing.has(a.id),
       b = rowButton(busy ? '正在读取…' : '刷新此账号额度', () => refreshQuota(a.id), accountStatus);
     b.disabled = busy;
     box.append(b);
   }
 }
-export async function refreshQuota(id) {
-  // 批量刷新拆成多个账号请求，谁先返回就先更新谁；不重绘来源选择器，
-  // 也不触发全局“切换中”状态，避免覆盖用户正在编辑的模型或来源。
+// 读取额度时官方可能续期令牌，套餐和会员时间随之变化；只合并这些字段，
+// 不替换整份账号数据，避免覆盖其他账号正在进行的刷新结果。
+const ACCOUNT_INFO = ['email', 'plan', 'subscriptionUntil', 'subscriptionCheckedAt', 'refreshedAt'];
+async function syncAccountInfo(ids) {
+  const fresh = await api('accounts', {});
+  for (const id of ids) {
+    const row = accountData.items.find((a) => a.id === id),
+      next = fresh.items.find((a) => a.id === id);
+    if (row && next) for (const key of ACCOUNT_INFO) row[key] = next[key];
+  }
+  renderAccounts();
+}
+export async function refreshQuota(id, sync = true) {
+  // 批量刷新拆成多个账号请求，谁先返回就先更新谁，全部结束后统一同步一次账号信息；
+  // 不触发全局“切换中”状态，避免覆盖用户正在编辑的模型或来源。
   if (!id) {
-    await Promise.all((accountData?.items || []).map((a) => refreshQuota(a.id)));
+    const ids = (accountData?.items || []).map((a) => a.id);
+    await Promise.all(ids.map((one) => refreshQuota(one, false)));
+    await syncAccountInfo(ids);
     return;
   }
   if (quotaRefreshing.has(id)) return;
@@ -214,6 +288,7 @@ export async function refreshQuota(id) {
     quotaRefreshing.delete(id);
     renderAccounts();
   }
+  if (sync) await syncAccountInfo([id]);
 }
 export function renderAccounts() {
   if (!accountData) return;

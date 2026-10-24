@@ -39,10 +39,12 @@ test('校验和失败时不触碰安装目录', async () => {
     projectDir: target,
     build: 'aaaaaaaaaaaa',
     version: '0.1.3',
+    sequence: 120,
     transport: {
       readJson: async () => ({
         version: '0.1.3',
         build: 'bbbbbbbbbbbb',
+        sequence: 128,
         commit: 'c'.repeat(40),
         publishedAt: new Date().toISOString(),
         notes: 'test',
@@ -136,6 +138,199 @@ test('升级拒绝外部地址和开发目录', async () => {
   await assert.rejects(manager.actions.installUpdate({}), /开发目录/);
 });
 
+test('开发目录检查更新时保持 idle 并标记 dev', async () => {
+  const root = temp('dev'),
+    bridge = path.join(root, 'bridge'),
+    project = path.join(root, 'project');
+  fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+  const manager = createUpdateManager({
+    bridgeHome: bridge,
+    codexHome: path.join(root, 'codex'),
+    projectDir: project,
+    build: 'a'.repeat(12),
+    version: '0.1.3',
+    platform: 'win32',
+    arch: 'x64',
+    transport: {
+      readJson: async () => ({
+        version: '0.1.3',
+        build: 'b'.repeat(12),
+        sequence: 128,
+        commit: 'c'.repeat(40),
+        publishedAt: new Date().toISOString(),
+        notes: 'test',
+        assets: { 'codex-switcher-windows-x64.zip': 'd'.repeat(64) },
+      }),
+    },
+  });
+  const state = await manager.actions.checkUpdate();
+  assert.equal(state.dev, true);
+  assert.equal(state.current.sequence, null);
+  assert.equal(state.status, 'idle');
+  assert.equal(state.latest.build, 'b'.repeat(12));
+});
+
+test('只有更大发行序号可升级，相同或回退序号不下载也不改文件', async () => {
+  for (const [sequence, expected] of [
+    [128, 'available'],
+    [120, 'idle'],
+    [119, 'idle'],
+  ]) {
+    const root = temp('order'),
+      target = path.join(root, 'installed');
+    write(path.join(target, 'keep.txt'), 'unchanged');
+    const manager = createUpdateManager({
+      bridgeHome: path.join(root, 'bridge'),
+      projectDir: target,
+      codexHome: path.join(root, 'codex'),
+      version: '0.1.3',
+      build: 'a'.repeat(12),
+      sequence: 120,
+      platform: 'win32',
+      arch: 'x64',
+      transport: {
+        readJson: async () => ({
+          version: '0.1.3',
+          build: 'b'.repeat(12),
+          sequence,
+          commit: 'c'.repeat(40),
+          publishedAt: new Date().toISOString(),
+          notes: 'test',
+          assets: { 'codex-switcher-windows-x64.zip': 'd'.repeat(64) },
+        }),
+        download: async () => assert.fail('相同或回退序号不得下载'),
+      },
+    });
+    const result = await manager.actions.checkUpdate();
+    assert.equal(result.status, expected);
+    assert.equal(result.current.sequence, 120);
+    assert.equal(result.latest.sequence, sequence);
+    if (expected === 'idle')
+      await assert.rejects(manager.actions.installUpdate({}), /不会安装相同或更旧/);
+    assert.equal(fs.readFileSync(path.join(target, 'keep.txt'), 'utf8'), 'unchanged');
+  }
+});
+
+test('发布序号缺失、非整数或非正数时拒绝元数据', async () => {
+  for (const sequence of [undefined, '128', 1.5, 0, -1]) {
+    const root = temp('metadata');
+    const manager = createUpdateManager({
+      bridgeHome: path.join(root, 'bridge'),
+      projectDir: path.join(root, 'installed'),
+      codexHome: path.join(root, 'codex'),
+      version: '0.1.3',
+      build: 'a'.repeat(12),
+      sequence: 120,
+      platform: 'win32',
+      arch: 'x64',
+      transport: {
+        readJson: async () => ({
+          version: '0.1.3',
+          build: 'b'.repeat(12),
+          sequence,
+          commit: 'c'.repeat(40),
+          publishedAt: new Date().toISOString(),
+          notes: 'test',
+          assets: { 'codex-switcher-windows-x64.zip': 'd'.repeat(64) },
+        }),
+      },
+    });
+    const result = await manager.actions.checkUpdate();
+    assert.equal(result.status, 'error');
+    assert.match(result.error, /元数据不完整/);
+  }
+});
+
+test('包内发行序号或构建号与元数据不同，不启动安装且保留原文件', async () => {
+  for (const packaged of [
+    { sequence: 127, id: 'b'.repeat(12) },
+    { sequence: 128, id: 'c'.repeat(12) },
+  ]) {
+    const root = temp('package-info'),
+      target = path.join(root, 'installed');
+    write(path.join(target, 'keep.txt'), 'unchanged');
+    const payload = 'verified download';
+    const manager = createUpdateManager({
+      bridgeHome: path.join(root, 'bridge'),
+      projectDir: target,
+      codexHome: path.join(root, 'codex'),
+      version: '0.1.3',
+      build: 'a'.repeat(12),
+      sequence: 120,
+      platform: 'win32',
+      arch: 'x64',
+      transport: {
+        readJson: async () => ({
+          version: '0.1.3',
+          build: 'b'.repeat(12),
+          sequence: 128,
+          commit: 'c'.repeat(40),
+          publishedAt: new Date().toISOString(),
+          notes: 'test',
+          assets: {
+            'codex-switcher-windows-x64.zip': crypto
+              .createHash('sha256')
+              .update(payload)
+              .digest('hex'),
+          },
+        }),
+        download: async (_url, file) => write(file, payload),
+      },
+      extract: async (_archive, destination) => {
+        packageTree(
+          path.join(destination, 'Codex Switcher'),
+          ['release-files.json', 'src/platform/build-info.cjs'],
+          {
+            'src/platform/build-info.cjs': `exports.buildInfo=()=>(${JSON.stringify(packaged)});`,
+          },
+        );
+      },
+      launchWorker: async () => assert.fail('包内构建信息不符，不得启动安装'),
+      shutdown: () => assert.fail('包内构建信息不符，不得关闭后台'),
+    });
+    await manager.actions.installUpdate({});
+    await manager.finished();
+    assert.equal(manager.state().status, 'error');
+    assert.match(manager.state().error, packaged.sequence !== 128 ? /发行序号/ : /构建号/);
+    assert.equal(fs.readFileSync(path.join(target, 'keep.txt'), 'utf8'), 'unchanged');
+  }
+});
+
+test('包内构建信息与 release.json 使用同一工作流序号和构建号', () => {
+  const root = temp('build'),
+    project = path.join(root, 'package'),
+    sequence = 321;
+  const { buildInfo, releaseInfo } = require('../src/platform/build-info.cjs');
+  for (const relative of require('../release-files.json')) {
+    write(path.join(project, relative), fs.readFileSync(path.join(__dirname, '..', relative)));
+  }
+  write(path.join(project, 'src/platform/release-info.json'), releaseInfo(sequence));
+  const packaged = JSON.parse(
+    cp.execFileSync(
+      process.execPath,
+      ['-e', "console.log(JSON.stringify(require('./src/platform/build-info.cjs').buildInfo()))"],
+      { cwd: project, encoding: 'utf8' },
+    ),
+  );
+  assert.deepEqual(packaged, buildInfo(sequence));
+  assert.notEqual(buildInfo(sequence + 1).id, packaged.id, '序号必须参与构建号计算');
+  assert.equal(buildInfo().sequence, null, '生成发行元数据不能修改源码占位文件');
+  const artifacts = path.join(root, 'artifacts'),
+    output = path.join(root, 'release.json');
+  write(path.join(artifacts, 'codex-switcher-windows-x64.zip'), 'fixture package');
+  cp.execFileSync(
+    process.execPath,
+    [path.join(__dirname, '../scripts/create-release-json.cjs'), 'v0.1.3', artifacts, output],
+    {
+      env: { ...process.env, GITHUB_RUN_NUMBER: String(sequence), GITHUB_SHA: 'c'.repeat(40) },
+    },
+  );
+  const metadata = JSON.parse(fs.readFileSync(output, 'utf8'));
+  assert.equal(metadata.sequence, packaged.sequence);
+  assert.equal(metadata.build, packaged.id);
+  assert.ok(!metadata.notes.startsWith('#'), '公开摘要使用纯文本');
+});
+
 test(
   '真实独立升级进程：本地发行服务 → 下载 → 校验 → 替换 → 新后台健康检查',
   { timeout: 90000 },
@@ -192,7 +387,7 @@ test(
     const bridge=process.env.BRIDGE_HOME, token=require('node:crypto').randomBytes(16).toString('hex');
     const network=transportFor(process.env.BRIDGE_CODEX_HOME);
     const map=(url)=>${JSON.stringify(origin)}+'/'+url.split('/').pop();
-    const manager=createUpdateManager({bridgeHome:bridge,codexHome:process.env.BRIDGE_CODEX_HOME,projectDir:__dirname,version:'0.1.3',build:build.id,
+    const manager=createUpdateManager({bridgeHome:bridge,codexHome:process.env.BRIDGE_CODEX_HOME,projectDir:__dirname,version:'0.1.3',build:build.id,sequence:build.sequence,
       transport:{readJson:url=>network.readJson(map(url)),download:(url,file)=>network.download(map(url),file)},
       shutdown:()=>process.exit(0)});
     const server=http.createServer(async(req,res)=>{
@@ -222,7 +417,7 @@ test(
         write(path.join(dir, file), fs.readFileSync(path.join(__dirname, '..', file)));
       write(
         path.join(dir, 'src/platform/build-info.cjs'),
-        `exports.buildInfo=()=>({version:'0.1.3',id:'${build}'});`,
+        `exports.buildInfo=()=>({version:'0.1.3',id:'${build}',sequence:${build === oldBuild ? 120 : 128}});`,
       );
       write(path.join(dir, 'main.cjs'), main);
       for (const folder of ['bin', 'node_modules']) fs.mkdirSync(path.join(dir, folder));
@@ -263,6 +458,7 @@ test(
     metadata = {
       version: '0.1.3',
       build: newBuild,
+      sequence: 128,
       commit: 'c'.repeat(40),
       publishedAt: new Date().toISOString(),
       notes: 'isolated release',

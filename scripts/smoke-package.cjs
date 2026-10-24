@@ -52,16 +52,21 @@ const freePort = () =>
       home = path.join(root, 'home'),
       bridge = path.join(root, 'private');
     // 同一份源码的所有发行包和 release.json 必须使用同一个构建号。
-    const packagedBuild = cp
-      .execFileSync(
-        node,
-        ['-e', "console.log(require('./src/platform/build-info.cjs').buildInfo().id)"],
-        { cwd: app, encoding: 'utf8' },
-      )
-      .trim();
-    assert.equal(
+    const packagedBuild = JSON.parse(
+      cp
+        .execFileSync(
+          node,
+          [
+            '-e',
+            "console.log(JSON.stringify(require('./src/platform/build-info.cjs').buildInfo()))",
+          ],
+          { cwd: app, encoding: 'utf8' },
+        )
+        .trim(),
+    );
+    assert.deepEqual(
       packagedBuild,
-      require('../src/platform/build-info.cjs').buildInfo().id,
+      require('../src/platform/build-info.cjs').buildInfo(Number(process.env.GITHUB_RUN_NUMBER)),
       '发行包构建号与源码不一致',
     );
     fs.mkdirSync(home);

@@ -6,6 +6,9 @@ const fs = require('node:fs'),
 const [tag, artifactDir, output] = process.argv.slice(2);
 if (!tag || !artifactDir || !output)
   throw Error('用法：create-release-json.cjs <tag> <artifactDir> <output>');
+const sequence = Number(process.env.GITHUB_RUN_NUMBER);
+if (!Number.isSafeInteger(sequence) || sequence <= 0)
+  throw Error('GITHUB_RUN_NUMBER 必须为正整数，用作发行序号。');
 const assets = {};
 for (const name of fs.readdirSync(artifactDir).sort()) {
   if (name.endsWith('.sha256')) continue;
@@ -15,7 +18,8 @@ for (const name of fs.readdirSync(artifactDir).sort()) {
 }
 const release = {
   version: require('../package.json').version,
-  build: require('../src/platform/build-info.cjs').buildInfo().id,
+  build: require('../src/platform/build-info.cjs').buildInfo(sequence).id,
+  sequence,
   commit:
     process.env.GITHUB_SHA ||
     require('node:child_process')
@@ -24,7 +28,9 @@ const release = {
   publishedAt: new Date().toISOString(),
   notes: fs
     .readFileSync(path.join(__dirname, '..', 'docs', 'RELEASE.md'), 'utf8')
-    .split(/\r?\n/, 1)[0],
+    .split(/\r?\n/)
+    .find((line) => line.trim() && !line.startsWith('#'))
+    .trim(),
   assets,
 };
 fs.writeFileSync(output, JSON.stringify(release, null, 2) + '\n');

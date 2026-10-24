@@ -38,8 +38,8 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 // 页面首屏后会检查更新；测试默认得到“已是最新”，需要时用 update 参数指定。
 const latestUpdate = {
-  current: { version: '0.1.3', build: 'test' },
-  latest: { version: '0.1.3', build: 'test' },
+  current: { version: '0.1.3', build: 'test', sequence: 1 },
+  latest: { version: '0.1.3', build: 'test', sequence: 1 },
   checkedAt: '2026-10-23T00:00:00.000Z',
   status: 'idle',
 };

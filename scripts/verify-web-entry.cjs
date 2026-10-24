@@ -53,8 +53,8 @@ async function start(token) {
       accounts: async () => ({ items: [], switchJob: fixtureJob }),
       // 不访问 GitHub：固定返回有新构建，验证顶部更新提示。
       checkUpdate: async () => ({
-        current: { version: '0.1.3', build: 'fixture-old' },
-        latest: { version: '0.1.3', build: 'fixture-new', notes: 'fixture notes' },
+        current: { version: '0.1.3', build: 'fixture-old', sequence: 7 },
+        latest: { version: '0.1.3', build: 'fixture-new', sequence: 9, notes: 'fixture notes' },
         checkedAt: new Date().toISOString(),
         status: 'available',
       }),
@@ -128,7 +128,7 @@ async function loaded(page, url) {
     assert.equal(new URL(page.url()).hash, '');
     checked('current-launch-token-establishes-session');
     await page.locator('#update-banner').waitFor({ state: 'visible' });
-    assert.ok((await page.locator('#update-detail').innerText()).includes('构建 fixture-new'));
+    assert.ok((await page.locator('#update-detail').innerText()).includes('第 9 版'));
     assert.equal(await page.locator('#update-install').isVisible(), true);
     checked('update-banner-shows-newer-build');
     const expiredContext = await browser.newContext();

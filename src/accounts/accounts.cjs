@@ -31,7 +31,8 @@ function identity(auth) {
   if (!auth?.tokens?.access_token || !auth.tokens.account_id) return null;
   const access = claims(auth.tokens.access_token),
     id = claims(auth.tokens.id_token || ''),
-    a = access['https://api.openai.com/auth'] || id['https://api.openai.com/auth'] || {};
+    subscription = id['https://api.openai.com/auth'] || {},
+    a = access['https://api.openai.com/auth'] || subscription;
   const accountId = auth.tokens.account_id,
     userId = a.chatgpt_user_id || a.user_id || access.sub || id.sub || '';
   return {
@@ -43,6 +44,9 @@ function identity(auth) {
     accountId,
     email: id.email || access['https://api.openai.com/profile']?.email || '',
     plan: a.chatgpt_plan_type || 'unknown',
+    // 订阅日期位于 ID 令牌，访问令牌的套餐声明不包含这些字段。
+    subscriptionUntil: subscription.chatgpt_subscription_active_until || null,
+    subscriptionCheckedAt: subscription.chatgpt_subscription_last_checked || null,
   };
 }
 function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
@@ -145,11 +149,19 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
     captureCurrent();
     const current = identity(currentAuth());
     return {
-      items: load().map((row) => ({
-        ...row,
-        current: row.id === current?.id,
-        quota: readJson(path.join(root, row.id, 'quota.json')),
-      })),
+      items: load().map((row) => {
+        const auth = readJson(authFile(row.id)),
+          latest = identity(auth);
+        return {
+          ...row,
+          plan: latest?.plan || 'unknown',
+          subscriptionUntil: latest?.subscriptionUntil || null,
+          subscriptionCheckedAt: latest?.subscriptionCheckedAt || null,
+          refreshedAt: auth?.last_refresh || null,
+          current: row.id === current?.id,
+          quota: readJson(path.join(root, row.id, 'quota.json')),
+        };
+      }),
       credentialsNotice,
       login: login ? { ...login } : null,
       switchJob: switchJob(bridgeHome),

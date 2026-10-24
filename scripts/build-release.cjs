@@ -13,6 +13,9 @@ const project = path.resolve(__dirname, '..'),
 const files = require('../release-files.json'),
   version = require('../package.json').version,
   nodeVersion = 'v22.22.0';
+const sequence = Number(process.env.GITHUB_RUN_NUMBER);
+if (!Number.isSafeInteger(sequence) || sequence <= 0)
+  throw Error('GITHUB_RUN_NUMBER 必须为正整数，用作发行序号。');
 const cache = path.join(project, '.build-cache');
 fs.mkdirSync(cache, { recursive: true });
 fs.mkdirSync(out, { recursive: true });
@@ -32,7 +35,14 @@ function walk(dir, prefix = '') {
 }
 function sourceEntries(prefix = '') {
   return files
-    .map((name) => ({ name: prefix + name, file: path.join(project, name) }))
+    .map((name) =>
+      name === 'src/platform/release-info.json'
+        ? {
+            name: prefix + name,
+            data: require('../src/platform/build-info.cjs').releaseInfo(sequence),
+          }
+        : { name: prefix + name, file: path.join(project, name) },
+    )
     .concat(
       ['smol-toml', 'yaml'].flatMap((dep) =>
         walk(path.join(project, 'node_modules', dep), 'node_modules/' + dep + '/').map((e) => ({

@@ -172,6 +172,138 @@ test('来源较多时置顶正在使用的账号，并支持搜索和筛选', as
   );
 });
 
+// 用户问“plus 怎么只有 30 天额度”：实际是会员已到期、令牌已变 free，页面要显示到期和读取时间。
+test('会员已到期的账号标出到期，详情显示套餐、到期、读取和登录刷新时间', async () => {
+  const hour = 3600000;
+  const accounts = [
+    {
+      id: 'a1',
+      label: 'expired@example.com',
+      email: 'expired@example.com',
+      plan: 'free',
+      current: false,
+      subscriptionUntil: new Date(Date.now() - hour).toISOString(),
+      refreshedAt: new Date(Date.now() - 2 * hour).toISOString(),
+      quota: quota(100),
+    },
+    {
+      id: 'a2',
+      label: 'active@example.com',
+      email: 'active@example.com',
+      plan: 'plus',
+      current: true,
+      subscriptionUntil: new Date(Date.now() + 10 * 24 * hour).toISOString(),
+      quota: null,
+    },
+  ];
+  const page = await runPage({ respond: backend({ accounts }) });
+  const mark = page.created.length;
+  const card = page.created.find(
+    (c) => c.node.className === 'source-card' && c.node.dataset.source === 'account:a1',
+  ).node;
+  assert.equal(
+    page.created.filter((c) => c.tag === 'span' && c.node.textContent === '会员已到期').length > 0,
+    true,
+  );
+  const detail = page.created
+    .filter((c) => c.tag === 'small' && /^ChatGPT free/.test(c.node.textContent))
+    .at(-1).node;
+  assert.match(detail.textContent, /^ChatGPT free · 会员已于 .+ 到期 · 刚刚读取$/);
+  const active = page.created
+    .filter((c) => c.tag === 'small' && /^ChatGPT plus/.test(c.node.textContent))
+    .at(-1).node;
+  assert.match(active.textContent, /^ChatGPT plus · 会员到期 \S+$/, '未读额度时不显示读取时间');
+
+  card.onclick();
+  const facts = page.created
+    .slice(mark)
+    .filter((c) => c.tag === 'dd')
+    .map((c) => [c.node.textContent, c.node.className]);
+  assert.equal(facts[0][0], 'free');
+  assert.match(facts[1][0], /（已到期）$/);
+  assert.equal(facts[1][1], 'warn');
+  assert.match(facts[2][0], /（刚刚）$/);
+  assert.match(facts[3][0], /（2 小时前）$/);
+});
+
+// 读取额度时官方续期了令牌（plus 到期变 free），刷新后页面要显示新套餐和时间，不必重开页面。
+test('刷新额度后同步该账号的套餐、到期和登录刷新时间，不动其他账号', async () => {
+  const hour = 3600000;
+  let refreshed = false;
+  const row = (id, plan, extra = {}) => ({
+    id,
+    label: id + '@example.com',
+    email: id + '@example.com',
+    plan,
+    // 都不是当前账号：页面打开时不会自动刷新当前账号额度，干扰本测试。
+    current: false,
+    quota: null,
+    ...extra,
+  });
+  const before = () => [
+    row('a1', 'plus', { subscriptionUntil: new Date(Date.now() + hour).toISOString() }),
+    row('a2', 'plus'),
+  ];
+  const after = () => [
+    row('a1', 'free', {
+      subscriptionUntil: new Date(Date.now() - hour).toISOString(),
+      refreshedAt: new Date().toISOString(),
+    }),
+    row('a2', 'team'),
+  ];
+  const base = backend();
+  const page = await runPage({
+    respond: async (route, body) => {
+      if (route === 'accounts')
+        return { body: { items: refreshed ? after() : before(), switchJob: null } };
+      if (route === 'accountQuota') {
+        refreshed = true;
+        return { body: { items: [{ id: body.id, ...quota(100) }] } };
+      }
+      return base(route, body);
+    },
+  });
+  const card = page.created.find(
+    (c) => c.node.className === 'source-card' && c.node.dataset.source === 'account:a1',
+  ).node;
+  card.onclick();
+  const mark = page.created.length;
+  const refresh = page.created
+    .filter((c) => c.tag === 'button' && c.node.textContent === '刷新此账号额度')
+    .at(-1).node;
+  await refresh.onclick();
+  await page.settle();
+  const details = page.created
+    .slice(mark)
+    .filter((c) => c.tag === 'small' && /^ChatGPT /.test(c.node.textContent))
+    .map((c) => c.node.textContent);
+  assert.ok(
+    details.some((t) => /^ChatGPT free · 会员已于 .+ 到期 · 刚刚读取$/.test(t)),
+    details.join('\n'),
+  );
+  assert.ok(
+    details.some((t) => t === 'ChatGPT plus'),
+    '只同步刷新的账号，a2 仍是 plus：\n' + details.join('\n'),
+  );
+});
+
+test('“全部刷新额度”一次读取所有已保存账号', async () => {
+  const page = await runPage({ respond: backend() });
+  const button = page.created
+    .filter((c) => c.tag === 'button' && c.node.className === 'link')
+    .at(-1).node;
+  assert.equal(button.textContent, '全部刷新额度');
+  await button.onclick();
+  await page.settle();
+  assert.deepEqual(
+    page
+      .calls('accountQuota')
+      .map((r) => r.body.id)
+      .sort(),
+    ['a1', 'a2'],
+  );
+});
+
 test('来源不多时不显示搜索和筛选', async () => {
   const page = await runPage({ respond: backend() });
   assert.equal(page.byId('source-search').hidden, true);

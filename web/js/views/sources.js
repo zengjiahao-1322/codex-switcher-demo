@@ -4,7 +4,13 @@ import { showTab } from '../tabs.js';
 import { accessTag, busy, combo, merge, status, tag } from '../ui.js';
 import {
   accountRemaining,
+  accountStatus,
+  ago,
+  membership,
+  membershipExpired,
+  quotaRefreshing,
   refreshAccounts,
+  refreshQuota,
   renderSelectedQuota,
   watchAccounts,
 } from './accounts.js';
@@ -113,7 +119,14 @@ function sourceCard(o) {
       head.append(
         tag(a.pendingLogin ? '登录已更新 · 待应用' : '正在使用', a.pendingLogin ? 'muted' : 'done'),
       );
-    detail.textContent = (a.label === a.email ? 'ChatGPT' : a.email + ' ·') + ' ' + a.plan;
+    if (membershipExpired(a)) head.append(tag('会员已到期', 'changed'));
+    detail.textContent = [
+      (a.label === a.email ? 'ChatGPT ' : a.email + ' · ') + a.plan,
+      membership(a),
+      a.quota?.checkedAt && ago(a.quota.checkedAt) + '读取',
+    ]
+      .filter(Boolean)
+      .join(' · ');
     // 行尾显示上次读到的剩余额度；超过 10 分钟的读数变淡，提示可能已变化。
     const known = accountRemaining(a, undefined, Infinity);
     if (known !== null) {
@@ -184,11 +197,23 @@ export function renderSources() {
   $('source-list').replaceChildren();
   let group = '';
   for (const o of shown) {
-    if (sourceFilter === 'all' && o.kind !== group) {
+    if (o.kind !== group) {
       group = o.kind;
-      const label = document.createElement('p');
+      const label = document.createElement('div');
       label.className = 'group-label';
-      label.textContent = group === 'account' ? '官方账号' : '自定义 API';
+      label.append(group === 'account' ? '官方账号' : '自定义 API');
+      // 一次刷新所有已保存账号的额度，各账号谁先返回先更新。
+      if (group === 'account' && items.length) {
+        const all = document.createElement('button');
+        all.type = 'button';
+        all.className = 'link';
+        all.textContent = quotaRefreshing.size
+          ? '正在刷新 ' + quotaRefreshing.size + ' 个…'
+          : '全部刷新额度';
+        all.disabled = quotaRefreshing.size > 0;
+        all.onclick = () => refreshQuota().catch((e) => accountStatus(e.message));
+        label.append(all);
+      }
       $('source-list').append(label);
     }
     $('source-list').append(sourceCard(o));

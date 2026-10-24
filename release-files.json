@@ -3,6 +3,7 @@
   "src/paths.cjs",
   "src/server/main.cjs",
   "src/platform/build-info.cjs",
+  "src/platform/release-info.json",
   "docs/ARCHITECTURE.md",
   "mcp-server.cjs",
   "cli.cjs",

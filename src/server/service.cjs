@@ -57,6 +57,7 @@ function createService({
     projectDir,
     build: build.id,
     version: build.version,
+    sequence: build.sequence,
     codexHome,
     shutdown: shutdownForUpdate,
   });

@@ -110,6 +110,7 @@ function createUpdateManager({
   projectDir,
   build,
   version,
+  sequence,
   platform = process.platform,
   arch = process.arch,
   transport = transportFor(codexHome),
@@ -121,8 +122,10 @@ function createUpdateManager({
   const previous = fs.existsSync(resultFile)
     ? JSON.parse(fs.readFileSync(resultFile, 'utf8'))
     : null;
+  const dev = fs.existsSync(path.join(projectDir, '.git'));
   const state = {
-    current: { version, build },
+    current: { version, build, sequence: dev ? null : sequence },
+    dev,
     latest: null,
     checkedAt: null,
     status: previous?.error ? 'error' : 'idle',
@@ -132,6 +135,11 @@ function createUpdateManager({
     checking = null,
     task = null;
   const snapshot = () => structuredClone(state);
+  const newer = () =>
+    !state.dev &&
+    Number.isSafeInteger(state.current.sequence) &&
+    state.current.sequence > 0 &&
+    metadata.sequence > state.current.sequence;
   async function checkUpdate() {
     if (task) return snapshot();
     if (checking) return checking;
@@ -144,6 +152,8 @@ function createUpdateManager({
         const latest = await transport.readJson(releaseUrl + 'release.json');
         if (
           typeof latest.version !== 'string' ||
+          !Number.isSafeInteger(latest.sequence) ||
+          latest.sequence <= 0 ||
           !/^[a-f0-9]{12}$/.test(latest.build) ||
           !/^[a-f0-9]{40}$/.test(latest.commit) ||
           !Number.isFinite(Date.parse(latest.publishedAt)) ||
@@ -155,11 +165,12 @@ function createUpdateManager({
         state.latest = {
           version: latest.version,
           build: latest.build,
+          sequence: latest.sequence,
           publishedAt: latest.publishedAt,
           notes: latest.notes,
         };
         state.checkedAt = new Date().toISOString();
-        state.status = latest.build === build ? 'idle' : 'available';
+        state.status = newer() ? 'available' : 'idle';
         delete state.error;
         log(bridgeHome, 'update.check', {
           build: latest.build,
@@ -197,7 +208,7 @@ function createUpdateManager({
     if (task) return { message: '更新正在进行。' };
     if (!metadata) await checkUpdate();
     if (!metadata) throw Error(state.error || '尚未取得更新信息。');
-    if (metadata.build === build) throw Error('当前已经是最新构建。');
+    if (!newer()) throw Error('不会安装相同或更旧的版本。');
     state.status = 'downloading';
     state.progress = 0;
     delete state.error;
@@ -228,6 +239,8 @@ function createUpdateManager({
             path.join(source, 'src', 'platform', 'build-info.cjs'),
           ).buildInfo();
           if (packaged.id !== metadata.build) throw Error('更新包构建号与发布信息不一致。');
+          if (packaged.sequence !== metadata.sequence)
+            throw Error('更新包发行序号与发布信息不一致。');
           state.status = 'installing';
           state.progress = 75;
           await launchWorker({
