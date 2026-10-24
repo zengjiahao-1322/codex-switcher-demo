@@ -77,88 +77,148 @@ export function selected(resetModel = true) {
   updateSwitchAction();
   renderSelectedQuota();
 }
-// 来源卡片：官方账号在前、自定义 API 在后；选中值存在隐藏的 #provider 中，其余逻辑按它读取。
+// 来源列表：官方账号在前、自定义 API 在后，正在使用的排在各组第一；
+// 来源较多时显示搜索和分类筛选。选中值存在隐藏的 #provider 中，其余逻辑按它读取。
 export let sourceOptions = [];
+let sourceFilter = 'all';
+const filterLabels = { all: '全部', account: '官方账号', api: 'API' };
+// 同一名称总是得到同一颜色，便于在长列表里区分首字母相同的来源。
+const hue = (text) => [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+function sourceCard(o) {
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'source-card';
+  card.setAttribute('role', 'radio');
+  card.setAttribute('aria-checked', String(o.value === $('provider').value));
+  card.dataset.source = o.value;
+  // 首字母图标 + 名称行（名称与标签）+ 说明行 + 行尾额度。
+  const avatar = document.createElement('span'),
+    body = document.createElement('span'),
+    head = document.createElement('span'),
+    name = document.createElement('span'),
+    detail = document.createElement('small');
+  avatar.className = 'avatar' + (o.provider ? ' api' : '');
+  avatar.style.setProperty('--hue', hue(o.name));
+  avatar.textContent = o.name.trim().charAt(0).toUpperCase();
+  body.className = 'body';
+  head.className = 'head';
+  name.className = 'name';
+  name.textContent = o.name;
+  head.append(name);
+  card.append(avatar, body);
+  const a = o.account,
+    p = o.provider;
+  if (a) {
+    if (a.current && state.current.official)
+      head.append(
+        tag(a.pendingLogin ? '登录已更新 · 待应用' : '正在使用', a.pendingLogin ? 'muted' : 'done'),
+      );
+    detail.textContent = (a.label === a.email ? 'ChatGPT' : a.email + ' ·') + ' ' + a.plan;
+    // 行尾显示上次读到的剩余额度；超过 10 分钟的读数变淡，提示可能已变化。
+    const known = accountRemaining(a, undefined, Infinity);
+    if (known !== null) {
+      const side = document.createElement('span'),
+        value = document.createElement('b'),
+        bar = document.createElement('progress');
+      side.className =
+        'side' + (known > 20 ? '' : ' low') + (accountRemaining(a) === null ? ' stale' : '');
+      side.title = '剩余额度，读取于 ' + new Date(a.quota.checkedAt).toLocaleString('zh-CN');
+      value.textContent = Math.round(known) + '%';
+      bar.max = 100;
+      bar.value = known;
+      side.append(value, bar);
+      card.append(side);
+    }
+  } else if (p) {
+    head.append(accessTag(p));
+    if (!p.hasKey && !p.local) head.append(tag('缺少密钥', 'changed'));
+    if (p.inUse) head.append(tag('正在使用', 'done'));
+    detail.textContent =
+      p.baseUrl.replace(/^https?:\/\//, '') + ' · ' + ((p.inUse && state.current.model) || p.model);
+  } else detail.textContent = '还没有保存的账号，选中后可添加';
+  body.append(head, detail);
+  card.onclick = () => {
+    status('');
+    $('provider').value = o.value;
+    selected();
+    // 窄屏上详情在列表下方；宽屏时详情固定在旁边，不会滚动。
+    $('source-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+  return card;
+}
 export function renderSources() {
   const items = accountData?.items || [],
     apis = state.providers.filter((p) => p.id !== 'official');
+  const inUse = (o) =>
+    Boolean(o.account ? o.account.current && state.current.official : o.provider?.inUse);
   sourceOptions = [
     ...(items.length
-      ? items.map((a) => ({
-          value: 'account:' + a.id,
-          name: a.label,
-          group: '官方账号',
-          account: a,
-        }))
-      : [{ value: 'official', name: 'ChatGPT 官方登录', group: '官方账号' }]),
-    ...apis.map((p) => ({ value: p.id, name: p.name, group: '自定义 API', provider: p })),
-  ];
+      ? items.map((a) => ({ value: 'account:' + a.id, name: a.label, kind: 'account', account: a }))
+      : [{ value: 'official', name: 'ChatGPT 官方登录', kind: 'account' }]),
+    ...apis.map((p) => ({ value: p.id, name: p.name, kind: 'api', provider: p })),
+  ].sort((x, y) => (x.kind === 'api') - (y.kind === 'api') || inUse(y) - inUse(x));
+  // 来源不多时一屏就能看完，不显示搜索和筛选。
+  const many = sourceOptions.length > 5;
+  if (!many) {
+    sourceFilter = 'all';
+    $('source-search').value = '';
+  }
+  $('source-search').hidden = !many;
+  $('source-filter').hidden = !many;
+  for (const button of $('source-filter').querySelectorAll('button')) {
+    const key = button.dataset.filter,
+      count = document.createElement('small');
+    count.textContent = sourceOptions.filter((o) => key === 'all' || o.kind === key).length;
+    button.replaceChildren(filterLabels[key], count);
+    button.setAttribute('aria-pressed', String(key === sourceFilter));
+  }
+  const q = $('source-search').value.trim().toLowerCase();
+  const shown = sourceOptions.filter(
+    (o) =>
+      (sourceFilter === 'all' || o.kind === sourceFilter) &&
+      (!q ||
+        [o.name, o.account?.email, o.provider?.baseUrl, o.provider?.model]
+          .filter(Boolean)
+          .some((text) => text.toLowerCase().includes(q))),
+  );
   $('source-list').replaceChildren();
   let group = '';
-  for (const o of sourceOptions) {
-    if (o.group !== group) {
-      group = o.group;
+  for (const o of shown) {
+    if (sourceFilter === 'all' && o.kind !== group) {
+      group = o.kind;
       const label = document.createElement('p');
       label.className = 'group-label';
-      label.textContent = group;
+      label.textContent = group === 'account' ? '官方账号' : '自定义 API';
       $('source-list').append(label);
     }
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'source-card';
-    card.setAttribute('role', 'radio');
-    card.setAttribute('aria-checked', String(o.value === $('provider').value));
-    card.dataset.source = o.value;
-    // 首字母图标 + 名称行（名称与标签）+ 说明行。
-    const avatar = document.createElement('span'),
-      body = document.createElement('span'),
-      head = document.createElement('span'),
-      name = document.createElement('span'),
-      detail = document.createElement('small');
-    avatar.className = 'avatar' + (o.provider ? ' api' : '');
-    avatar.textContent = o.name.trim().charAt(0).toUpperCase();
-    body.className = 'body';
-    head.className = 'head';
-    name.className = 'name';
-    name.textContent = o.name;
-    head.append(name);
-    const a = o.account,
-      p = o.provider;
-    if (a) {
-      head.append(tag(a.plan));
-      if (a.current && state.current.official)
-        head.append(
-          tag(
-            a.pendingLogin ? '登录已更新 · 待应用' : '正在使用',
-            a.pendingLogin ? 'muted' : 'done',
-          ),
-        );
-      const remaining = accountRemaining(a);
-      if (remaining !== null)
-        head.append(tag('剩余 ' + Math.round(remaining) + '%', remaining > 20 ? '' : 'changed'));
-      detail.textContent = a.label === a.email ? 'ChatGPT 官方账号' : a.email;
-    } else if (p) {
-      head.append(accessTag(p));
-      if (!p.hasKey && !p.local) head.append(tag('缺少密钥', 'changed'));
-      if (p.inUse) head.append(tag('正在使用', 'done'));
-      detail.textContent =
-        p.baseUrl.replace(/^https?:\/\//, '') +
-        ' · ' +
-        ((p.inUse && state.current.model) || p.model);
-    } else detail.textContent = '还没有保存的账号，选中后可添加';
-    body.append(head, detail);
-    card.append(avatar, body);
-    card.onclick = () => {
-      status('');
-      $('provider').value = o.value;
-      selected();
-      // 窄屏上详情在卡片列表下方；宽屏时详情固定在旁边，不会滚动。
-      $('source-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    };
-    $('source-list').append(card);
+    $('source-list').append(sourceCard(o));
+  }
+  if (!shown.length) {
+    const empty = document.createElement('p');
+    empty.className = 'group-label';
+    empty.textContent = '没有匹配的账号或 API。';
+    $('source-list').append(empty);
   }
   updateSwitchAction();
 }
+$('source-search').oninput = renderSources;
+$('source-filter').onclick = (e) => {
+  const key = e.target.closest('button')?.dataset.filter;
+  if (!key) return;
+  sourceFilter = key;
+  renderSources();
+};
+// 列表按单选组的习惯用上下方向键移动选中项。
+$('source-list').onkeydown = (e) => {
+  if (!['ArrowDown', 'ArrowUp'].includes(e.key)) return;
+  e.preventDefault();
+  const cards = [...$('source-list').querySelectorAll('.source-card')],
+    i = cards.findIndex((c) => c.dataset.source === $('provider').value),
+    next = cards[e.key === 'ArrowDown' ? Math.min(i + 1, cards.length - 1) : Math.max(i - 1, 0)];
+  if (!next || next.disabled) return;
+  next.click();
+  next.focus();
+};
 export function renderSelect(keepDraft = false) {
   const keep = $('provider').value;
   renderSources();

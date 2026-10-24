@@ -56,7 +56,22 @@
 
         <section class="chooser" aria-labelledby="sources-heading">
           <div class="sources">
-            <h2 id="sources-heading" class="eyebrow">切换到</h2>
+            <div class="sources-head">
+              <h2 id="sources-heading" class="eyebrow">切换到</h2>
+              <div class="seg" id="source-filter" role="group" aria-label="筛选来源">
+                <button type="button" data-filter="all" aria-pressed="true">全部</button
+                ><button type="button" data-filter="account" aria-pressed="false">官方账号</button
+                ><button type="button" data-filter="api" aria-pressed="false">API</button>
+              </div>
+            </div>
+            <input
+              type="search"
+              id="source-search"
+              placeholder="搜索账号、API 或模型"
+              autocomplete="off"
+              spellcheck="false"
+              aria-label="搜索来源"
+            />
             <input type="hidden" id="provider" />
             <div id="source-list" role="radiogroup" aria-labelledby="sources-heading"></div>
           </div>

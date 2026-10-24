@@ -120,6 +120,64 @@ test('状态卡显示当前账号额度，不显示进程编号', async () => {
   assert.match(page.byId('editor-reload-hint').textContent, /PID 900/);
 });
 
+// 账号多时：正在使用的置顶、可搜索和分类筛选，行尾显示上次读到的额度（旧读数标记为旧）。
+test('来源较多时置顶正在使用的账号，并支持搜索和筛选', async () => {
+  const old = { ...quota(40), checkedAt: new Date(Date.now() - 3600000).toISOString() };
+  const accounts = Array.from({ length: 6 }, (_, i) => ({
+    id: 'a' + i,
+    label: '账号' + i,
+    email: 'user' + i + '@example.com',
+    plan: 'plus',
+    current: i === 4,
+    quota: i === 4 ? quota(62) : i === 2 ? old : null,
+  }));
+  const page = await runPage({ respond: backend({ accounts }) });
+  const rendered = () => page.created.length;
+  let mark = rendered();
+  const since = () =>
+    page.created
+      .slice(mark)
+      .filter((c) => c.tag === 'button' && c.node.className === 'source-card')
+      .map((c) => c.node);
+  page.byId('source-search').value = '';
+  page.byId('source-search').oninput();
+  const all = since();
+  assert.deepEqual(
+    all.map((c) => c.dataset.source),
+    ['account:a4', 'account:a0', 'account:a1', 'account:a2', 'account:a3', 'account:a5', 'api-1'],
+  );
+  assert.equal(page.byId('source-search').hidden, false);
+  const sides = page.created
+    .slice(mark)
+    .filter((c) => c.tag === 'span' && /^side/.test(c.node.className))
+    .map((c) => c.node.className);
+  assert.deepEqual(sides, ['side', 'side stale'], '当前账号是新读数，账号2是一小时前的旧读数');
+
+  mark = rendered();
+  page.byId('source-search').value = 'USER3';
+  page.byId('source-search').oninput();
+  assert.deepEqual(
+    since().map((c) => c.dataset.source),
+    ['account:a3'],
+  );
+
+  mark = rendered();
+  page.byId('source-search').value = '';
+  page.byId('source-filter').onclick({
+    target: { closest: () => ({ dataset: { filter: 'api' } }) },
+  });
+  assert.deepEqual(
+    since().map((c) => c.dataset.source),
+    ['api-1'],
+  );
+});
+
+test('来源不多时不显示搜索和筛选', async () => {
+  const page = await runPage({ respond: backend() });
+  assert.equal(page.byId('source-search').hidden, true);
+  assert.equal(page.byId('source-filter').hidden, true);
+});
+
 test('管理分页默认收起；打开时才读取数据，再点一次收起', async () => {
   const page = await runPage({ respond: backend() });
   for (const id of ['account-manager', 'api-manager', 'client-details', 'settings-panel'])

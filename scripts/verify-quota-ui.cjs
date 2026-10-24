@@ -109,7 +109,10 @@ let officialMode = false,
     );
     await page.locator('#model').fill('draft-kept-during-quota');
     await page.locator('#tab-accounts').click();
-    await page.locator('#account-list').getByText('剩余 65%', { exact: true }).waitFor();
+    await page
+      .locator('#account-list .quota-summary')
+      .getByText(/^5小时 65% · /)
+      .waitFor();
     const slowRow = page.locator('.prow').filter({ hasText: 'Slow account' });
     const fastRow = page.locator('.prow').filter({ hasText: 'Fast account' });
     assert.equal(
@@ -156,7 +159,7 @@ let officialMode = false,
       fullPage: true,
     });
     releaseSlow();
-    await slowRow.getByText('剩余 80%', { exact: true }).waitFor();
+    await slowRow.getByText(/^5小时 80% · /).waitFor();
     await page.getByRole('button', { name: '刷新全部额度', exact: true }).waitFor();
     assert.deepEqual(errors, []);
     report.checks.push('each-account-renders-own-result-without-script-errors');

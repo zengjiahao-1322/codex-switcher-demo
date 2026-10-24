@@ -21,12 +21,13 @@ export let accountTimer = null,
   lastQuotaLogin = null;
 export const quotaRefreshing = new Set();
 // 只使用近期成功读取、尚未重置的窗口；旧缓存和读取失败不推断为额度耗尽。
-export function accountRemaining(account, bucketId) {
+// maxAge 仅供列表展示上次读数（标为旧数据）；提醒和备用账号建议使用默认的 10 分钟。
+export function accountRemaining(account, bucketId, maxAge = 600000) {
   const quota = account.quota;
   if (
     account.pendingLogin ||
     quota?.status !== 'ok' ||
-    Date.now() - Date.parse(quota.checkedAt) > 600000 ||
+    Date.now() - Date.parse(quota.checkedAt) > maxAge ||
     !Number.isFinite(Date.parse(quota.checkedAt))
   )
     return null;
@@ -70,7 +71,8 @@ export function renderQuotaNotice() {
   }
   box.append(document.createTextNode('不会自动切换；如有额外额度，以官方计费为准。'));
 }
-export function quotaNode(q) {
+// compact 用于账号管理列表：一行摘要；完整进度条在选中来源的详情里。
+export function quotaNode(q, compact = false) {
   const box = document.createElement('div');
   box.className = 'quota';
   const note = (text, cls = '') => {
@@ -105,6 +107,30 @@ export function quotaNode(q) {
         : n % 60 === 0
           ? n / 60 + '小时'
           : n + '分钟';
+  if (compact) {
+    note(
+      q.buckets
+        .flatMap((b) =>
+          b.windows.map(
+            (w) =>
+              (q.buckets.length > 1 ? b.name + ' ' : '') +
+              duration(w.minutes) +
+              ' ' +
+              (w.remainingPercent == null ? '未返回' : Math.round(w.remainingPercent) + '%'),
+          ),
+        )
+        .join(' · ') +
+        ' · 更新于 ' +
+        new Date(q.checkedAt).toLocaleString('zh-CN', {
+          month: 'numeric',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      'quota-summary',
+    );
+    return box;
+  }
   const time = (n) =>
     new Date(n * 1000).toLocaleString('zh-CN', {
       month: 'numeric',
@@ -212,7 +238,7 @@ export function renderAccounts() {
     info.append(email);
     const acts = document.createElement('div');
     acts.className = 'actions';
-    info.append(quotaNode(a.quota));
+    info.append(quotaNode(a.quota, true));
     const quotaButton = rowButton(
       quotaRefreshing.has(a.id) ? '正在读取…' : '刷新额度',
       () => refreshQuota(a.id),

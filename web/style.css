@@ -324,64 +324,111 @@ h1 {
   gap: 20px;
   align-items: start;
 }
-.sources .eyebrow {
+.sources-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  margin-bottom: 10px;
   padding-left: 2px;
 }
+.sources-head .eyebrow {
+  margin: 0;
+}
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: #e9e9e7;
+  border-radius: 9px;
+}
+.seg button {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  box-shadow: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.seg button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.5);
+}
+.seg button[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(24, 24, 27, 0.1);
+}
+.seg small {
+  margin-left: 5px;
+  font-size: 11px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+#source-search {
+  height: 36px;
+  margin-bottom: 10px;
+}
+/* 列表本身滚动，账号再多右侧详情和切换按钮也始终可见。 */
 #source-list {
   display: grid;
-  gap: 8px;
+  gap: 2px;
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--ring), var(--lift);
 }
 .group-label {
-  font-size: 12px;
+  font-size: 11.5px;
+  font-weight: 600;
   color: var(--faint);
-  margin: 10px 0 0 2px;
+  margin: 0;
+  padding: 10px 10px 4px;
 }
 .group-label:first-child {
-  margin-top: 0;
+  padding-top: 4px;
 }
 .source-card {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 11px;
   width: 100%;
   height: auto;
   text-align: left;
-  background: var(--surface);
-  border: 0;
-  border-radius: 12px;
-  box-shadow: var(--ring);
-  padding: 12px 14px;
+  background: transparent;
+  border-radius: 9px;
+  box-shadow: none;
+  padding: 8px 10px;
   color: var(--ink);
-  transition:
-    box-shadow 0.15s,
-    transform 0.15s;
+  font-weight: 400;
 }
 .source-card:hover:not(:disabled) {
-  box-shadow:
-    0 0 0 1px var(--field),
-    var(--lift);
+  background: var(--sunken);
 }
 .source-card[aria-checked='true'] {
-  box-shadow:
-    0 0 0 2px var(--ink),
-    var(--lift);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1.5px var(--ink);
 }
 .avatar {
+  --hue: 0;
   flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
   display: grid;
   place-items: center;
   font-weight: 650;
-  font-size: 15px;
-  background: var(--ink);
-  color: #fff;
+  font-size: 13.5px;
+  background: hsl(var(--hue) 42% 91%);
+  color: hsl(var(--hue) 45% 30%);
 }
 .avatar.api {
-  background: var(--sunken);
-  color: var(--ink-2);
-  box-shadow: inset 0 0 0 1px var(--hairline);
+  border-radius: 9px;
 }
 .source-card .body {
   min-width: 0;
@@ -389,24 +436,54 @@ h1 {
 }
 .source-card .head {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px 6px;
+  gap: 6px;
+  min-width: 0;
 }
 .source-card .name {
   font-weight: 600;
-  font-size: 14.5px;
-  margin-right: 2px;
-  overflow-wrap: anywhere;
-}
-.source-card small {
-  display: block;
-  font-size: 12.5px;
-  line-height: 1.5;
-  margin-top: 2px;
+  font-size: 14px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.source-card .tag {
+  flex: none;
+}
+.source-card small {
+  display: block;
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.source-card .side {
+  flex: none;
+  width: 52px;
+  text-align: right;
+}
+.source-card .side b {
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.source-card .side progress {
+  height: 4px;
+  margin: 4px 0 0;
+}
+.source-card .side.low b {
+  color: var(--warn);
+}
+.source-card .side.low progress::-webkit-progress-value {
+  background: var(--warn);
+}
+.source-card .side.low progress::-moz-progress-bar {
+  background: var(--warn);
+}
+.source-card .side.stale {
+  opacity: 0.4;
 }
 .source-panel {
   position: sticky;
@@ -751,9 +828,11 @@ progress::-moz-progress-bar {
   min-width: 0;
 }
 .account-info .quota {
-  margin-top: 8px;
-  max-width: 420px;
+  margin-top: 4px;
   font-weight: 400;
+}
+.quota-summary {
+  font-variant-numeric: tabular-nums;
 }
 #account-list:empty::after {
   content: '还没有保存的官方账号，点击“添加账号”开始。';
@@ -986,6 +1065,9 @@ footer {
   }
   .chooser {
     grid-template-columns: 1fr;
+  }
+  #source-list {
+    max-height: none;
   }
   .source-panel {
     position: static;
