@@ -176,6 +176,39 @@ h1 {
 .banner button.primary:hover:not(:disabled) {
   background: #e4e4e7;
 }
+.remote-card {
+  border-top: 1px solid var(--hairline);
+  padding: 16px 0;
+}
+.remote-card > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.remote-card > small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.remote-card > button {
+  margin-top: 10px;
+}
+.remote-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 12px;
+}
+.remote-form select,
+.remote-form input {
+  margin: 0;
+}
+.remote-form small {
+  grid-column: 1 / -1;
+}
+.remote-form button {
+  height: 40px;
+}
 .settings-title {
   font-size: 14px;
   margin: 24px 0 4px;
@@ -184,8 +217,10 @@ h1 {
 }
 
 /* 通用卡片 */
+/* 列宽用 minmax(0, 1fr)：不换行的长文字（如账号说明）只显示省略号，不撑宽页面。 */
 .workspace {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
 }
 .card {
@@ -375,6 +410,7 @@ h1 {
 /* 列表本身滚动，账号再多右侧详情和切换按钮也始终可见。 */
 #source-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   max-height: calc(100vh - 150px);
   overflow-y: auto;
@@ -1108,6 +1144,9 @@ footer {
   }
   #source-list {
     max-height: none;
+  }
+  .remote-form {
+    grid-template-columns: 1fr;
   }
   .source-panel {
     position: static;

@@ -132,6 +132,12 @@ const freePort = () =>
     const response = await fetch(u.origin + vsix.url);
     assert.equal(response.status, 200);
     assert.ok((await response.arrayBuffer()).byteLength > 1000);
+    const remoteVsix = await api('remoteAgentPackage'),
+      remoteResponse = await fetch(u.origin + remoteVsix.url);
+    assert.equal(remoteVsix.filename, 'codex-switcher-remote.vsix');
+    assert.equal(remoteResponse.status, 200);
+    assert.match(remoteResponse.headers.get('content-disposition'), /codex-switcher-remote\.vsix/);
+    assert.ok((await remoteResponse.arrayBuffer()).byteLength > 1000);
     assert.equal(
       fs.readFileSync(path.join(home, 'config.toml'), 'utf8'),
       'model="package-smoke"\n',
@@ -161,6 +167,8 @@ const freePort = () =>
         'src/diagnostics/diagnostics.cjs',
         'src/clients/editor-integration.cjs',
         'vscode-companion/extension.cjs',
+        'vscode-remote-agent/extension.cjs',
+        'src/clients/remote-servers.cjs',
         'node_modules/smol-toml/package.json',
       ])
         assert.ok(

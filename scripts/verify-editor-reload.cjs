@@ -133,6 +133,7 @@ async function initializeHome(executable, home) {
     process.env.BRIDGE_HOME = bridge;
     const extensions = path.join(root, 'installed-extensions');
     const vsix = require('../src/clients/editor-integration.cjs').build(project);
+    const remoteVsix = require('../src/clients/editor-integration.cjs').buildRemote(project);
     // 普通安装避免扩展开发宿主只允许一个开发窗口，真实覆盖同一实例的多个窗口。
     const fixtureVsix = require('../src/shared/zip.cjs').zip(
       [
@@ -162,7 +163,7 @@ async function initializeHome(executable, home) {
       path.join(root, 'editor-fixture.vsix'),
     );
     report.extensionInstall = '';
-    for (const packageFile of [vsix, fixtureVsix])
+    for (const packageFile of [vsix, remoteVsix, fixtureVsix])
       report.extensionInstall += cp.execFileSync(
         editorEntry.exe,
         [
@@ -179,6 +180,7 @@ async function initializeHome(executable, home) {
       );
     report.checks.push(
       'actual-offline-companion-VSIX-install',
+      'actual-offline-remote-agent-VSIX-install',
       'actual-offline-fixture-VSIX-install',
     );
     for (const home of [selected, separate]) {

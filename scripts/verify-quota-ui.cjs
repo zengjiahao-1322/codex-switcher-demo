@@ -201,6 +201,20 @@ let officialMode = false,
       'API 模式不应拿官方额度提醒',
     );
     report.checks.push('low-quota-selects-backup-without-switch-and-ignores-failed-read');
+    // 账号说明（邮箱、套餐、到期、读取时间）很长时，手机宽度也只显示省略号，不能撑出横向滚动。
+    accounts[1].email = 'a-very-long-mailbox-name-used-to-check-mobile-layout@example.test';
+    accounts[1].subscriptionUntil = new Date(Date.now() + 86400000).toISOString();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await page.waitForFunction(
+      () => document.querySelector('#source-list .source-card')?.disabled === false,
+    );
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      true,
+      '长账号说明撑出了横向滚动',
+    );
+    report.checks.push('long-account-details-fit-mobile-width');
     report.passed = true;
   } catch (error) {
     report.passed = false;

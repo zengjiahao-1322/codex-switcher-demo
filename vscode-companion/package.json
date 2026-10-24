@@ -12,7 +12,6 @@
     "onStartupFinished"
   ],
   "extensionKind": [
-    "workspace",
     "ui"
   ],
   "contributes": {

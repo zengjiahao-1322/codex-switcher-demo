@@ -180,6 +180,8 @@ async function runCompanion({
             JSON.stringify({
               command: null,
               connection: { state: connectionState, home: '', backendPids: [] },
+              // 后台核对重载完成后才回 reloadConfirmed:true；本机窗口即新后端已关联。
+              ...(body.completedReload ? { reloadConfirmed: connectionState === 'ready' } : {}),
               ...(longPoll ? { longPoll: true } : {}),
             }),
           );

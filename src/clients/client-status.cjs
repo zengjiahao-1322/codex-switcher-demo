@@ -151,6 +151,7 @@ function heartbeat(bridgeHome, input) {
   const file = path.join(bridgeHome, 'clients', id + '.json'),
     prior = readJson(file, {});
   const { isTrustedCodex, extensionBinary } = require('../platform/runtime.cjs');
+  const remoteServers = require('./remote-servers.cjs');
   const reported = input.extensionPath && extensionBinary(String(input.extensionPath));
   const row = {
     id,
@@ -165,6 +166,10 @@ function heartbeat(bridgeHome, input) {
     editorKind: input.editorKind ? String(input.editorKind) : null,
     codexExe: isTrustedCodex(input.codexExe) ? String(input.codexExe) : null,
     remote: input.remote ? String(input.remote) : null,
+    remoteType: input.remoteType ? String(input.remoteType) : null,
+    remoteProtocol: input.remoteProtocol || 0,
+    authority: input.authority ? String(input.authority) : null,
+    remoteAgent: remoteServers.agentStatus(input.remoteAgent),
     wsl: !!input.wsl,
     companionVersion: input.companionVersion || null,
     reloadProtocol: input.reloadProtocol || 0,
@@ -173,7 +178,23 @@ function heartbeat(bridgeHome, input) {
     command: prior.command || null,
     lastAck: prior.lastAck || null,
   };
-  if (input.ack && (row.command?.id === input.ack || row.lastAck?.id === input.ack)) {
+  const remoteAck = remoteServers.acknowledge(bridgeHome, input);
+  if (remoteAck) row.lastAck = remoteAck;
+  else if (
+    row.lastAck?.remote &&
+    row.lastAck.id === input.ack &&
+    input.ackStatus === 'reload_failed'
+  )
+    row.lastAck = {
+      ...row.lastAck,
+      status: 'reload_failed',
+      error: '远端窗口未能执行重载，请在编辑器中手动重载',
+      at: Date.now(),
+    };
+  else if (
+    input.ack &&
+    (row.command?.id === input.ack || (row.lastAck?.id === input.ack && !row.lastAck.remote))
+  ) {
     const ack = {
       id: input.ack,
       status: input.ackStatus || 'accepted',
@@ -189,12 +210,20 @@ function heartbeat(bridgeHome, input) {
   }
   // 新扩展宿主启动后回报上次重载编号；只有编号匹配才能把“已接收”推进到“扩展已重载”。
   const completed = input.completedReload;
+  let reloadConfirmed = false;
   if (completed && /^[\w-]{8,80}$/.test(completed.clientId || '')) {
     const oldFile = path.join(bridgeHome, 'clients', completed.clientId + '.json');
     const old = readJson(oldFile);
-    if (old?.lastAck?.id === completed.commandId && old.lastAck.status === 'reload_requested') {
-      old.lastAck = { ...old.lastAck, status: 'reloaded', at: Date.now() };
+    if (
+      old?.lastAck?.id === completed.commandId &&
+      ['reload_requested', 'reloaded'].includes(old.lastAck.status) &&
+      (!old.remoteAgent || remoteServers.confirmsReload(input, old))
+    ) {
+      if (old.lastAck.status !== 'reloaded')
+        old.lastAck = { ...old.lastAck, status: 'reloaded', at: Date.now() };
       row.lastAck = old.lastAck;
+      reloadConfirmed = true;
+      if (old.remoteAgent) old.seenAt = 0;
       writeJson(oldFile, old);
     }
   }
@@ -206,7 +235,10 @@ function heartbeat(bridgeHome, input) {
     JSON.stringify(fields) !== JSON.stringify(previousFields)
   )
     writeJson(file, row);
-  return { command: row.command };
+  return {
+    command: remoteServers.command(bridgeHome, id) || row.command,
+    ...(completed ? { reloadConfirmed } : {}),
+  };
 }
 function waitForCommand(bridgeHome, id, wait, signal) {
   const file = path.join(bridgeHome, 'clients', id + '.json');
@@ -221,6 +253,8 @@ function waitForCommand(bridgeHome, id, wait, signal) {
     };
     const check = () => {
       try {
+        const remote = require('./remote-servers.cjs').command(bridgeHome, id);
+        if (remote) return finish(null, remote);
         const current = fs.statSync(file).mtimeMs;
         if (current !== modified) {
           modified = current;
@@ -357,6 +391,9 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
       name: w.name,
       workspace: w.workspace,
       remote: w.remote,
+      remoteType: w.remoteType,
+      authority: w.authority,
+      remoteAgent: w.remoteAgent,
       wsl: w.wsl,
       home: confirmed[0]?.home || w.home,
       confirmed: !!confirmed.length,
@@ -389,8 +426,14 @@ function snapshot(codexHome, bridgeHome, { inventory = scan() } = {}) {
     checkedAt: new Date().toISOString(),
   };
 }
-function requestReload(codexHome, bridgeHome, { id, stoppedEditors = [] } = {}) {
-  const status = snapshot(codexHome, bridgeHome),
+function requestReload(
+  codexHome,
+  bridgeHome,
+  { id, stoppedEditors = [], onlyStopped = false } = {},
+) {
+  const status = onlyStopped
+      ? { clients: [], ide: 0, connectedEditors: records(bridgeHome).length }
+      : snapshot(codexHome, bridgeHome),
     targets = status.clients.filter(
       (c) => c.kind === 'editor' && c.canReload && (!id || c.editorId === id),
     );

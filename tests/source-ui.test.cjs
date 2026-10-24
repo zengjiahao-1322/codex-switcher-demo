@@ -57,7 +57,9 @@ function backend({ accounts, clients = [] } = {}) {
         },
       };
     if (route === 'clients')
-      return { body: { home: '', clients, auxiliary: [], editors: [], connectedEditors: 0 } };
+      return {
+        body: { home: '', clients, auxiliary: [], editors: [], connectedEditors: 0, remotes: [] },
+      };
     return { body: { message: route + ' ok', items: [] } };
   };
 }

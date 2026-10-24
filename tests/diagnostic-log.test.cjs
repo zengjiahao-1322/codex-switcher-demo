@@ -204,7 +204,7 @@ test('切换失败时提示可以导出诊断日志', async () => {
         : route === 'accounts'
           ? { body: { items: [], switchJob: switched ? failedJob : null } }
           : route === 'clients'
-            ? { body: { home: '', clients: [], auxiliary: [], connectedEditors: 0 } }
+            ? { body: { home: '', clients: [], auxiliary: [], connectedEditors: 0, remotes: [] } }
             : route === 'desktopSwitch'
               ? ((switched = true), { body: { message: '已开始切换' } })
               : { body: {} },

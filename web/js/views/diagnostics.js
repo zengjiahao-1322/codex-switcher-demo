@@ -4,6 +4,7 @@ import { accountData, modelCache, state } from '../store.js';
 import { activeTab, showTab } from '../tabs.js';
 import { busy, rowButton, status, tag } from '../ui.js';
 import { beginLogin, refreshAccounts } from './accounts.js';
+import { renderRemotes } from './remotes.js';
 import { chooseSource } from './sources.js';
 
 export function renderDiagnosis() {
@@ -14,6 +15,7 @@ export async function refreshClients() {
   if (!lastClients) $('clients-status').textContent = '正在查看运行中的 Codex…';
   try {
     const c = await api('clients', {});
+    renderRemotes(c.remotes);
     // 自动重载的前提直接显示在勾选框旁，避免用户把“勾选”当成“已连接”。
     const missing = c.clients.filter(
       (p) => p.kind === 'ide' && p.confirmed && p.shared && !p.editorId,

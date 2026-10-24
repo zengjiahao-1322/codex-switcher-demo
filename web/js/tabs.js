@@ -8,6 +8,7 @@ export const tabPanels = {
   accounts: 'account-manager',
   apis: 'api-manager',
   editors: 'client-details',
+  remotes: 'remote-panel',
   settings: 'settings-panel',
 };
 export let activeTab = null,
@@ -22,7 +23,8 @@ export function showTab(name, toggle = false) {
   activeTab = next;
   clearInterval(clientsTimer);
   clientsTimer = null;
-  if (next === 'editors') {
+  // 编辑器和远程服务器都来自运行状态，打开时每 5 秒刷新。
+  if (next === 'editors' || next === 'remotes') {
     refreshClients();
     clientsTimer = setInterval(refreshClients, 5000);
   }

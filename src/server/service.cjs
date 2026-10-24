@@ -298,7 +298,7 @@ function createService({
   // Codex 模型下拉列表：生成 model_catalog_json 指向的模型目录。条目以 Codex 官方缓存中的模型元数据为模板（同名用其本身，否则用官方默认模型），
   // Codex 要求完整字段，只写名称会被拒绝并退回官方列表。模型 = 当前模型 + 配置中的可选模型 + 供应商模型列表（不超过 80 个时）；当前模型排第一（即默认）。
   const catalogPath = path.join(bridgeHome, 'model-catalog.json');
-  async function buildCatalog(p, model, outputPath = catalogPath) {
+  async function catalogData(p, model) {
     const official = (readJson(path.join(codexHome, 'models_cache.json'))?.models || []).filter(
       (m) => m && m.slug,
     );
@@ -339,10 +339,15 @@ function createService({
       upgrade: null,
       availability_nux: null,
     }));
+    return { text: JSON.stringify({ models }, null, 1), count: models.length, source, truncated };
+  }
+  async function buildCatalog(p, model, outputPath = catalogPath) {
+    const data = await catalogData(p, model);
+    if (!data) return null;
     const tmp = outputPath + '.' + crypto.randomUUID() + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify({ models }, null, 1));
+    fs.writeFileSync(tmp, data.text);
     fs.renameSync(tmp, outputPath);
-    return { path: outputPath, count: models.length, source, truncated };
+    return { path: outputPath, count: data.count, source: data.source, truncated: data.truncated };
   }
   // 切回官方时 model_catalog_json 应恢复为用户原有值（通常为空）；本工具生成的目录不算原有值。
   function originalCatalog(c) {
@@ -593,6 +598,7 @@ function createService({
       } catch {}
       return {
         ...status,
+        remotes: require('../clients/remote-servers.cjs').groups(bridgeHome),
         runtime,
         editors: require('../clients/editor-integration.cjs')
           .editors()
@@ -640,7 +646,10 @@ function createService({
       let result = clients.heartbeat(bridgeHome, registration);
       let connection = await connectionFor(input);
       // 新后端已关联后才推进完成确认；心跳连通本身不能代表重载成功。
-      if (completedReload && connection.state === 'ready')
+      if (
+        completedReload &&
+        (connection.state === 'ready' || (input.remoteType === 'ssh-remote' && input.remoteAgent))
+      )
         result = clients.heartbeat(bridgeHome, input);
       const wait = Math.min(10000, Math.max(0, Number(input.wait) || 0));
       if (wait && !input.ack && !completedReload && !result.command) {
@@ -654,12 +663,49 @@ function createService({
         longPoll: true,
       };
     },
+    installRemoteAgent: async ({ id }) => {
+      const remote = require('../clients/remote-servers.cjs'),
+        window = require('../clients/client-status.cjs')
+          .records(bridgeHome)
+          .find((row) => row.id === id);
+      if (window?.remoteType !== 'ssh-remote') throw Error('请选择已连接的 Remote-SSH 窗口');
+      if (window.remoteProtocol !== 1) throw Error('请先更新本机伴随扩展并重载这个窗口');
+      const file = require('../clients/editor-integration.cjs').buildRemote(projectDir, bridgeHome);
+      return remote.dispatch(
+        bridgeHome,
+        id,
+        { type: 'installRemoteAgent', base64: fs.readFileSync(file).toString('base64') },
+        { timeout: 60000 },
+      );
+    },
+    remoteSwitch: async ({ authority, providerId, model }) => {
+      if (providerId === OFFICIAL) throw Error('远程服务器只支持可直连的自定义 API');
+      const p = provider(providerId);
+      if (store.access(bridgeHome, p).mode !== 'direct' || !p.apiKey)
+        throw Error('请选择已确认可直连且有密钥的自定义 API');
+      model = String(model || '').trim();
+      if (!model || model.length > 200) throw Error('请选择或填写模型');
+      const catalog = await catalogData(p, model);
+      const results = await require('../clients/remote-servers.cjs').apply(bridgeHome, authority, {
+        provider: p,
+        model,
+        catalog: catalog?.text || null,
+      });
+      return { results };
+    },
     reloadClients: (input) =>
       require('../clients/client-status.cjs').requestReload(codexHome, bridgeHome, input),
     companionPackage: async () => {
       const file = require('../clients/editor-integration.cjs').build(projectDir);
       return {
         filename: 'codex-switcher-companion.vsix',
+        base64: fs.readFileSync(file).toString('base64'),
+      };
+    },
+    remoteAgentPackage: async () => {
+      const file = require('../clients/editor-integration.cjs').buildRemote(projectDir, bridgeHome);
+      return {
+        filename: 'codex-switcher-remote.vsix',
         base64: fs.readFileSync(file).toString('base64'),
       };
     },

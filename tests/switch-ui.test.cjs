@@ -21,7 +21,9 @@ function backend({ switchJob = null, desktopSwitch, clients = [] } = {}) {
     if (route === 'state') return { body: await service.state() };
     if (route === 'accounts') return { body: { items: [], switchJob } };
     if (route === 'clients')
-      return { body: { home: '', clients, auxiliary: [], editors: [], connectedEditors: 0 } };
+      return {
+        body: { home: '', clients, auxiliary: [], editors: [], connectedEditors: 0, remotes: [] },
+      };
     if (route === 'desktopSwitch') return desktopSwitch(body);
     return { body: { message: route + ' ok' } };
   };

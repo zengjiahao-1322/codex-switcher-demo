@@ -19,6 +19,7 @@
   "web/js/views/accounts.js",
   "web/js/views/diagnostics.js",
   "web/js/views/providers.js",
+  "web/js/views/remotes.js",
   "web/js/views/settings.js",
   "web/js/views/sources.js",
   "web/js/views/status.js",
@@ -27,6 +28,7 @@
   "src/clients/autostart.cjs",
   "scripts/cli.cjs",
   "src/clients/client-status.cjs",
+  "src/clients/remote-servers.cjs",
   "src/platform/compatibility.cjs",
   "src/config/core.cjs",
   "src/clients/desktop-account.cjs",
@@ -72,5 +74,7 @@
   "vscode-companion/package.json",
   "vscode-companion/extension.cjs",
   "vscode-companion/extension.vsixmanifest",
-  "vscode-companion/content-types.xml"
+  "vscode-companion/content-types.xml",
+  "vscode-remote-agent/package.json",
+  "vscode-remote-agent/extension.cjs"
 ]

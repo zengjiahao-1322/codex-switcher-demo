@@ -50,12 +50,38 @@ function activate(context) {
   // Remote-SSH 窗口的扩展可能运行在远端 extension host；只有这时才能
   // 读取远端 CODEX_HOME，并由同一主机上的切换器扫描远端 Codex 后端。
   const runsOnRemoteHost = context.extensionUri?.scheme === 'vscode-remote';
+  // Remote-SSH 窗口里本扩展在本机运行时，服务器上的 Codex 只能经服务器端的远端代理读写。
+  // 远端代理没装时命令不存在，记为 null；每 30 秒问一次，写入或安装后立即重问。
+  const sshRemote = () => !runsOnRemoteHost && vscode.env.remoteName === 'ssh-remote';
+  let remoteAgent = null,
+    remoteCheckedAt = 0;
+  async function refreshRemoteAgent() {
+    if (!sshRemote() || Date.now() - remoteCheckedAt < 30000) return;
+    remoteCheckedAt = Date.now();
+    try {
+      const s = await vscode.commands.executeCommand('codexSwitcherRemote.status');
+      // 只转发约定字段，远端代理多给的内容不上报。
+      remoteAgent = {
+        agentVersion: s.agentVersion,
+        host: s.host,
+        platform: s.platform,
+        arch: s.arch,
+        codexHome: s.codexHome,
+        configExists: s.configExists,
+        current: s.current && {
+          model: s.current.model,
+          modelProvider: s.current.modelProvider,
+          baseUrl: s.current.baseUrl,
+        },
+      };
+    } catch {
+      remoteAgent = null;
+    }
+  }
   const report = () => {
     const folders = vscode.workspace.workspaceFolders || [],
-      remote =
-        folders.find((f) => f.uri.scheme === 'vscode-remote')?.uri.authority ||
-        vscode.env.remoteName ||
-        null;
+      authority = folders.find((f) => f.uri.scheme === 'vscode-remote')?.uri.authority || null,
+      remote = authority || vscode.env.remoteName || null;
     const wsl =
       process.platform === 'win32' &&
       !!vscode.workspace
@@ -113,6 +139,13 @@ function activate(context) {
           : candidate,
       remote,
       wsl,
+      remoteProtocol: 1,
+      remoteType: vscode.env.remoteName || null,
+      // 没打开文件夹的 SSH 窗口拿不到 authority，用远端代理报告的主机名代替。
+      authority: sshRemote()
+        ? authority || (remoteAgent ? 'ssh-remote+' + remoteAgent.host : null)
+        : null,
+      remoteAgent: sshRemote() ? remoteAgent : null,
     };
   };
   const connection = () =>
@@ -123,12 +156,79 @@ function activate(context) {
         'utf8',
       ),
     );
+  const ack = (c, data, commandId, ackStatus, extra = {}) =>
+    post(c, 'clientHeartbeat', { ...data, ack: commandId, ackStatus, ...extra }, controller.signal);
+  // 记下待确认的重载后重载窗口；新窗口的心跳带 completedReload 让后台确认。
+  async function reloadWindow(c, data, commandId) {
+    await context.workspaceState.update('codexSwitcher.lastReload', commandId);
+    await context.workspaceState.update('codexSwitcher.pendingReload', {
+      clientId: id,
+      commandId,
+    });
+    setTimeout(async () => {
+      try {
+        await vscode.commands.executeCommand('workbench.action.reloadWindow');
+      } catch (error) {
+        await context.workspaceState.update('codexSwitcher.pendingReload', undefined);
+        // 请求已收到但编辑器未能执行时，不能继续显示为成功或误报服务未运行。
+        await ack(c, data, commandId, 'reload_failed', { ackError: error.message }).catch(() => {});
+      }
+    }, 200);
+  }
+  // 远端读写：转调服务器端远端代理的命令，结果只放在回执里交给后台。
+  async function remoteApply(c, data, command) {
+    let result;
+    try {
+      result =
+        command.step === 'read'
+          ? await vscode.commands.executeCommand('codexSwitcherRemote.read')
+          : await vscode.commands.executeCommand('codexSwitcherRemote.write', {
+              text: command.text,
+              expectedSha256: command.expectedSha256,
+              catalog: command.catalog,
+            });
+    } catch (error) {
+      await ack(c, data, command.id, 'failed', { ackError: error.message });
+      return;
+    }
+    if (command.step === 'write') remoteCheckedAt = 0;
+    await ack(c, data, command.id, 'completed', { ackResult: result });
+    if (command.step === 'write' && command.reload) await reloadWindow(c, data, command.id);
+  }
+  // 远端代理随切换器发行；在这个 SSH 窗口里安装，workspace 扩展会装到服务器一侧。
+  async function installRemoteAgent(c, data, command) {
+    const file = path.join(os.tmpdir(), 'codex-switcher-remote-' + crypto.randomUUID() + '.vsix');
+    try {
+      fs.writeFileSync(file, Buffer.from(command.base64, 'base64'));
+      await vscode.commands.executeCommand(
+        'workbench.extensions.installExtension',
+        vscode.Uri.file(file),
+      );
+    } catch (error) {
+      await ack(c, data, command.id, 'failed', { ackError: error.message });
+      return;
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
+    remoteCheckedAt = 0;
+    await ack(c, data, command.id, 'completed', { ackResult: { installed: true } });
+    // 不等待用户点按钮，避免阻塞心跳。
+    vscode.window
+      .showInformationMessage(
+        '已在服务器上安装 Codex Switcher 远端代理。如果切换器里仍显示未安装，请重载窗口。',
+        '重载窗口',
+      )
+      .then((choice) => {
+        if (choice === '重载窗口') vscode.commands.executeCommand('workbench.action.reloadWindow');
+      });
+  }
   async function tick() {
     if (busy || stopped) return;
     clearTimeout(timer);
     busy = true;
     let delay = 2000;
     try {
+      await refreshRemoteAgent();
       const c = connection(),
         data = report(),
         r = await post(
@@ -143,7 +243,8 @@ function activate(context) {
         );
       if (stopped) return;
       longPoll = r.longPoll === true;
-      if (completedReload && r.connection.state === 'ready') {
+      // 以后台核对后的结论为准：本机窗口要新后端已关联，远程窗口要同服务器同目录的远端代理版本一致。
+      if (completedReload && r.reloadConfirmed === true) {
         await context.workspaceState.update('codexSwitcher.pendingReload', undefined);
         completedReload = undefined;
       }
@@ -166,41 +267,11 @@ function activate(context) {
       if (r.command?.type === 'reload') {
         // 后台只给已确认共用配置的本机后端派发命令；远程窗口标签
         // 不再重复否决它，否则会出现“已关联但拒绝重载”。
-        await post(
-          c,
-          'clientHeartbeat',
-          {
-            ...data,
-            ack: r.command.id,
-            ackStatus: 'reload_requested',
-          },
-          controller.signal,
-        );
-        await context.workspaceState.update('codexSwitcher.lastReload', r.command.id);
-        await context.workspaceState.update('codexSwitcher.pendingReload', {
-          clientId: id,
-          commandId: r.command.id,
-        });
-        setTimeout(async () => {
-          try {
-            await vscode.commands.executeCommand('workbench.action.reloadWindow');
-          } catch (error) {
-            await context.workspaceState.update('codexSwitcher.pendingReload', undefined);
-            // 请求已收到但编辑器未能执行时，不能继续显示为成功或误报服务未运行。
-            await post(
-              c,
-              'clientHeartbeat',
-              {
-                ...data,
-                ack: r.command.id,
-                ackStatus: 'reload_failed',
-                ackError: error.message,
-              },
-              controller.signal,
-            ).catch(() => {});
-          }
-        }, 200);
-      }
+        await ack(c, data, r.command.id, 'reload_requested');
+        await reloadWindow(c, data, r.command.id);
+      } else if (r.command?.type === 'remoteApply') await remoteApply(c, data, r.command);
+      else if (r.command?.type === 'installRemoteAgent')
+        await installRemoteAgent(c, data, r.command);
     } catch (error) {
       if (stopped) return;
       delay = 5000;

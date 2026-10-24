@@ -36,7 +36,7 @@ function createServer({
       downloads.delete(key);
       res.writeHead(200, {
         'Content-Type': 'application/octet-stream',
-        'Content-Disposition': 'attachment; filename=\"codex-switcher-companion.vsix\"',
+        'Content-Disposition': 'attachment; filename="' + item.filename + '"',
         'Content-Length': item.bytes.length,
       });
       res.end(item.bytes);
@@ -100,7 +100,9 @@ function createServer({
         let text = '';
         for await (const chunk of req) {
           text += chunk;
-          if (Buffer.byteLength(text) > 16384) return send(413, { error: 'Payload too large' });
+          // 远端 read 的配置正文通过心跳回传；其余动作维持原来的小请求上限。
+          const limit = url.pathname === '/api/clientHeartbeat' ? 1024 * 1024 : 16384;
+          if (Buffer.byteLength(text) > limit) return send(413, { error: 'Payload too large' });
         }
         const controller = new AbortController(),
           disconnected = () => controller.abort();
@@ -113,10 +115,14 @@ function createServer({
           res.off('close', disconnected);
         }
         if (res.destroyed) return;
-        if (url.pathname === '/api/companionPackage') {
+        if (['/api/companionPackage', '/api/remoteAgentPackage'].includes(url.pathname)) {
           const key = crypto.randomBytes(24).toString('hex');
           for (const [k, v] of downloads) if (Date.now() - v.at > 300000) downloads.delete(k);
-          downloads.set(key, { at: Date.now(), bytes: Buffer.from(result.base64, 'base64') });
+          downloads.set(key, {
+            at: Date.now(),
+            filename: result.filename,
+            bytes: Buffer.from(result.base64, 'base64'),
+          });
           return send(200, { filename: result.filename, url: '/download/' + key });
         }
         return send(200, result);

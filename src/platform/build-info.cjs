@@ -15,7 +15,7 @@ function buildInfo(sequence = require('./release-info.json').sequence) {
   const files = require('../../release-files.json').filter(
     (file) =>
       file === 'release-files.json' ||
-      /^(?:src|web|platform|vscode-companion)\//.test(file) ||
+      /^(?:src|web|platform|vscode-companion|vscode-remote-agent)\//.test(file) ||
       ['scripts/update-worker.cjs', 'main.cjs', 'package.json'].includes(file),
   );
   for (const relative of files.sort()) {

@@ -137,7 +137,16 @@ function pageBackend(options = {}, routes = {}) {
     if (route === 'state') return { body: await service.state() };
     if (route === 'accounts') return { body: { items: [], switchJob: null } };
     if (route === 'clients')
-      return { body: { home: '', clients: [], auxiliary: [], editors: [], connectedEditors: 0 } };
+      return {
+        body: {
+          home: '',
+          clients: [],
+          auxiliary: [],
+          editors: [],
+          connectedEditors: 0,
+          remotes: [],
+        },
+      };
     return { body: { message: route + ' ok' } };
   };
 }

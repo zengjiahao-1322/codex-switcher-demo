@@ -78,6 +78,41 @@ function build(projectDir = PROJECT_ROOT) {
     out,
   );
 }
+function buildRemote(projectDir = PROJECT_ROOT, dataDir) {
+  const source = path.join(projectDir, 'vscode-remote-agent'),
+    pkg = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8')),
+    output = path.join(
+      dataDir ||
+        process.env.BRIDGE_HOME ||
+        (process.platform === 'darwin'
+          ? require('../platform/platform.cjs').dataHome()
+          : path.join(projectDir, 'private')),
+      'codex-switcher-remote.vsix',
+    );
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  return require('../shared/zip.cjs').zip(
+    [
+      ...['package.json', 'extension.cjs'].map((name) => ({
+        name: 'extension/' + name,
+        file: path.join(source, name),
+      })),
+      {
+        name: '[Content_Types].xml',
+        file: path.join(projectDir, 'vscode-companion', 'content-types.xml'),
+      },
+      {
+        name: 'extension.vsixmanifest',
+        data: `<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+ <Metadata><Identity Language="en-US" Id="codex-switcher-remote" Version="${pkg.version}" Publisher="codex-switcher-demo"/><DisplayName>Codex Switcher Remote Agent</DisplayName><Description xml:space="preserve">Apply a selected API to this Remote-SSH server.</Description><Properties><Property Id="Microsoft.VisualStudio.Code.Engine" Value="^1.85.0"/></Properties></Metadata>
+ <Installation><InstallationTarget Id="Microsoft.VisualStudio.Code"/></Installation><Dependencies/>
+ <Assets><Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true"/></Assets>
+</PackageManifest>`,
+      },
+    ],
+    output,
+  );
+}
 async function install(id, projectDir = PROJECT_ROOT) {
   const editor = editors().find((e) => e.id === Number(id));
   if (!editor) throw Error('未检测到该编辑器。可下载 VSIX 后在编辑器中选择“从 VSIX 安装”。');
@@ -120,4 +155,4 @@ function cliFor(shim) {
   const resolve = (value) => path.resolve(path.dirname(shim), value.replace(/^%~dp0/i, ''));
   return { exe: resolve(match[1]), cli: resolve(match[2]) };
 }
-module.exports = { editors, build, install, cliFor };
+module.exports = { editors, build, buildRemote, install, cliFor };
