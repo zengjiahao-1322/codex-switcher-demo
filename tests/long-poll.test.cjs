@@ -44,7 +44,8 @@ test('不带 wait 的心跳立即返回（兼容旧版伴随扩展）', async ()
   const s = await start();
   try {
     const r = await s.beat({ id: 'window-old-0001' });
-    assert.ok(r.ms < 1500, '耗时 ' + Math.round(r.ms) + ' ms');
+    // Mac Intel 的进程扫描可能超过 1.5 秒；仍须明显低于 10 秒长轮询。
+    assert.ok(r.ms < 5000, '耗时 ' + Math.round(r.ms) + ' ms');
     assert.ok(r.body.connection);
   } finally {
     await s.close();
