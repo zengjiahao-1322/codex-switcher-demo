@@ -704,14 +704,24 @@ test(
         : 'new backend did not start',
     );
     const url = new URL(running.url);
+    // running.json 在监听端口前写入；等待真实新后台健康端点就绪。
+    let runtimeResponse;
+    let runtimeError;
+    const healthDeadline = Date.now() + 5000;
+    while (Date.now() < healthDeadline) {
+      try {
+        runtimeResponse = await fetch(url.origin + '/api/runtime', {
+          headers: { Authorization: 'Bearer ' + url.hash.slice(1) },
+        });
+        break;
+      } catch (error) {
+        runtimeError = error;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+    if (!runtimeResponse) throw runtimeError;
     assert.equal(
-      (
-        await (
-          await fetch(url.origin + '/api/runtime', {
-            headers: { Authorization: 'Bearer ' + url.hash.slice(1) },
-          })
-        ).json()
-      ).id,
+      (await runtimeResponse.json()).id,
       newBuild,
     );
     assert.notEqual(url.hash, oldUrl.hash, '新后台必须生成新页面令牌');
