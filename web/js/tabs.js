@@ -1,6 +1,7 @@
 import { $ } from './api.js';
 import { accountData } from './store.js';
 import { accountStatus, refreshQuota } from './views/accounts.js';
+import { refreshBackups } from './views/backups.js';
 import { refreshClients } from './views/diagnostics.js';
 
 // 管理分页默认收起，打开时才读取对应数据；再次点击当前分页收起。
@@ -28,6 +29,9 @@ export function showTab(name, toggle = false) {
     refreshClients();
     clientsTimer = setInterval(() => document.hidden || refreshClients(), 5000);
   }
+  // 备份列表只在打开设置时读取。
+  if (next === 'settings')
+    refreshBackups().catch((e) => ($('backup-list').textContent = '读取备份失败：' + e.message));
   // 每读一个账号额度都要启动一个官方 Codex 进程；只在读数超过 10 分钟时自动刷新，和首屏一致。
   if (
     next === 'accounts' &&

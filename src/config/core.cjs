@@ -249,6 +249,7 @@ function applySwitch(codexHome, provider, model, bridgeHome, catalogPath) {
   const backupPath = path.join(bridgeHome, 'original-config.toml');
   if (!fs.existsSync(backupPath) || parseToml(original || '').model_provider !== 'hermes_bridge')
     atomicWrite(backupPath, original || '');
+  require('./backups.cjs').save(codexHome, bridgeHome, 'switch');
   atomicWrite(configPath, next, original);
   return { ok: true, model, modelProvider: 'hermes_bridge', configPath, backupPath };
 }
@@ -272,11 +273,12 @@ function prepareOfficialConfig(current, model, catalog, credentialsStore) {
     parsed.model_providers?.hermes_bridge,
   );
 }
-function applyOfficial(codexHome, model, catalog, credentialsStore) {
+function applyOfficial(codexHome, model, catalog, credentialsStore, bridgeHome) {
   const configPath = path.join(codexHome, 'config.toml');
   const current = readOptional(configPath);
   const next = prepareOfficialConfig(current, model, catalog, credentialsStore);
   fs.mkdirSync(codexHome, { recursive: true });
+  require('./backups.cjs').save(codexHome, bridgeHome, 'official');
   atomicWrite(configPath, next, current === null ? undefined : current);
   return { ok: true, model: model?.trim() || null, modelProvider: 'openai', configPath };
 }
@@ -334,6 +336,7 @@ function restoreOfficial(codexHome, bridgeHome) {
     },
     parsed.model_providers?.hermes_bridge || original.model_providers?.hermes_bridge,
   );
+  require('./backups.cjs').save(codexHome, bridgeHome, 'official');
   atomicWrite(configPath, next, current);
   return {
     ok: true,
@@ -360,6 +363,15 @@ function withLock(home, fn) {
     fs.unlinkSync(file);
   }
 }
+function restoreBackup(codexHome, bridgeHome, id) {
+  const backups = require('./backups.cjs'),
+    { text, config } = backups.read(bridgeHome, id),
+    configPath = path.join(codexHome, 'config.toml'),
+    current = readOptional(configPath);
+  backups.save(codexHome, bridgeHome, 'restore');
+  atomicWrite(configPath, text, current);
+  return { model: config.model || null, modelProvider: config.model_provider || 'openai' };
+}
 module.exports = {
   discoverProviders,
   publicProviders,
@@ -368,7 +380,9 @@ module.exports = {
   privateAcl,
   applySwitch: (home, p, m, b, cat) => withLock(home, () => applySwitch(home, p, m, b, cat)),
   restoreOfficial: (home, b) => withLock(home, () => restoreOfficial(home, b)),
-  applyOfficial: (home, m, cat, credentialsStore) =>
-    withLock(home, () => applyOfficial(home, m, cat, credentialsStore)),
+  applyOfficial: (home, m, cat, credentialsStore, bridgeHome) =>
+    withLock(home, () => applyOfficial(home, m, cat, credentialsStore, bridgeHome)),
+  restoreBackup: (home, bridgeHome, id) =>
+    withLock(home, () => restoreBackup(home, bridgeHome, id)),
   cleanupBridge: (home, cat) => withLock(home, () => cleanupBridge(home, cat)),
 };

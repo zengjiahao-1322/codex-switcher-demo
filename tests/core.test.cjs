@@ -232,7 +232,7 @@ test('model_catalog_json is managed with the selection: set on switch, restored 
   assert.equal(toml.parse(fs.readFileSync(file, 'utf8')).model_catalog_json, 'C:/mine.json');
   core().applySwitch(codex, provider, 'm', bridge);
   assert.equal(toml.parse(fs.readFileSync(file, 'utf8')).model_catalog_json, undefined);
-  core().applyOfficial(codex, 'o2');
+  core().applyOfficial(codex, 'o2', undefined, undefined, bridge);
   assert.equal(toml.parse(fs.readFileSync(file, 'utf8')).model_catalog_json, undefined);
 });
 test('cleanupBridge removes the switcher provider and its own catalog only when Codex is not using it', (t) => {

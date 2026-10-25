@@ -19,6 +19,10 @@
       {
         "command": "codexSwitcher.connect",
         "title": "Codex Switcher: Connect this window"
+      },
+      {
+        "command": "codexSwitcher.quickSwitch",
+        "title": "Codex Switcher: Switch account or API"
       }
     ],
     "configuration": {

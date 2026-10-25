@@ -203,7 +203,7 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
     if (!selected) throw Error('请选择一个已保存的官方账号');
     captureCurrent();
     const auth = readJson(authFile(id));
-    require('../config/core.cjs').applyOfficial(codexHome, model, catalog, 'file');
+    require('../config/core.cjs').applyOfficial(codexHome, model, catalog, 'file', bridgeHome);
     writeJson(liveFile, auth);
     keychainMode = false;
     keychainAuth = null;

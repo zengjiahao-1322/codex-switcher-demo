@@ -9,6 +9,7 @@ import {
   renderSelect,
   renderSources,
   selectedAccount,
+  startSwitch,
   switchPending,
 } from './sources.js';
 import { renderSummary, renderSwitchProgress } from './status.js';
@@ -58,11 +59,26 @@ export function renderQuotaNotice() {
     .sort((a, b) => accountRemaining(b, bucketId) - accountRemaining(a, bucketId))[0];
   if (alternative) {
     box.append(document.createTextNode('「' + alternative.label + '」同类订阅额度尚有余量。'));
+    // 一键换号：确认后直接切换，不需要先选中再点“切换”；只手动，不自动轮换。
     const button = rowButton(
-      '选择备用账号',
-      () => {
+      '换到「' + alternative.label + '」',
+      async () => {
+        if (
+          !confirm(
+            '切换到「' +
+              alternative.label +
+              '」？Codex 桌面端会重启' +
+              ($('reload-editors').checked ? '，已接入的编辑器窗口会重载' : '') +
+              '，正在运行的任务会中断。',
+          )
+        )
+          return;
         chooseSource('account:' + alternative.id);
-        $('switch').focus();
+        status('正在准备应用账号…');
+        await startSwitch('accountSwitch', {
+          id: alternative.id,
+          reloadEditors: $('reload-editors').checked,
+        });
       },
       accountStatus,
     );

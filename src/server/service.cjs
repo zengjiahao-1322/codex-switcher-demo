@@ -18,6 +18,11 @@ const { createAccounts, identity } = require('../accounts/accounts.cjs'),
 const { createUpdateManager } = require('./update.cjs');
 const operation = require('../config/switch-state.cjs');
 const eventLog = require('../diagnostics/event-log.cjs');
+const backups = require('../config/backups.cjs');
+function switchSource(source = 'web') {
+  if (!['web', 'vscode-local', 'vscode-ssh'].includes(source)) throw Error('切换来源无效');
+  return source;
+}
 const OFFICIAL = 'official',
   MCP_NAME = 'api_switcher';
 const readJson = (p) => {
@@ -511,6 +516,54 @@ function createService({
       },
     };
   }
+  async function prepareBackup({ backupId }) {
+    const { text, config } = backups.read(bridgeHome, backupId),
+      a = adapterSettings(),
+      target = config.model_providers?.hermes_bridge,
+      adapter =
+        config.model_provider === 'hermes_bridge' &&
+        target?.base_url === 'http://127.0.0.1:' + a.port + '/v1',
+      saved =
+        config.model_provider === 'hermes_bridge'
+          ? store
+              .list(bridgeHome)
+              .find((p) =>
+                adapter
+                  ? target.name === p.name + '（经本机转换）'
+                  : p.baseUrl === target?.base_url &&
+                    p.apiKey === target?.experimental_bearer_token,
+              )
+          : null;
+    // 转换配置只记录本机转换器地址；真实上游仍取已有 API 配置，不能误用当前另一个上游。
+    if (adapter && !saved)
+      throw Error('这份备份使用的 API 配置已删除或改名，无法恢复本机转换目标。');
+    if (adapter && !(await serviceUp())) throw Error('本机转换服务未运行，无法恢复这份配置。');
+    const compatible = await require('../platform/compatibility.cjs').validateConfig(
+      text,
+      findCodex({ dataHome: bridgeHome }),
+    );
+    if (!compatible.ok) throw Error(compatible.message);
+    return {
+      label: backups.summary(config),
+      cleanup() {},
+      apply() {
+        core.restoreBackup(codexHome, bridgeHome, backupId);
+        if (adapter) {
+          a.target = { providerId: saved.id, model: config.model, apiMode: saved.apiMode };
+          saveAdapter(a);
+        }
+        if (saved)
+          require('../accounts/accounts.cjs').writeJson(currentPath, {
+            providerId: saved.id,
+            model: config.model,
+            mode: adapter ? 'adapter' : 'direct',
+            at: new Date().toISOString(),
+          });
+        else fs.rmSync(currentPath, { force: true });
+        return { label: backups.summary(config) };
+      },
+    };
+  }
   async function connectionFor(input) {
     // 本机伴随扩展转发的远程窗口没有本机后端，避免每次心跳扫描全机进程。
     if (input.remote && input.companionHost !== 'remote')
@@ -555,6 +608,25 @@ function createService({
     return connection;
   }
   const actions = {
+    backups: () => ({ items: backups.list(bridgeHome) }),
+    restoreBackup: ({ id, reloadEditors = true, source } = {}) =>
+      exclusive(async () => {
+        if (['starting', 'waiting'].includes(accounts.status().login?.status))
+          throw Error('请先完成或取消当前登录');
+        const { config } = backups.read(bridgeHome, id);
+        return scheduleSwitch({
+          id: 'config-restore',
+          kind: 'restore',
+          backupId: id,
+          target: backups.summary(config),
+          source: switchSource(source),
+          codexHome,
+          bridgeHome,
+          projectDir,
+          reloadEditors,
+          threadFollow: 'all',
+        });
+      }),
     checkUpdate: () => updates.actions.checkUpdate(),
     installUpdate: (input) => updates.actions.installUpdate(input),
     updateCompanions: async () => {
@@ -581,12 +653,13 @@ function createService({
       });
       return { results, reload };
     },
-    resumeThreadSync: () =>
+    resumeThreadSync: ({ source } = {}) =>
       exclusive(async () => {
         const previous = operation.switchJob(bridgeHome);
         if (!previous?.threads?.failed) throw Error('没有待继续的旧对话同步任务。');
         return scheduleSwitch({
           id: 'thread-sync',
+          source: switchSource(source),
           resumeThreads: true,
           threadFollow: previous.threadFollow,
           previousProvider: previous.previousProvider,
@@ -725,7 +798,8 @@ function createService({
         throw Error(reason);
       }
     },
-    remoteSwitch: async ({ authority, providerId, accountId, model }) => {
+    remoteSwitch: async ({ authority, providerId, accountId, model, source: requestedSource }) => {
+      const origin = switchSource(requestedSource);
       if ((providerId ? 1 : 0) + (accountId ? 1 : 0) !== 1)
         throw Error('请选择一个官方账号或自定义 API');
       let source;
@@ -749,6 +823,7 @@ function createService({
         bridgeHome,
         authority,
         source,
+        origin,
       );
       if (accountId) remoteCredentials.observe(accountId);
       return { results };
@@ -860,6 +935,7 @@ function createService({
         return scheduleSwitch({
           id: input.id,
           target: target.name,
+          source: switchSource(input.source),
           model: input.model,
           autostart: input.autostart,
           reloadEditors: input.reloadEditors,
@@ -905,7 +981,7 @@ function createService({
         accounts.remove(id);
         return { message: '已移除保存的账号。' };
       }),
-    accountSwitch: ({ id, reloadEditors = true, threadFollow: requestedFollow }) =>
+    accountSwitch: ({ id, reloadEditors = true, threadFollow: requestedFollow, source }) =>
       exclusive(async () => {
         if (['starting', 'waiting'].includes(accounts.status().login?.status))
           throw Error('请先完成或取消当前登录');
@@ -919,6 +995,7 @@ function createService({
         return scheduleSwitch({
           id,
           target: saved.email,
+          source: switchSource(source),
           codexHome,
           bridgeHome,
           reloadEditors,
@@ -962,15 +1039,20 @@ function createService({
         return r;
       }),
     // 10 分钟内没有检测过（或检测结果已过期）时自动先检测一次，未通过则不切换。
-    switch: ({ id, model, autostart: wantAutostart, threadFollow: requestedFollow }) =>
+    switch: ({ id, model, autostart: wantAutostart, threadFollow: requestedFollow, source }) =>
       exclusive(async () => {
+        eventLog.log(bridgeHome, 'switch.start', {
+          kind: id === OFFICIAL ? 'official' : 'api',
+          source: switchSource(source),
+          target: id,
+        });
         const follow = require('../config/thread-follow.cjs');
         const mode = follow.selectedMode(bridgeHome, requestedFollow);
         const previousProvider = follow.provider(codexHome);
         if (id === OFFICIAL) {
           const c = readConfig();
           const m = String(model || officialModel(c) || '').trim() || undefined;
-          core.applyOfficial(codexHome, m, originalCatalog(c));
+          core.applyOfficial(codexHome, m, originalCatalog(c), undefined, bridgeHome);
           fs.rmSync(currentPath, { force: true });
           const threads = await require('../diagnostics/thread-routing.cjs').synchronizeThreads({
             codexHome,
@@ -999,8 +1081,12 @@ function createService({
           prepared.cleanup();
         }
       }),
-    restore: ({ threadFollow: requestedFollow } = {}) =>
+    restore: ({ threadFollow: requestedFollow, source } = {}) =>
       exclusive(async () => {
+        eventLog.log(bridgeHome, 'switch.start', {
+          kind: 'official',
+          source: switchSource(source),
+        });
         const follow = require('../config/thread-follow.cjs');
         const mode = follow.selectedMode(bridgeHome, requestedFollow);
         const previousProvider = follow.provider(codexHome);
@@ -1135,6 +1221,7 @@ function createService({
     state,
     actions,
     prepareApi,
+    prepareBackup,
     handleResponses,
     adapterSettings,
     setListeningPort: (p) => {

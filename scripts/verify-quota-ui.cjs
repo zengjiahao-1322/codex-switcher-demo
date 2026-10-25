@@ -169,9 +169,16 @@ let officialMode = false,
     await page.reload();
     await page.locator('#quota-notice').waitFor({ state: 'visible' });
     assert.ok((await page.locator('#quota-notice').innerText()).includes('10%'));
-    await page.getByRole('button', { name: '选择备用账号', exact: true }).click();
+    // 一键换号：取消确认时不切换；确认后直接对备用账号发起切换。
+    const swap = page.getByRole('button', { name: '换到「Fast account」', exact: true });
+    page.once('dialog', (dialog) => dialog.dismiss());
+    await swap.click();
+    assert.equal(switches, 0, '取消确认时不切换');
+    page.once('dialog', (dialog) => dialog.accept());
+    await swap.click();
+    await page.waitForTimeout(300);
+    assert.equal(switches, 1, '确认后直接切换到备用账号');
     assert.equal(await page.locator('#provider').inputValue(), 'account:fixture-fast');
-    assert.equal(switches, 0, '额度提醒只选择账号，不自动应用或重启');
     accounts[0].quota.status = 'error';
     await page.reload();
     await page.waitForFunction(
@@ -200,7 +207,7 @@ let officialMode = false,
       true,
       'API 模式不应拿官方额度提醒',
     );
-    report.checks.push('low-quota-selects-backup-without-switch-and-ignores-failed-read');
+    report.checks.push('low-quota-one-click-swap-after-confirm-and-ignores-failed-read');
     // 账号说明（邮箱、套餐、到期、读取时间）很长时，手机宽度也只显示省略号，不能撑出横向滚动。
     accounts[1].email = 'a-very-long-mailbox-name-used-to-check-mobile-layout@example.test';
     accounts[1].subscriptionUntil = new Date(Date.now() + 86400000).toISOString();

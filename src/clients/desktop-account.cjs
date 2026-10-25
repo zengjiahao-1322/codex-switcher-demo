@@ -182,6 +182,7 @@ async function runSwitch(
   // 不调用桌面端关闭与启动流程。两种模式共用账号准备和配置应用逻辑。
   const file = path.join(job.bridgeHome, 'account-switch.json');
   const api = job.kind === 'api',
+    restoring = job.kind === 'restore',
     desktop = job.desktopExe !== null,
     resume = job.resumeThreads === true,
     follow = require('../config/thread-follow.cjs');
@@ -221,6 +222,7 @@ async function runSwitch(
     if (['done', 'error'].includes(status))
       log(job.bridgeHome, 'switch.end', {
         job: job.id,
+        source: job.source || 'web',
         status,
         elapsedMs,
         configurationApplied: applied,
@@ -228,6 +230,12 @@ async function runSwitch(
         reload: editorReload?.targets
           ? require('./client-status.cjs').reloadResults(job.bridgeHome, editorReload.targets)
           : [],
+      });
+    if (restoring && ['done', 'error'].includes(status))
+      log(job.bridgeHome, 'config.restore', {
+        id: job.backupId,
+        status: status === 'done' ? 'restored' : 'failed',
+        ...(status === 'error' ? { reason: message } : {}),
       });
   };
   // 每步只记录实际执行结果；桌面打开请求与窗口重载完成分别展示。
@@ -249,6 +257,7 @@ async function runSwitch(
       item.durationMs = Math.round(performance.now() - begin);
       log(job.bridgeHome, 'switch.step', {
         job: job.id,
+        source: job.source || 'web',
         id,
         status: item.status,
         durationMs: item.durationMs,
@@ -276,50 +285,64 @@ async function runSwitch(
   const logClients = (phase, status) =>
     log(job.bridgeHome, 'switch.clients', {
       job: job.id,
+      source: job.source || 'web',
       phase,
       clients: require('./client-status.cjs').diagnosticClients(status, status.inventory),
     });
   log(job.bridgeHome, 'switch.start', {
     job: job.id,
-    kind: resume ? 'resume' : api ? 'api' : 'official',
+    source: job.source || 'web',
+    kind: resume ? 'resume' : restoring ? 'restore' : api ? 'api' : 'official',
     target: resume ? '当前来源' : job.target,
     threadFollow: job.threadFollow,
     reloadEditors: job.reloadEditors !== false,
     desktop,
   });
-  report('preparing', api ? '正在检查 API 和模型列表…' : '正在准备目标账号登录…');
+  report(
+    'preparing',
+    restoring ? '正在检查配置备份…' : api ? '正在检查 API 和模型列表…' : '正在准备目标账号登录…',
+  );
   try {
     mode = follow.selectedMode(job.bridgeHome, job.threadFollow);
     previousProvider = resume ? job.previousProvider : follow.provider(job.codexHome);
     // 后台切换进程是新实例，先读取实际凭据存储，避免漏存 Mac 钥匙串账号。
-    await step('prepare', api ? '检查 API 和准备模型' : '准备账号登录', async () => {
-      await accounts.syncCurrent({ force: true });
-      const checks = await Promise.allSettled([
-        resume
-          ? Promise.resolve()
-          : api
-            ? require('../server/service.cjs').createService(job).prepareApi(job)
-            : accounts.prepare(job.id),
-        (async () => {
-          // 进程归属检查与登录校验互不依赖；全部通过后才允许关闭和写入。
-          if (job.reloadEditors === false) return;
-          const checked = await clients();
-          logClients('check', checked);
-          checkEditors(checked.clients);
-        })(),
-      ]);
-      if (api && !resume && checks[0].status === 'fulfilled') prepared = checks[0].value;
-      // 失败时也等另一项收尾，避免释放切换锁后仍有旧校验在更新凭证。
-      for (const check of checks) if (check.status === 'rejected') throw check.reason;
-      if (job.reloadEditors !== false) {
-        // 登录校验可能耗时数秒。关闭前重新核对一次，所有关闭操作共用此刻的进程表。
-        const latest = await clients({ force: true });
-        logClients('recheck', latest);
-        checkEditors(latest.clients);
-        releaseInventory = latest.inventory;
-        hasSharedEditors = latest.clients.some((c) => c.kind === 'ide' && c.confirmed && c.shared);
-      }
-    });
+    await step(
+      'prepare',
+      restoring ? '检查配置备份' : api ? '检查 API 和准备模型' : '准备账号登录',
+      async () => {
+        if (!restoring) await accounts.syncCurrent({ force: true });
+        const checks = await Promise.allSettled([
+          resume
+            ? Promise.resolve()
+            : restoring
+              ? require('../server/service.cjs').createService(job).prepareBackup(job)
+              : api
+                ? require('../server/service.cjs').createService(job).prepareApi(job)
+                : accounts.prepare(job.id),
+          (async () => {
+            // 进程归属检查与登录校验互不依赖；全部通过后才允许关闭和写入。
+            if (job.reloadEditors === false) return;
+            const checked = await clients();
+            logClients('check', checked);
+            checkEditors(checked.clients);
+          })(),
+        ]);
+        if ((api || restoring) && !resume && checks[0].status === 'fulfilled')
+          prepared = checks[0].value;
+        // 失败时也等另一项收尾，避免释放切换锁后仍有旧校验在更新凭证。
+        for (const check of checks) if (check.status === 'rejected') throw check.reason;
+        if (job.reloadEditors !== false) {
+          // 登录校验可能耗时数秒。关闭前重新核对一次，所有关闭操作共用此刻的进程表。
+          const latest = await clients({ force: true });
+          logClients('recheck', latest);
+          checkEditors(latest.clients);
+          releaseInventory = latest.inventory;
+          hasSharedEditors = latest.clients.some(
+            (c) => c.kind === 'ide' && c.confirmed && c.shared,
+          );
+        }
+      },
+    );
     currentStatus = 'switching';
     // 桌面端与编辑器后端是两组独立进程；同时释放它们，完成后才写入目标凭证。
     const desktopStop = desktop
@@ -342,10 +365,12 @@ async function runSwitch(
     // 退出前官方客户端可能刚刷新令牌；应用目标配置前再保存一次最新登录。
     const result = await step('apply', '保存并应用目标配置', async () => {
       if (resume) return { label: '当前来源' };
-      await accounts.syncCurrent({ force: true });
-      const value = api
-        ? (accounts.captureCurrent(), prepared.apply())
-        : accounts.apply(job.id, job.model, job.catalog);
+      if (!restoring) await accounts.syncCurrent({ force: true });
+      const value = restoring
+        ? prepared.apply()
+        : api
+          ? (accounts.captureCurrent(), prepared.apply())
+          : accounts.apply(job.id, job.model, job.catalog);
       applied = true;
       return value;
     });
@@ -426,9 +451,11 @@ async function runSwitch(
       '已应用 ' +
         (resume
           ? '当前来源（继续同步）'
-          : api
-            ? prepared.label + ' · ' + job.model
-            : result.label + ' 的官方配置') +
+          : restoring
+            ? prepared.label + ' 的配置备份'
+            : api
+              ? prepared.label + ' · ' + job.model
+              : result.label + ' 的官方配置') +
         '。' +
         effect +
         editorNote +

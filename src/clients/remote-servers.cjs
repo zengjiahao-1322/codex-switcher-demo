@@ -21,6 +21,7 @@ function recordReload(bridgeHome, id, { status, reason } = {}) {
   log(bridgeHome, 'remote.reload', {
     host: reload.host || reload.authority,
     codexHome: reload.codexHome,
+    source: reload.source || 'web',
     status,
     ...(status === 'confirmed'
       ? { elapsedMs: Date.now() - reload.requestedAt }
@@ -201,7 +202,7 @@ async function readAuth(bridgeHome, windowId) {
   }
   return { ...result, auth };
 }
-async function apply(bridgeHome, authority, source) {
+async function apply(bridgeHome, authority, source, origin = 'web') {
   if (typeof authority !== 'string' || !/^ssh-remote\+[^\s/\\?#]{1,240}$/.test(authority))
     throw Error('请选择已连接的 Remote-SSH 服务器');
   const clients = require('./client-status.cjs'),
@@ -218,6 +219,7 @@ async function apply(bridgeHome, authority, source) {
       const skip = (reason) => {
         log(bridgeHome, 'remote.sync', {
           ...target,
+          source: origin,
           host: group.host,
           codexHome: group.codexHome,
           status: 'skipped',
@@ -293,6 +295,7 @@ async function apply(bridgeHome, authority, source) {
           authority: group.authority,
           codexHome: group.codexHome,
           requestedAt,
+          source: origin,
         });
         const others = group.windows.filter((item) => item.id !== window.id);
         if (others.length)
@@ -306,6 +309,7 @@ async function apply(bridgeHome, authority, source) {
           });
         log(bridgeHome, 'remote.sync', {
           ...target,
+          source: origin,
           host: group.host,
           codexHome: group.codexHome,
           step,
@@ -326,6 +330,7 @@ async function apply(bridgeHome, authority, source) {
         );
         log(bridgeHome, 'remote.sync', {
           ...target,
+          source: origin,
           host: group.host,
           codexHome: group.codexHome,
           step: error.code === 'REMOTE_TIMEOUT' ? 'timeout' : step,

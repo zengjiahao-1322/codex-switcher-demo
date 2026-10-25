@@ -4,13 +4,13 @@ const fs = require('node:fs'),
   path = require('node:path'),
   crypto = require('node:crypto'),
   http = require('node:http');
-function post(connection, route, data, signal) {
+function post(connection, route, data, signal, method = 'POST', timeout = 15000) {
   return new Promise((resolve, reject) => {
     const u = new URL(connection.url);
     const q = http.request(
       new URL('/api/' + route, u.origin),
       {
-        method: 'POST',
+        method,
         signal,
         headers: { Authorization: 'Bearer ' + u.hash.slice(1), 'content-type': 'application/json' },
       },
@@ -27,7 +27,7 @@ function post(connection, route, data, signal) {
         });
       },
     );
-    q.setTimeout(15000, () => q.destroy(Error('switcher unavailable')));
+    q.setTimeout(timeout, () => q.destroy(Error('switcher unavailable')));
     q.on('error', reject);
     q.end(JSON.stringify(data));
   });
@@ -43,7 +43,8 @@ function activate(context) {
   const controller = new AbortController();
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 20);
   status.text = '$(plug) Codex Switcher';
-  status.command = 'codexSwitcher.connect';
+  // 点击状态栏打开快捷切换列表。
+  status.command = 'codexSwitcher.quickSwitch';
   status.tooltip = 'Connect to the local Codex switcher';
   status.show();
   context.subscriptions.push(status);
@@ -324,6 +325,170 @@ function activate(context) {
       if (!stopped) timer = setTimeout(tick, delay);
     }
   }
+  // 状态栏快捷切换：点击时才向切换器取账号和 API，选中、确认后调用和网页同一个切换接口。
+  // 本机窗口切本机；SSH 窗口只列这台服务器能用的来源，切这台服务器。
+  const quotaLeft = (q) => {
+    if (q?.status !== 'ok' || !q.buckets?.length) return null;
+    const bucket = q.buckets.find((b) => b.id === 'codex') || q.buckets[0];
+    // 已经重置过的窗口不能再用旧比例。
+    const live = bucket.windows.filter((w) => !w.resetsAt || w.resetsAt * 1000 > Date.now());
+    return live.length ? Math.min(...live.map((w) => w.remainingPercent)) : null;
+  };
+  const ago = (iso) => {
+    const minutes = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    return minutes < 60
+      ? minutes + ' 分钟前'
+      : minutes < 1440
+        ? Math.round(minutes / 60) + ' 小时前'
+        : Math.round(minutes / 1440) + ' 天前';
+  };
+  const sameUrl = (x, y) => x.replace(/\/+$/, '') === y.replace(/\/+$/, '');
+  function accountItem(a, using) {
+    const left = quotaLeft(a.quota),
+      tags = [
+        using && '正在使用',
+        left !== null && left <= 20 && '额度低',
+        a.subscriptionUntil && Date.parse(a.subscriptionUntil) < Date.now() && '会员已到期',
+      ].filter(Boolean);
+    return {
+      label: '$(account) ' + a.label,
+      description: [a.plan, tags.join(' · ')].filter(Boolean).join(' · '),
+      detail:
+        left === null
+          ? '额度尚未读取'
+          : '额度剩余 ' + Math.round(left) + '%（' + ago(a.quota.checkedAt) + '读取）',
+      // 正在用的排最前；其余额度充足的在前、额度低和未读取的在后。
+      rank: using ? 0 : left === null ? 2 : left > 20 ? 1 : 3,
+      left: left ?? -1,
+      target: { kind: 'account', id: a.id, name: a.label },
+    };
+  }
+  async function quickSwitch() {
+    let c;
+    try {
+      c = connection();
+    } catch {
+      vscode.window.showErrorMessage('没有找到正在运行的 Codex 切换器，请先启动切换器。');
+      return;
+    }
+    const open = () => vscode.env.openExternal(vscode.Uri.parse(c.url));
+    const remote = sshRemote();
+    if (remote && (!remoteAgent || remoteAgent.protocol !== 2)) {
+      const choice = await vscode.window.showWarningMessage(
+        '这台服务器还没有接入可用的远端代理，请先在切换器的“远程服务器”页安装或更新。',
+        '打开切换器',
+      );
+      if (choice) open();
+      return;
+    }
+    let state, accounts;
+    try {
+      [state, accounts] = await Promise.all([
+        post(c, 'state', undefined, undefined, 'GET'),
+        post(c, 'accounts', {}),
+      ]);
+    } catch (error) {
+      vscode.window.showErrorMessage('读取切换器失败：' + error.message);
+      return;
+    }
+    const official = remote
+      ? !remoteAgent.current?.modelProvider || remoteAgent.current.modelProvider === 'openai'
+      : state.current.official;
+    const accountItems = accounts.items
+      .map((a) =>
+        accountItem(a, official && (remote ? remoteAgent.account?.id === a.id : a.current)),
+      )
+      .sort((x, y) => x.rank - y.rank || y.left - x.left);
+    // 服务器连不到本机转换服务，只列直连且有密钥的 API；本机列出有密钥（或本机代理）的 API。
+    const apis = state.providers.filter(
+      (p) =>
+        p.id !== 'official' &&
+        (remote ? p.access?.mode === 'direct' && p.hasKey : p.hasKey || p.local),
+    );
+    const apiItems = apis.map((p) => {
+      const using = remote
+        ? !official &&
+          !!remoteAgent.current?.baseUrl &&
+          sameUrl(remoteAgent.current.baseUrl, p.baseUrl)
+        : p.inUse;
+      return {
+        label: '$(plug) ' + p.name,
+        description: [
+          { direct: '直连', adapter: '经本机转换' }[p.access?.mode] || '未检测',
+          p.model,
+          using && '正在使用',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        detail: p.baseUrl.replace(/^https?:\/\//, ''),
+        target: { kind: 'api', id: p.id, name: p.name, model: p.model },
+      };
+    });
+    const separator = (label) => ({ label, kind: vscode.QuickPickItemKind.Separator });
+    const picked = await vscode.window.showQuickPick(
+      [
+        ...(accountItems.length ? [separator('官方账号'), ...accountItems] : []),
+        ...(apiItems.length ? [separator('自定义 API'), ...apiItems] : []),
+      ],
+      {
+        placeHolder: remote
+          ? '切换服务器 ' + remoteAgent.host + ' 使用的账号或 API（本机不受影响）'
+          : '切换本机 Codex 使用的账号或 API',
+        matchOnDescription: true,
+        matchOnDetail: true,
+      },
+    );
+    if (!picked) return;
+    const t = picked.target,
+      what = t.kind === 'account' ? '官方账号「' + t.name + '」' : '「' + t.name + '」· ' + t.model;
+    const confirmed = await vscode.window.showWarningMessage(
+      remote
+        ? '把服务器 ' +
+            remoteAgent.host +
+            ' 切换到' +
+            what +
+            '？会重启这个窗口里的扩展（不重连服务器），服务器上正在运行的 Codex 任务会中断。本机不受影响。'
+        : '把本机 Codex 切换到' +
+            what +
+            '？Codex 桌面端会重启，已接入的编辑器窗口（包括这个窗口）会重载，正在运行的 Codex 任务会中断。',
+      { modal: true },
+      '切换',
+    );
+    if (confirmed !== '切换') return;
+    const source = remote ? 'vscode-ssh' : 'vscode-local';
+    const request = remote
+      ? [
+          'remoteSwitch',
+          t.kind === 'account'
+            ? { authority: report().authority, accountId: t.id, source }
+            : { authority: report().authority, providerId: t.id, model: t.model, source },
+        ]
+      : t.kind === 'account'
+        ? ['accountSwitch', { id: t.id, reloadEditors: true, source }]
+        : ['desktopSwitch', { id: t.id, model: t.model, reloadEditors: true, source }];
+    try {
+      const r = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: '正在切换到' + what + '…' },
+        // 服务器读写各有 30 秒上限，等待时间放宽到 2 分钟。
+        () => post(c, request[0], request[1], undefined, 'POST', 120000),
+      );
+      const failed = (r.results || []).filter((x) => x.status !== 'synced');
+      if (failed.length)
+        throw Error(failed.map((x) => x.codexHome + '：' + (x.reason || x.status)).join('；'));
+      vscode.window.showInformationMessage(
+        remote ? '已写入服务器，正在重启扩展让 Codex 换上新配置。' : r.message || '已开始切换。',
+      );
+    } catch (error) {
+      const choice = await vscode.window.showErrorMessage(
+        '切换失败：' + error.message,
+        '打开切换器',
+      );
+      if (choice) open();
+    }
+  }
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codexSwitcher.quickSwitch', quickSwitch),
+  );
   context.subscriptions.push(vscode.commands.registerCommand('codexSwitcher.connect', tick));
   context.subscriptions.push({
     dispose() {

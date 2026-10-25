@@ -26,9 +26,16 @@ async function runCompanion({
   pendingReload,
   authText,
   agentVersion,
+  // routes：切换器普通接口的假回复；ui：快捷列表和确认框的选择；act：心跳就绪后执行的操作。
+  routes = {},
+  ui = {},
+  act = async () => {},
   until,
 }) {
   const statusItem = { show() {}, text: '', tooltip: '' };
+  const calls = [],
+    shown = [],
+    registered = new Map();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-companion-remote-'));
   const home = path.join(root, 'server-codex');
   fs.mkdirSync(home);
@@ -46,7 +53,14 @@ async function runCompanion({
     let text = '';
     req.on('data', (d) => (text += d));
     req.on('end', () => {
-      const body = JSON.parse(text || '{}');
+      const body = JSON.parse(text || '{}'),
+        route = req.url.replace(/^\/api\//, '');
+      if (routes[route]) {
+        calls.push({ route, method: req.method, body });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(routes[route](body)));
+        return;
+      }
       requests.push(body);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(
@@ -67,13 +81,22 @@ async function runCompanion({
   );
   const vscode = {
     StatusBarAlignment: { Right: 2 },
-    Uri: { file: (fsPath) => ({ scheme: 'file', fsPath }) },
+    QuickPickItemKind: { Separator: -1 },
+    ProgressLocation: { Notification: 15 },
+    Uri: { file: (fsPath) => ({ scheme: 'file', fsPath }), parse: (url) => ({ url }) },
     window: {
       createStatusBarItem: () => statusItem,
       showInformationMessage: async () => undefined,
+      showErrorMessage: async (...args) => (shown.push({ error: args[0] }), undefined),
+      showWarningMessage: async (...args) => (
+        shown.push({ warning: args[0] }),
+        ui.confirm?.(args[0])
+      ),
+      showQuickPick: async (items, options) => (shown.push({ items, options }), ui.pick?.(items)),
+      withProgress: (options, task) => task(),
     },
     commands: {
-      registerCommand: () => ({ dispose() {} }),
+      registerCommand: (name, handler) => (registered.set(name, handler), { dispose() {} }),
       executeCommand: async (name, input) => {
         executed.push(name);
         if (name.startsWith('codexSwitcherRemote.')) {
@@ -104,7 +127,7 @@ async function runCompanion({
           section === 'codexSwitcher' && key === 'connectionFile' ? connectionFile : fallback,
       }),
     },
-    env: { appName: 'Visual Studio Code', remoteName },
+    env: { appName: 'Visual Studio Code', remoteName, openExternal: async () => true },
     extensions: { all: [] },
   };
   const load = Module._load;
@@ -125,12 +148,13 @@ async function runCompanion({
   }
   const deadline = Date.now() + 5000;
   while (!until(requests) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+  await act({ registered });
   // 等重载的 200 ms 延时执行完。
   await new Promise((r) => setTimeout(r, 300));
   for (const s of subscriptions) s.dispose?.();
   fake.closeAllConnections();
   await new Promise((r) => fake.close(r));
-  return { requests, executed, installed, state, home, statusItem };
+  return { requests, executed, installed, state, home, statusItem, calls, shown };
 }
 const acked = (id) => (requests) => requests.some((r) => r.ack === id);
 
@@ -366,4 +390,108 @@ test('安装失败时回执 failed，临时文件同样删除', async () => {
     .readdirSync(os.tmpdir())
     .filter((name) => name.startsWith('codex-switcher-remote-'));
   assert.deepEqual(leftovers, []);
+});
+
+// 状态栏快捷切换：点击时取账号和 API，选中、确认后调用和网页同一个切换接口。
+const now = new Date().toISOString();
+const quota = (left) => ({
+  status: 'ok',
+  checkedAt: now,
+  buckets: [{ id: 'codex', windows: [{ minutes: 300, remainingPercent: left }] }],
+});
+const providers = [
+  { id: 'official', name: '官方', baseUrl: '' },
+  {
+    id: 'direct',
+    name: 'Direct API',
+    baseUrl: 'https://api.example.com/v1',
+    model: 'gpt-6.1-sol',
+    hasKey: true,
+    inUse: false,
+    access: { mode: 'direct' },
+  },
+  {
+    id: 'adapter',
+    name: 'Adapter API',
+    baseUrl: 'https://adapter.example.com/v1',
+    model: 'm2',
+    hasKey: true,
+    inUse: true,
+    access: { mode: 'adapter' },
+  },
+  {
+    id: 'nokey',
+    name: 'No Key',
+    baseUrl: 'https://nokey.example.com/v1',
+    model: 'm3',
+    hasKey: false,
+    access: { mode: 'direct' },
+  },
+];
+const switchRoutes = (accounts, extra = {}) => ({
+  state: () => ({ current: { official: false, model: 'm2' }, providers }),
+  accounts: () => ({ items: accounts, switchJob: null }),
+  ...extra,
+});
+const quick = (registered) => registered.get('codexSwitcher.quickSwitch')();
+const labels = (shown) =>
+  shown
+    .find((s) => s.items)
+    .items.filter((i) => i.kind !== -1)
+    .map((i) => i.label);
+
+test('SSH 窗口快捷切换：只列服务器能用的来源，额度充足排前，确认后切这台服务器', async () => {
+  const { identity } = require('../src/accounts/accounts.cjs');
+  const team = identity(JSON.parse(login('2026-10-24T10:00:00Z'))).id;
+  const accounts = [
+    { id: 'low', label: 'low@example.com', plan: 'plus', current: true, quota: quota(10) },
+    { id: 'none', label: 'none@example.com', plan: 'free', current: false, quota: null },
+    { id: team, label: 'team@example.com', plan: 'team', current: false, quota: quota(80) },
+  ];
+  const { calls, shown } = await runCompanion({
+    authText: login('2026-10-24T10:00:00Z'),
+    routes: switchRoutes(accounts, {
+      remoteSwitch: () => ({ results: [{ codexHome: '/srv', status: 'synced' }] }),
+    }),
+    ui: {
+      pick: (items) => items.find((i) => i.label.includes('team@example.com')),
+      confirm: () => '切换',
+    },
+    until: (r) => r.length >= 1,
+    act: ({ registered }) => quick(registered),
+  });
+  assert.deepEqual(labels(shown), [
+    '$(account) team@example.com',
+    '$(account) none@example.com',
+    '$(account) low@example.com',
+    '$(plug) Direct API',
+  ]);
+  const direct = shown.find((s) => s.items).items.find((i) => i.label === '$(plug) Direct API');
+  assert.match(direct.description, /正在使用/, '服务器当前就是这个 API 地址');
+  assert.match(shown.find((s) => s.warning).warning, /不重连服务器/);
+  assert.deepEqual(calls.find((c) => c.route === 'remoteSwitch').body, {
+    authority: 'ssh-remote+gpu-box',
+    accountId: team,
+    source: 'vscode-ssh',
+  });
+});
+
+test('本机窗口快捷切换：列出全部 API，确认后按默认模型切本机', async () => {
+  const { calls } = await runCompanion({
+    remoteName: null,
+    routes: switchRoutes([], { desktopSwitch: () => ({ message: '已开始切换' }) }),
+    ui: {
+      pick: (items) => items.find((i) => i.label === '$(plug) Direct API'),
+      confirm: () => '切换',
+    },
+    until: (r) => r.length >= 1,
+    act: ({ registered }) => quick(registered),
+  });
+  assert.deepEqual(calls.find((c) => c.route === 'desktopSwitch').body, {
+    id: 'direct',
+    model: 'gpt-6.1-sol',
+    reloadEditors: true,
+    source: 'vscode-local',
+  });
+  assert.equal(calls.find((c) => c.route === 'state').method, 'GET');
 });

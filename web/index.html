@@ -308,6 +308,12 @@
           <p class="note">
             部分 API 需要经本机转换后才能被 Codex 使用，转换服务需保持运行；可直连的 API 不受影响。
           </p>
+          <h3 class="settings-title">配置备份</h3>
+          <p class="note">
+            切换器每次改写本机 Codex 配置前会自动备份，保留最近 10
+            份。备份不含登录信息，恢复不会改变当前登录的账号。
+          </p>
+          <div id="backup-list"></div>
           <h3 class="settings-title">版本与更新</h3>
           <p class="note" id="update-status">尚未检查更新。</p>
           <button type="button" id="update-check">检查更新</button>
