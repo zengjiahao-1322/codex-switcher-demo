@@ -92,7 +92,12 @@ async function runCompanion({
         shown.push({ warning: args[0] }),
         ui.confirm?.(args[0])
       ),
-      showQuickPick: async (items, options) => (shown.push({ items, options }), ui.pick?.(items)),
+      // 和 VS Code 一样接受还在加载的列表。
+      showQuickPick: async (pending, options) => {
+        const items = await pending;
+        shown.push({ items, options });
+        return ui.pick?.(items);
+      },
       withProgress: (options, task) => task(),
     },
     commands: {
@@ -469,6 +474,7 @@ test('SSH 窗口快捷切换：只列服务器能用的来源，额度充足排�
   const direct = shown.find((s) => s.items).items.find((i) => i.label === '$(plug) Direct API');
   assert.match(direct.description, /正在使用/, '服务器当前就是这个 API 地址');
   assert.match(shown.find((s) => s.warning).warning, /不重连服务器/);
+  assert.match(shown.find((s) => s.warning).warning, /登录会保存到服务器上/);
   assert.deepEqual(calls.find((c) => c.route === 'remoteSwitch').body, {
     authority: 'ssh-remote+gpu-box',
     accountId: team,

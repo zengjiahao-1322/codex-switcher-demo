@@ -381,63 +381,20 @@ function activate(context) {
       if (choice) open();
       return;
     }
-    let state, accounts;
+    // 列表先弹出（显示加载中），数据到了再填，点击后立即有反应。
+    let picked;
     try {
-      [state, accounts] = await Promise.all([
-        post(c, 'state', undefined, undefined, 'GET'),
-        post(c, 'accounts', {}),
-      ]);
-    } catch (error) {
-      vscode.window.showErrorMessage('读取切换器失败：' + error.message);
-      return;
-    }
-    const official = remote
-      ? !remoteAgent.current?.modelProvider || remoteAgent.current.modelProvider === 'openai'
-      : state.current.official;
-    const accountItems = accounts.items
-      .map((a) =>
-        accountItem(a, official && (remote ? remoteAgent.account?.id === a.id : a.current)),
-      )
-      .sort((x, y) => x.rank - y.rank || y.left - x.left);
-    // 服务器连不到本机转换服务，只列直连且有密钥的 API；本机列出有密钥（或本机代理）的 API。
-    const apis = state.providers.filter(
-      (p) =>
-        p.id !== 'official' &&
-        (remote ? p.access?.mode === 'direct' && p.hasKey : p.hasKey || p.local),
-    );
-    const apiItems = apis.map((p) => {
-      const using = remote
-        ? !official &&
-          !!remoteAgent.current?.baseUrl &&
-          sameUrl(remoteAgent.current.baseUrl, p.baseUrl)
-        : p.inUse;
-      return {
-        label: '$(plug) ' + p.name,
-        description: [
-          { direct: '直连', adapter: '经本机转换' }[p.access?.mode] || '未检测',
-          p.model,
-          using && '正在使用',
-        ]
-          .filter(Boolean)
-          .join(' · '),
-        detail: p.baseUrl.replace(/^https?:\/\//, ''),
-        target: { kind: 'api', id: p.id, name: p.name, model: p.model },
-      };
-    });
-    const separator = (label) => ({ label, kind: vscode.QuickPickItemKind.Separator });
-    const picked = await vscode.window.showQuickPick(
-      [
-        ...(accountItems.length ? [separator('官方账号'), ...accountItems] : []),
-        ...(apiItems.length ? [separator('自定义 API'), ...apiItems] : []),
-      ],
-      {
+      picked = await vscode.window.showQuickPick(loadItems(c, remote), {
         placeHolder: remote
           ? '切换服务器 ' + remoteAgent.host + ' 使用的账号或 API（本机不受影响）'
           : '切换本机 Codex 使用的账号或 API',
         matchOnDescription: true,
         matchOnDetail: true,
-      },
-    );
+      });
+    } catch (error) {
+      vscode.window.showErrorMessage('读取切换器失败：' + error.message);
+      return;
+    }
     if (!picked) return;
     const t = picked.target,
       what = t.kind === 'account' ? '官方账号「' + t.name + '」' : '「' + t.name + '」· ' + t.model;
@@ -447,10 +404,15 @@ function activate(context) {
             remoteAgent.host +
             ' 切换到' +
             what +
-            '？会重启这个窗口里的扩展（不重连服务器），服务器上正在运行的 Codex 任务会中断。本机不受影响。'
+            '？' +
+            // 和网页一致：官方登录会写到服务器上，需要明确告知。
+            (t.kind === 'account'
+              ? '这个账号的登录会保存到服务器上（只有当前用户可读）；本机和服务器同时用这个账号时，切换器会让两边登录保持一致。'
+              : 'API 地址、模型和密钥会写入服务器的 config.toml（只有当前用户可读）。') +
+            '会重启这个窗口里的扩展（不重连服务器），服务器上正在运行的 Codex 任务会中断。本机不受影响。'
         : '把本机 Codex 切换到' +
             what +
-            '？Codex 桌面端会重启，已接入的编辑器窗口（包括这个窗口）会重载，正在运行的 Codex 任务会中断。',
+            '？Codex 桌面端会重启，已接入、共用这份配置的编辑器窗口会重载，正在运行的 Codex 任务会中断。',
       { modal: true },
       '切换',
     );
@@ -485,6 +447,50 @@ function activate(context) {
       );
       if (choice) open();
     }
+  }
+  async function loadItems(c, remote) {
+    const [state, accounts] = await Promise.all([
+      post(c, 'state', undefined, undefined, 'GET'),
+      post(c, 'accounts', {}),
+    ]);
+    const official = remote
+      ? !remoteAgent.current?.modelProvider || remoteAgent.current.modelProvider === 'openai'
+      : state.current.official;
+    const accountItems = accounts.items
+      .map((a) =>
+        accountItem(a, official && (remote ? remoteAgent.account?.id === a.id : a.current)),
+      )
+      .sort((x, y) => x.rank - y.rank || y.left - x.left);
+    // 服务器连不到本机转换服务，只列直连且有密钥的 API；本机列出有密钥（或本机代理）的 API。
+    const apis = state.providers.filter(
+      (p) =>
+        p.id !== 'official' &&
+        (remote ? p.access?.mode === 'direct' && p.hasKey : p.hasKey || p.local),
+    );
+    const apiItems = apis.map((p) => {
+      const using = remote
+        ? !official &&
+          !!remoteAgent.current?.baseUrl &&
+          sameUrl(remoteAgent.current.baseUrl, p.baseUrl)
+        : p.inUse;
+      return {
+        label: '$(plug) ' + p.name,
+        description: [
+          { direct: '直连', adapter: '经本机转换' }[p.access?.mode] || '未检测',
+          p.model,
+          using && '正在使用',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        detail: p.baseUrl.replace(/^https?:\/\//, ''),
+        target: { kind: 'api', id: p.id, name: p.name, model: p.model },
+      };
+    });
+    const separator = (label) => ({ label, kind: vscode.QuickPickItemKind.Separator });
+    return [
+      ...(accountItems.length ? [separator('官方账号'), ...accountItems] : []),
+      ...(apiItems.length ? [separator('自定义 API'), ...apiItems] : []),
+    ];
   }
   context.subscriptions.push(
     vscode.commands.registerCommand('codexSwitcher.quickSwitch', quickSwitch),
