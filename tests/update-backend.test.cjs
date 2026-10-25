@@ -704,9 +704,9 @@ test(
         : 'new backend did not start',
     );
     const url = new URL(running.url);
-    // running.json 在监听端口前写入；等待真实新后台健康端点就绪。
     let runtimeResponse;
     let runtimeError;
+    const healthRetries = [];
     const healthDeadline = Date.now() + 5000;
     while (Date.now() < healthDeadline) {
       try {
@@ -716,17 +716,24 @@ test(
         break;
       } catch (error) {
         runtimeError = error;
+        let pidState = 'unknown';
+        try {
+          process.kill(running.pid, 0);
+          pidState = 'alive';
+        } catch (processError) {
+          pidState = processError.code || 'not-alive';
+        }
+        healthRetries.push({
+          cause: error.cause?.code || 'none',
+          pid: running.pid,
+          pidState,
+          build: running.build.id,
+        });
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
     }
+    console.log('升级健康检查重试记录：' + JSON.stringify(healthRetries));
     if (!runtimeResponse) {
-      let pidState = 'unknown';
-      try {
-        process.kill(running.pid, 0);
-        pidState = 'alive';
-      } catch (error) {
-        pidState = error.code || 'not-alive';
-      }
       throw Error(
         '新后台健康请求失败：' +
           runtimeError.message +
@@ -735,7 +742,7 @@ test(
           ' pid=' +
           running.pid +
           ' pidState=' +
-          pidState +
+          healthRetries.at(-1).pidState +
           ' build=' +
           running.build.id,
       );
