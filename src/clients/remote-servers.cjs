@@ -5,8 +5,26 @@ const path = require('node:path'),
 const { redact, log } = require('../diagnostics/event-log.cjs');
 // 远端配置正文和回执只经过常驻服务内存，不能复用落盘的窗口命令字段。
 const pending = new Map();
+const reloads = new Map();
 const keyFor = (home, id) => path.resolve(home) + '\0' + id;
 const digest = (text) => crypto.createHash('sha256').update(text).digest('hex');
+function markReload(bridgeHome, id, target) {
+  reloads.set(keyFor(bridgeHome, id), { ...target, requestedAt: Date.now() });
+}
+function recordReload(bridgeHome, id, { status, reason } = {}) {
+  const key = keyFor(bridgeHome, id),
+    reload = reloads.get(key);
+  if (!reload) return;
+  reloads.delete(key);
+  log(bridgeHome, 'remote.reload', {
+    host: reload.host || reload.authority,
+    codexHome: reload.codexHome,
+    status,
+    ...(status === 'confirmed'
+      ? { elapsedMs: Date.now() - reload.requestedAt }
+      : { reason: redact(reason || '远程窗口未能执行重载') }),
+  });
+}
 
 function agentStatus(value) {
   if (value == null) return null;
@@ -255,6 +273,11 @@ async function apply(bridgeHome, authority, source) {
             ...(authText ? { auth: { text: authText, expectedSha256: previousAuth.sha256 } } : {}),
           };
         step = 'write';
+        markReload(bridgeHome, window.id, {
+          host: group.host,
+          authority: group.authority,
+          codexHome: group.codexHome,
+        });
         const written = await dispatch(bridgeHome, window.id, write);
         if (written?.ok !== true || written.sha256 !== digest(text))
           throw Error('远端未确认写入目标配置');
@@ -289,6 +312,7 @@ async function apply(bridgeHome, authority, source) {
           previousAuth?.text,
           previousAuth?.auth,
         );
+        recordReload(bridgeHome, window.id, { status: 'failed', reason });
         log(bridgeHome, 'remote.sync', {
           ...target,
           host: group.host,
@@ -313,5 +337,7 @@ module.exports = {
   windowFor,
   readAuth,
   redactReason,
+  markReload,
+  recordReload,
   apply,
 };

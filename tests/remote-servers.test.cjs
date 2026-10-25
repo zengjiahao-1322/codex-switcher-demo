@@ -162,6 +162,12 @@ test('同服务器同目录只写一次，保留远端设置并使用远端模�
   const result = await pending;
   assert.equal(result.length, 1);
   assert.equal(result[0].status, 'synced');
+  const writeCommandId = write.id;
+  clients.heartbeat(home, {
+    ...first,
+    id: 'remote-group-reloaded',
+    completedReload: { clientId: first.id, commandId: writeCommandId },
+  });
   assert.equal(remote.command(home, second.id), null);
   assert.equal(clients.records(home).find((item) => item.id === second.id).command.type, 'reload');
   assert.equal(fileText(home).includes(secret), false);
@@ -169,9 +175,13 @@ test('同服务器同目录只写一次，保留远端设置并使用远端模�
   const events = require('../src/diagnostics/event-log.cjs').readRecent(home, 10);
   assert.deepEqual(
     events.map((row) => row.event),
-    ['remote.sync'],
+    ['remote.sync', 'remote.reload'],
   );
   assert.equal(events[0].sha256.length, 8);
+  assert.equal(
+    events.some((row) => row.event === 'remote.reload' && row.status === 'confirmed'),
+    true,
+  );
 });
 
 test('未装代理和版本不同均跳过，非SSH与未连接服务器明确拒绝', async (t) => {

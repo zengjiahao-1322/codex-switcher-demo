@@ -185,12 +185,18 @@ function heartbeat(bridgeHome, input) {
     row.lastAck.id === input.ack &&
     input.ackStatus === 'reload_failed'
   )
-    row.lastAck = {
-      ...row.lastAck,
-      status: 'reload_failed',
-      error: '远端窗口未能执行重载，请在编辑器中手动重载',
-      at: Date.now(),
-    };
+    (() => {
+      row.lastAck = {
+        ...row.lastAck,
+        status: 'reload_failed',
+        error: '远端窗口未能执行重载，请在编辑器中手动重载',
+        at: Date.now(),
+      };
+      remoteServers.recordReload(bridgeHome, id, {
+        status: 'failed',
+        reason: input.ackError,
+      });
+    })();
   else if (
     input.ack &&
     (row.command?.id === input.ack || (row.lastAck?.id === input.ack && !row.lastAck.remote))
@@ -223,6 +229,7 @@ function heartbeat(bridgeHome, input) {
         old.lastAck = { ...old.lastAck, status: 'reloaded', at: Date.now() };
       row.lastAck = old.lastAck;
       reloadConfirmed = true;
+      remoteServers.recordReload(bridgeHome, completed.clientId, { status: 'confirmed' });
       if (old.remoteAgent) old.seenAt = 0;
       writeJson(oldFile, old);
     }
