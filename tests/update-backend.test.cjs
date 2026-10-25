@@ -719,7 +719,27 @@ test(
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
     }
-    if (!runtimeResponse) throw runtimeError;
+    if (!runtimeResponse) {
+      let pidState = 'unknown';
+      try {
+        process.kill(running.pid, 0);
+        pidState = 'alive';
+      } catch (error) {
+        pidState = error.code || 'not-alive';
+      }
+      throw Error(
+        '新后台健康请求失败：' +
+          runtimeError.message +
+          ' cause=' +
+          (runtimeError.cause?.code || 'none') +
+          ' pid=' +
+          running.pid +
+          ' pidState=' +
+          pidState +
+          ' build=' +
+          running.build.id,
+      );
+    }
     assert.equal(
       (await runtimeResponse.json()).id,
       newBuild,
