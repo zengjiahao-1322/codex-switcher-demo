@@ -178,6 +178,7 @@ test('同服务器同目录只写一次，保留远端设置并使用远端模�
     ['remote.sync', 'remote.reload'],
   );
   assert.equal(events[0].sha256.length, 8);
+  assert.equal(typeof events[0].elapsedMs, 'number');
   assert.equal(
     events.some((row) => row.event === 'remote.reload' && row.status === 'confirmed'),
     true,
@@ -226,6 +227,10 @@ test('读回sha不符不写入；写入失败只记录脱敏原因，不影响�
   assert.equal(events.at(-1).codexHome, input.remoteAgent.codexHome);
   assert.match(events.at(-1).reason, /文件已被手动修改/);
   assert.equal(events.at(-1).reason.includes(secret), false);
+  assert.equal(
+    events.some((row) => row.event === 'remote.reload'),
+    false,
+  );
 });
 
 test('远程请求超时后释放内存命令，不重试也不写磁盘', async (t) => {

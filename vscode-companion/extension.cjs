@@ -53,7 +53,9 @@ function activate(context) {
   // Remote-SSH 窗口里本扩展在本机运行时，服务器上的 Codex 只能经服务器端的远端代理读写。
   // 远端代理没装时命令不存在，记为 null；每 30 秒问一次，写入或安装后立即重问。
   const sshRemote = () => !runsOnRemoteHost && vscode.env.remoteName === 'ssh-remote';
+  // remoteAgentError 记下最近一次问不到远端代理的原因，随心跳交给后台写日志。
   let remoteAgent = null,
+    remoteAgentError = null,
     remoteCheckedAt = 0;
   async function refreshRemoteAgent() {
     if (!sshRemote() || Date.now() - remoteCheckedAt < 30000) return;
@@ -81,8 +83,10 @@ function activate(context) {
           lastRefresh: s.account.lastRefresh,
         },
       };
-    } catch {
+      remoteAgentError = null;
+    } catch (error) {
       remoteAgent = null;
+      remoteAgentError = String(error.message).slice(0, 300);
     }
   }
   const report = () => {
@@ -153,6 +157,7 @@ function activate(context) {
         ? authority || (remoteAgent ? 'ssh-remote+' + remoteAgent.host : null)
         : null,
       remoteAgent: sshRemote() ? remoteAgent : null,
+      remoteAgentError: sshRemote() ? remoteAgentError : null,
     };
   };
   const connection = () =>

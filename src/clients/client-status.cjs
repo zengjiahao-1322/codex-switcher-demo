@@ -250,9 +250,10 @@ function heartbeat(bridgeHome, input) {
 function waitForCommand(bridgeHome, id, wait, signal) {
   const file = path.join(bridgeHome, 'clients', id + '.json');
   return new Promise((resolve, reject) => {
-    let modified;
+    const remote = require('./remote-servers.cjs');
     const finish = (error, command = null) => {
-      clearInterval(interval);
+      watcher.close();
+      unsubscribe();
       clearTimeout(timeout);
       signal?.removeEventListener('abort', aborted);
       if (error) reject(error);
@@ -260,21 +261,21 @@ function waitForCommand(bridgeHome, id, wait, signal) {
     };
     const check = () => {
       try {
-        const remote = require('./remote-servers.cjs').command(bridgeHome, id);
-        if (remote) return finish(null, remote);
-        const current = fs.statSync(file).mtimeMs;
-        if (current !== modified) {
-          modified = current;
-          const row = JSON.parse(fs.readFileSync(file, 'utf8'));
-          if (row.command) finish(null, row.command);
-        }
+        const command = remote.command(bridgeHome, id);
+        if (command) return finish(null, command);
+        const row = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (row.command) finish(null, row.command);
       } catch (error) {
         finish(error);
       }
     };
     const aborted = () => finish(null),
-      interval = setInterval(check, 250),
+      watcher = fs.watch(path.dirname(file), (event, name) => {
+        if (name === null || name === id + '.json') check();
+      }),
+      unsubscribe = remote.onCommand(bridgeHome, id, check),
       timeout = setTimeout(() => finish(null), wait);
+    watcher.on('error', (error) => finish(error));
     signal?.addEventListener('abort', aborted, { once: true });
     // 扫描进程期间也可能刚写入命令，开始等待时先读一次，避免漏掉这次变化。
     if (signal?.aborted) aborted();

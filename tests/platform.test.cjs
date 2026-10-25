@@ -25,13 +25,17 @@ test('Windows 手动系统代理支持统一地址、按协议地址和关闭状
 });
 test('显式代理环境变量优先，不读取 Windows 系统代理', (t) => {
   const previous = process.env.HTTPS_PROXY;
-  process.env.HTTPS_PROXY = 'http://explicit-proxy.example:1234';
+  process.env.HTTPS_PROXY = 'http://fixture-user:fixture-password@explicit-proxy.example:1234';
   try {
     const read = t.mock.method(cp, 'execFileSync', () => {
       throw Error('不应读取系统代理');
     });
     const env = require('../src/platform/platform.cjs').codexEnv('fixture-home');
     assert.equal(env.HTTPS_PROXY, process.env.HTTPS_PROXY);
+    assert.deepEqual(require('../src/platform/platform.cjs').proxyInfo('fixture-home'), {
+      type: 'manual',
+      value: 'http://explicit-proxy.example:1234',
+    });
     assert.equal(read.mock.callCount(), 0);
   } finally {
     if (previous === undefined) delete process.env.HTTPS_PROXY;

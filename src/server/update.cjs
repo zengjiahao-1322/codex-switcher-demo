@@ -146,6 +146,7 @@ function createUpdateManager({
   launchWorker = startWorker,
   shutdown,
 }) {
+  const proxyInfo = () => require('../platform/platform.cjs').proxyInfo(codexHome);
   const resultFile = path.join(bridgeHome, 'updates', 'result.json');
   const previous = fs.existsSync(resultFile)
     ? JSON.parse(fs.readFileSync(resultFile, 'utf8'))
@@ -174,7 +175,8 @@ function createUpdateManager({
     if (state.checkedAt && Date.now() - Date.parse(state.checkedAt) < 6 * 60 * 60 * 1000)
       return snapshot();
     checking = (async () => {
-      const started = performance.now();
+      const started = performance.now(),
+        proxy = proxyInfo();
       state.status = 'checking';
       try {
         const latest = await transport.readJson(releaseUrl + 'release.json');
@@ -204,6 +206,7 @@ function createUpdateManager({
           build: latest.build,
           durationMs: Math.round(performance.now() - started),
           status: state.status,
+          proxy,
         });
       } catch (error) {
         state.status = 'error';
@@ -212,6 +215,7 @@ function createUpdateManager({
           build,
           durationMs: Math.round(performance.now() - started),
           error: error.message,
+          proxy,
           ...(error.curl ? { curl: error.curl } : {}),
         });
       }
@@ -245,6 +249,7 @@ function createUpdateManager({
     task = new Promise((resolve) => setImmediate(resolve))
       .then(async () => {
         const started = performance.now(),
+          proxy = proxyInfo(),
           name = assetName(platform, arch),
           stagingRoot = path.join(bridgeHome, 'updates', 'staging');
         fs.mkdirSync(stagingRoot, { recursive: true });
@@ -258,6 +263,7 @@ function createUpdateManager({
             build: metadata.build,
             durationMs: Math.round(performance.now() - started),
             status: 'verified',
+            proxy,
           });
           state.progress = 50;
           const extracted = path.join(staging, 'extracted');
@@ -289,6 +295,7 @@ function createUpdateManager({
             build: metadata.build,
             durationMs: Math.round(performance.now() - started),
             error: error.message,
+            proxy,
             ...(error.curl ? { curl: error.curl } : {}),
           });
           throw error;

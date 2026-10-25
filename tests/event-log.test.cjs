@@ -92,7 +92,7 @@ test('同一窗口十次相同心跳只记一次，关联状态改变后才追�
     exe: path.join(root, 'openai.chatgpt-test', 'bin', 'codex.exe'),
     context: { ok: true, home: codexHome },
   });
-  now += 5000;
+  now += 30000;
   for (let i = 0; i < 10; i++) await service.actions.clientHeartbeat(input);
   events = readRecent(bridgeHome, 100);
   assert.equal(events.length, 2);
@@ -103,6 +103,46 @@ test('同一窗口十次相同心跳只记一次，关联状态改变后才追�
   now += 30000;
   await service.actions.clientHeartbeat(input);
   assert.equal(readRecent(bridgeHome, 1)[0].to, 'separate');
+});
+
+test('SSH窗口不扫描本机，只在远端代理状态变化时记录脱敏日志', async (t) => {
+  const f = fixture(t),
+    clients = require('../src/clients/client-status.cjs');
+  t.mock.method(clients, 'scanAsync', () => assert.fail('远程窗口不应扫描本机进程'));
+  const service = require('../src/server/service.cjs').createService(f),
+    input = {
+      id: 'ssh-log-window',
+      pid: 710,
+      remote: 'ssh-remote+fixture',
+      remoteType: 'ssh-remote',
+      companionHost: 'local',
+      authority: 'ssh-remote+fixture',
+      companionVersion: '0.1.4',
+    };
+  const result = await service.actions.clientHeartbeat(input);
+  assert.deepEqual(result.connection, { state: 'remote', home: null, backendPids: [] });
+  await service.actions.clientHeartbeat(input);
+  input.remoteAgent = {
+    codexHome: '/srv/.codex',
+    protocol: 2,
+    agentVersion: '0.1.4',
+    host: 'fixture',
+    platform: 'linux',
+    arch: 'x64',
+    account: { id: 'fixture-account', email: 'alice@example.test', plan: 'plus' },
+  };
+  await service.actions.clientHeartbeat(input);
+  await service.actions.clientHeartbeat(input);
+  input.remoteAgent.protocol = 1;
+  await service.actions.clientHeartbeat(input);
+  assert.deepEqual(
+    readRecent(f.bridgeHome, 10).map(({ event, state, account }) => ({ event, state, account })),
+    [
+      { event: 'remote.agent', state: 'missing', account: null },
+      { event: 'remote.agent', state: 'connected', account: 'al***@example.test' },
+      { event: 'remote.agent', state: 'needsUpdate', account: 'al***@example.test' },
+    ],
+  );
 });
 
 test('官方准备、额度和登录失败各自落盘，保留类型与错误码且不泄露秘密', async (t) => {

@@ -170,9 +170,10 @@ test('SSH 窗口状态栏显示服务器接入情况', async () => {
   assert.match(await label({ agentInstalled: false }), /服务器未装远端代理$/);
 });
 
-test('远端代理没装时 remoteAgent 为 null', async () => {
+test('远端代理没装时 remoteAgent 为 null，并把问不到的原因交给后台记日志', async () => {
   const { requests } = await runCompanion({ agentInstalled: false, until: (r) => r.length >= 1 });
   assert.equal(requests[0].remoteAgent, null);
+  assert.match(requests[0].remoteAgentError, /codexSwitcherRemote\.status' not found/);
   assert.equal(requests[0].authority, 'ssh-remote+gpu-box');
 });
 

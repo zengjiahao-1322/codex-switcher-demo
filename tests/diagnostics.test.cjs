@@ -308,7 +308,7 @@ test('心跳返回真实后端关联结果，已连接不能代替已接入', as
     bridgeHome: f.bridge,
     hermesHome: path.join(f.root, 'no-hermes'),
   });
-  const input = { id: 'connected-window', pid: 810, remote: 'ssh-remote+fixture' };
+  const input = { id: 'connected-window', pid: 810 };
   const pending = await service.actions.clientHeartbeat(input);
   assert.equal(pending.connection.state, 'unmatched');
   assert.deepEqual(pending.connection.backendPids, []);
@@ -318,7 +318,7 @@ test('心跳返回真实后端关联结果，已连接不能代替已接入', as
     exe: 'codex',
     context: { ok: true, home: f.home },
   });
-  now += 5000;
+  now += 30000;
   const ready = await service.actions.clientHeartbeat(input);
   assert.equal(ready.connection.state, 'ready');
   assert.deepEqual(ready.connection.backendPids, [811]);
@@ -372,9 +372,11 @@ test('心跳返回真实后端关联结果，已连接不能代替已接入', as
         ...newInput,
         completedReload: undefined,
         home: f.home,
+        remote: 'ssh-remote+fixture',
+        companionHost: 'local',
       })
     ).connection.state,
-    'unmatched',
+    'remote',
   );
 });
 

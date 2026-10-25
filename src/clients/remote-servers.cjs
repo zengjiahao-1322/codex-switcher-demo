@@ -1,15 +1,17 @@
 'use strict';
 
 const path = require('node:path'),
-  crypto = require('node:crypto');
+  crypto = require('node:crypto'),
+  { EventEmitter } = require('node:events');
 const { redact, log } = require('../diagnostics/event-log.cjs');
 // 远端配置正文和回执只经过常驻服务内存，不能复用落盘的窗口命令字段。
 const pending = new Map();
+const commandEvents = new EventEmitter();
 const reloads = new Map();
 const keyFor = (home, id) => path.resolve(home) + '\0' + id;
 const digest = (text) => crypto.createHash('sha256').update(text).digest('hex');
 function markReload(bridgeHome, id, target) {
-  reloads.set(keyFor(bridgeHome, id), { ...target, requestedAt: Date.now() });
+  reloads.set(keyFor(bridgeHome, id), target);
 }
 function recordReload(bridgeHome, id, { status, reason } = {}) {
   const key = keyFor(bridgeHome, id),
@@ -110,6 +112,11 @@ function groups(bridgeHome) {
 function command(bridgeHome, id) {
   return pending.get(keyFor(bridgeHome, id))?.command || null;
 }
+function onCommand(bridgeHome, id, listener) {
+  const key = keyFor(bridgeHome, id);
+  commandEvents.on(key, listener);
+  return () => commandEvents.off(key, listener);
+}
 function dispatch(bridgeHome, id, fields, { timeout = 30000 } = {}) {
   const key = keyFor(bridgeHome, id);
   if (pending.has(key)) throw Error('该窗口正在执行另一项远程命令');
@@ -127,6 +134,7 @@ function dispatch(bridgeHome, id, fields, { timeout = 30000 } = {}) {
         else resolve(result);
       },
     });
+    commandEvents.emit(key);
   });
 }
 function acknowledge(bridgeHome, input) {
@@ -205,6 +213,7 @@ async function apply(bridgeHome, authority, source) {
   if (!targets.length) throw Error('这台服务器当前没有已连接的窗口');
   return Promise.all(
     targets.map(async (group) => {
+      const started = performance.now();
       const result = { codexHome: group.codexHome, status: 'skipped' };
       const skip = (reason) => {
         log(bridgeHome, 'remote.sync', {
@@ -273,16 +282,18 @@ async function apply(bridgeHome, authority, source) {
             ...(authText ? { auth: { text: authText, expectedSha256: previousAuth.sha256 } } : {}),
           };
         step = 'write';
-        markReload(bridgeHome, window.id, {
-          host: group.host,
-          authority: group.authority,
-          codexHome: group.codexHome,
-        });
+        const requestedAt = Date.now();
         const written = await dispatch(bridgeHome, window.id, write);
         if (written?.ok !== true || written.sha256 !== digest(text))
           throw Error('远端未确认写入目标配置');
         if (authText && written.authSha256 !== digest(authText))
           throw Error('远端未确认写入目标登录');
+        markReload(bridgeHome, window.id, {
+          host: group.host,
+          authority: group.authority,
+          codexHome: group.codexHome,
+          requestedAt,
+        });
         const others = group.windows.filter((item) => item.id !== window.id);
         if (others.length)
           clients.requestReload(null, bridgeHome, {
@@ -300,6 +311,7 @@ async function apply(bridgeHome, authority, source) {
           step,
           sha256: written.sha256.slice(0, 8),
           status: 'synced',
+          elapsedMs: Math.round(performance.now() - started),
         });
         return { ...result, status: 'synced' };
       } catch (error) {
@@ -312,7 +324,6 @@ async function apply(bridgeHome, authority, source) {
           previousAuth?.text,
           previousAuth?.auth,
         );
-        recordReload(bridgeHome, window.id, { status: 'failed', reason });
         log(bridgeHome, 'remote.sync', {
           ...target,
           host: group.host,
@@ -331,6 +342,7 @@ module.exports = {
   agentStatus,
   groups,
   command,
+  onCommand,
   dispatch,
   acknowledge,
   confirmsReload,

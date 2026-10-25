@@ -69,6 +69,7 @@ function createService({
   const passed = new Map();
   const companionStates = new Map();
   const companionConnections = new Map();
+  const remoteAgentStates = new Map();
   const fingerprint = (p, m) =>
     crypto
       .createHash('sha256')
@@ -511,14 +512,16 @@ function createService({
     };
   }
   async function connectionFor(input) {
+    // 本机伴随扩展转发的远程窗口没有本机后端，避免每次心跳扫描全机进程。
+    if (input.remote && input.companionHost !== 'remote')
+      return { state: 'remote', home: null, backendPids: [] };
     const clients = require('../clients/client-status.cjs'),
-      cached = companionConnections.get(input.id),
-      ttl = cached?.connection.state === 'ready' ? 30000 : 5000;
+      cached = companionConnections.get(input.id);
     if (
       cached &&
       cached.pid === Number(input.pid) &&
       !input.completedReload &&
-      Date.now() - cached.checkedAt < ttl
+      Date.now() - cached.checkedAt < 30000
     )
       return cached.connection;
     const status = clients.snapshot(codexHome, bridgeHome, {
@@ -537,7 +540,7 @@ function createService({
       connection,
     });
     const from = companionStates.get(input.id) || null;
-    if (from !== connection.state) {
+    if (input.remoteType !== 'ssh-remote' && from !== connection.state) {
       eventLog.log(bridgeHome, 'companion.state', {
         editor: input.id,
         editorPid: Number(input.pid),
@@ -648,6 +651,30 @@ function createService({
       const clients = require('../clients/client-status.cjs');
       const { completedReload, ...registration } = input;
       let result = clients.heartbeat(bridgeHome, registration);
+      if (input.remoteType === 'ssh-remote') {
+        const agent = input.remoteAgent,
+          key = JSON.stringify([input.authority, agent?.codexHome || null]),
+          status = !agent
+            ? 'missing'
+            : agent.protocol !== 2 || agent.agentVersion !== input.companionVersion
+              ? 'needsUpdate'
+              : 'connected',
+          detail = {
+            authority: input.authority,
+            codexHome: agent?.codexHome || null,
+            state: status,
+            agentVersion: agent?.agentVersion || null,
+            protocol: agent?.protocol || 0,
+            companionVersion: input.companionVersion || null,
+            account: agent?.account?.email || null,
+            error: input.remoteAgentError ? String(input.remoteAgentError).slice(0, 300) : null,
+          },
+          serialized = JSON.stringify(detail);
+        if (remoteAgentStates.get(key) !== serialized) {
+          eventLog.log(bridgeHome, 'remote.agent', detail);
+          remoteAgentStates.set(key, serialized);
+        }
+      }
       // 登记通过后按服务器正在使用的账号同步，不依赖网页是否打开。
       if (input.remoteType === 'ssh-remote' && input.remoteAgent?.account?.id)
         remoteCredentials.observe(input.remoteAgent.account.id);

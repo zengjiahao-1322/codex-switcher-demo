@@ -110,7 +110,7 @@ function codexEnv(home) {
               '-NoProfile',
               '-NonInteractive',
               '-Command',
-              "$settings = Get-ItemProperty -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'; [pscustomobject]@{enabled=[int]$settings.ProxyEnable;server=[string]$settings.ProxyServer} | ConvertTo-Json -Compress",
+              "$settings = Get-ItemProperty -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'; $connection = Get-ItemProperty -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Connections' -ErrorAction SilentlyContinue; $flags = $connection.DefaultConnectionSettings; [pscustomobject]@{enabled=[int]$settings.ProxyEnable;server=[string]$settings.ProxyServer;autoDetect=[bool]($settings.AutoDetect -or ($flags.Length -gt 8 -and ($flags[8] -band 8)));autoConfigUrl=[string]$settings.AutoConfigURL} | ConvertTo-Json -Compress",
             ],
             { encoding: 'utf8', timeout: 3000, windowsHide: true },
           ),
@@ -133,7 +133,7 @@ function codexEnv(home) {
         values = Object.fromEntries(
           [
             ...text.matchAll(
-              /^\s*(HTTPSEnable|HTTPSProxy|HTTPSPort|HTTPEnable|HTTPProxy|HTTPPort|SOCKSEnable|SOCKSProxy|SOCKSPort)\s*:\s*(.+)$/gm,
+              /^\s*(HTTPSEnable|HTTPSProxy|HTTPSPort|HTTPEnable|HTTPProxy|HTTPPort|SOCKSEnable|SOCKSProxy|SOCKSPort|ProxyAutoConfigEnable|ProxyAutoDiscoveryEnable)\s*:\s*(.+)$/gm,
             ),
           ].map((m) => [m[1], m[2].trim()]),
         );
@@ -150,6 +150,31 @@ function codexEnv(home) {
   }
   return env;
 }
+function proxyEndpoint(value) {
+  const text = value.includes('://') ? value : 'http://' + value;
+  try {
+    const url = new URL(text);
+    return url.protocol + '//' + url.host;
+  } catch {
+    return null;
+  }
+}
+function proxyInfo(home) {
+  const env = codexEnv(home),
+    // 更新地址固定为 HTTPS；curl 按 HTTPS_PROXY / ALL_PROXY 选择代理。
+    value = env.https_proxy || env.HTTPS_PROXY || env.all_proxy || env.ALL_PROXY;
+  if (value) return { type: 'manual', value: proxyEndpoint(value) || 'unknown' };
+  if (process.platform === 'win32') {
+    const values = proxyCache?.values || {};
+    if (values.autoDetect || values.autoConfigUrl) return { type: 'auto' };
+  }
+  if (mac) {
+    const values = proxyCache?.values || {};
+    if (values.ProxyAutoConfigEnable === '1' || values.ProxyAutoDiscoveryEnable === '1')
+      return { type: 'auto' };
+  }
+  return { type: 'none' };
+}
 function proxySource(home) {
   if (proxyKeys.some((key) => process.env[key])) return 'env';
   const env = codexEnv(home);
@@ -165,6 +190,7 @@ module.exports = {
   macApps,
   isCodexDesktop,
   codexEnv,
+  proxyInfo,
   proxySource,
   windowsProxyEnv,
 };

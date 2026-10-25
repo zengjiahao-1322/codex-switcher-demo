@@ -97,7 +97,7 @@ test('挂起期间另一进程写入重载命令，500 ms 内返回命令', serv
   }
 });
 
-// 新窗口的伴随扩展通常先于官方后端启动：挂起期间后端接入时，这次回复就应反映结束时的状态。
+// 连接结果缓存三十秒；等待跨过缓存期限时，回复应采用重新扫描的结果。
 test('挂起结束时按缓存期限重新确认连接，回复反映结束时的状态', server, async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-longpoll-state-'));
   const codexHome = path.join(root, 'codex'),
@@ -106,7 +106,9 @@ test('挂起结束时按缓存期限重新确认连接，回复反映结束时�
   fs.mkdirSync(bridgeHome);
   fs.writeFileSync(path.join(codexHome, 'config.toml'), 'model="gpt-5"\n');
   const clients = require('../src/clients/client-status.cjs');
-  let backendReady = false;
+  let backendReady = false,
+    now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   t.mock.method(clients, 'scanAsync', async () => ({ ancestry: [], processes: [] }));
   t.mock.method(clients, 'snapshot', () => ({
     clients: backendReady
@@ -126,8 +128,9 @@ test('挂起结束时按缓存期限重新确认连接，回复反映结束时�
   const held = beat({ wait: 10000 });
   await new Promise((r) => setTimeout(r, 1000));
   backendReady = true;
+  now += 30000;
   const r = await held;
-  assert.equal(r.connection.state, 'ready', '挂起期间后端已接入，回复仍是旧状态');
+  assert.equal(r.connection.state, 'ready', '缓存已到期，回复仍是旧状态');
   assert.deepEqual(r.connection.backendPids, [777]);
 });
 

@@ -54,8 +54,10 @@ test('Windows检查与下载启用吊销离线best-effort，Mac不加且均保�
   }
 });
 
-test('Schannel错误在人机界面显示中文，检查和下载日志只记录退出码与英文诊断', async () => {
+test('Schannel错误在人机界面显示中文，检查和下载日志只记录退出码与英文诊断', async (t) => {
   const { transportFor } = require('../src/server/update.cjs');
+  const proxy = { type: 'manual', value: 'http://fixture-proxy:7897' };
+  t.mock.method(require('../src/platform/platform.cjs'), 'proxyInfo', () => proxy);
   for (const stage of ['check', 'download']) {
     const root = temp('schannel-' + stage),
       bridge = path.join(root, 'bridge'),
@@ -113,6 +115,7 @@ test('Schannel错误在人机界面显示中文，检查和下载日志只记录
     const events = require('../src/diagnostics/event-log.cjs').readRecent(bridge, 10),
       failure = events.find((row) => row.event === 'update.' + stage && row.curl);
     assert.equal(failure.curl.code, 35);
+    assert.deepEqual(failure.proxy, proxy);
     assert.match(failure.curl.detail, /CRYPT_E_REVOCATION_OFFLINE/);
     assert.match(failure.curl.detail, /^[\x20-\x7e]*$/);
     assert.doesNotMatch(JSON.stringify(events), /PRIVATE-PATH|curl\.exe|--output|\ufffd/);

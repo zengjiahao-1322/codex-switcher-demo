@@ -57,13 +57,13 @@ function logAdapter(message) {
     fs.appendFileSync(p, new Date().toISOString() + ' ' + message + '\n', { mode: 0o600 });
   } catch {}
 }
-function ownsOldService(pid, entry) {
+function nodeCommand(pid) {
   let command;
   if (process.platform === 'darwin') {
     command = cp.execFileSync('/bin/ps', ['-ww', '-p', String(pid), '-o', 'command='], {
       encoding: 'utf8',
     });
-    if (!/(?:^|\/)node(?:\s|"|$)/.test(command)) return false;
+    if (!/(?:^|\/)node(?:\s|"|$)/.test(command)) return null;
   } else {
     const found = JSON.parse(
       require('../clients/desktop-account.cjs').powershell(
@@ -71,13 +71,36 @@ function ownsOldService(pid, entry) {
         { SWITCHER_UPDATE_PID: String(pid) },
       ),
     );
-    if (!found || path.basename(found.exe).toLowerCase() !== 'node.exe') return false;
+    if (!found || path.basename(found.exe).toLowerCase() !== 'node.exe') return null;
     command = found.command;
   }
-  // macOS 的 ps 可能把 /private、符号链接或临时目录显示成另一种等价路径；
-  // 已确认 Node 可执行文件后，按主入口文件名核对，避免合法旧后台被误拒绝。
-  const main = entry ? path.basename(entry) : 'main.cjs';
-  return command.includes(main) && /(?:^|[\\/])main\.cjs(?:\s|"|$)/.test(command);
+  return command;
+}
+function ownsOldService(pid, entry) {
+  const command = nodeCommand(pid),
+    main = entry ? path.basename(entry) : 'main.cjs';
+  // 升级接管已先验证服务鉴权；允许新副本替换旧目录及没有 runtime 接口的旧版本。
+  return !!command && command.includes(main) && /(?:^|[\\/])main\.cjs(?:\s|"|$)/.test(command);
+}
+function sameInstall(pid) {
+  const command = nodeCommand(pid);
+  if (!command) return false;
+  // ps 不保留 argv 的引号；从 Node 后面提取完整入口，保留应用目录中的空格。
+  const actual = command.match(
+    /(?:^|[\\/])node(?:\.exe)?"?\s+"?(.+?[\\/]main\.cjs)"?(?:\s|$)/i,
+  )?.[1];
+  if (!actual) return false;
+  try {
+    const actualEntry = fs.realpathSync.native(actual),
+      expectedEntry = fs.realpathSync.native(runtimeInfo.entry);
+    return process.platform === 'win32'
+      ? actualEntry.toLowerCase() === expectedEntry.toLowerCase()
+      : actualEntry === expectedEntry;
+  } catch (error) {
+    // 旧副本已移动或删除时不能证明同一安装，让新服务使用空闲端口。
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false;
+    throw error;
+  }
 }
 function listeningPid(port) {
   if (process.platform === 'darwin') {
@@ -109,7 +132,7 @@ async function waitPortFree(port) {
 }
 async function reclaimFixedPort(port) {
   const pid = listeningPid(port);
-  if (!pid || !ownsOldService(pid, runtimeInfo.entry)) return false;
+  if (!pid || !sameInstall(pid)) return false;
   await require('../platform/process-stop.cjs').stopProcesses([pid]);
   await waitPortFree(port);
   return true;
@@ -232,19 +255,30 @@ async function existing() {
       port,
       handover: hadRunning && !prior,
       protectSkipped,
+      ...(handoverResult || {}),
     });
     console.log('BRIDGE_READY http://127.0.0.1:' + port);
     openUrl(url);
   };
+  let handoverResult = null;
   const handleListenError = async (e) => {
     if (e.code !== 'EADDRINUSE') throw e;
+    const ownerPid = listeningPid(a.port);
     if (await reclaimFixedPort(a.port)) {
+      handoverResult = { reclaimed: { pid: ownerPid } };
       console.log('BRIDGE_RECLAIMED_OLD_SERVICE ' + a.port);
       server.once('error', handleListenError);
       server.listen(a.port, '127.0.0.1');
       return;
     }
     // 固定端口被其他程序占用时退回随机端口：界面仍可用，但转换模式不可用。
+    handoverResult = {
+      portFallback: {
+        port: a.port,
+        ownerPid: ownerPid || null,
+        reason: ownerPid ? 'different_process' : 'port_in_use',
+      },
+    };
     const prior = await existing();
     if (prior) {
       console.log('BRIDGE_ALREADY_RUNNING ' + new URL(prior.url).origin);

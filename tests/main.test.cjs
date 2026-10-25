@@ -317,20 +317,20 @@ test('changing the managed home immediately reads the selected config and preser
 });
 
 test(
-  '固定端口被旧切换器占用时接管旧服务而不退回随机端口',
+  '固定端口只接管同安装目录旧服务，保留其他目录的同名入口',
   { timeout: 60000, skip: !['win32', 'darwin'].includes(process.platform) },
   async (t) => {
     const oldDirs = makeDirs('switcher-port-old-'),
       newDirs = makeDirs('switcher-port-new-'),
       port = await freePort();
-    const launch = (dirs) => {
-      const child = spawn(process.execPath, [path.join(PROJECT_ROOT, 'main.cjs'), '--no-open'], {
+    const launch = (dirs, entry = path.join(PROJECT_ROOT, 'main.cjs'), selectedPort = port) => {
+      const child = spawn(process.execPath, [entry, '--no-open'], {
         env: {
           ...process.env,
           BRIDGE_HERMES_HOME: dirs.hermes,
           BRIDGE_CODEX_HOME: dirs.codex,
           BRIDGE_HOME: dirs.bridge,
-          BRIDGE_PORT: String(port),
+          BRIDGE_PORT: String(selectedPort),
         },
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -382,6 +382,33 @@ test(
     await waitReady(next);
     const nextRecord = JSON.parse(fs.readFileSync(path.join(newDirs.bridge, 'running.json')));
     assert.equal(new URL(nextRecord.url).port, String(port));
+    const { readRecent } = require('../src/diagnostics/event-log.cjs');
+    assert.deepEqual(readRecent(newDirs.bridge, 10).find((e) => e.event === 'startup').reclaimed, {
+      pid: old.child.pid,
+    });
     await old.closed;
+
+    // 另一个目录也叫 main.cjs；路径带空格覆盖 macOS ps 的无引号输出。
+    const foreignDirs = makeDirs('switcher-other install-'),
+      fallbackDirs = makeDirs('switcher-fallback-'),
+      foreignPort = await freePort(),
+      foreignEntry = path.join(path.dirname(foreignDirs.bridge), 'main.cjs');
+    fs.writeFileSync(
+      foreignEntry,
+      "require('node:http').createServer((q,r)=>r.end('fixture')).listen(Number(process.env.BRIDGE_PORT),'127.0.0.1',()=>console.log('BRIDGE_READY'));",
+    );
+    const foreign = launch(foreignDirs, foreignEntry, foreignPort);
+    await waitReady(foreign);
+    const fallback = launch(fallbackDirs, path.join(PROJECT_ROOT, 'main.cjs'), foreignPort);
+    await waitReady(fallback);
+    const fallbackRecord = JSON.parse(
+      fs.readFileSync(path.join(fallbackDirs.bridge, 'running.json')),
+    );
+    assert.notEqual(new URL(fallbackRecord.url).port, String(foreignPort));
+    assert.equal(process.kill(foreign.child.pid, 0), true);
+    assert.deepEqual(
+      readRecent(fallbackDirs.bridge, 10).find((e) => e.event === 'startup').portFallback,
+      { port: foreignPort, ownerPid: foreign.child.pid, reason: 'different_process' },
+    );
   },
 );
