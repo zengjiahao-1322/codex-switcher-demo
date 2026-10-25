@@ -54,7 +54,11 @@ const currentText = (r) =>
             ? hostOf(r.current.baseUrl)
             : r.current.modelProvider) +
         (r.current.model ? ' · ' + r.current.model : '');
-const resultLabels = { synced: '已写入，已请求重载窗口', skipped: '未切换', failed: '失败' };
+const resultLabels = {
+  synced: '已写入，已请求重启服务器上的 Codex',
+  skipped: '未切换',
+  failed: '失败',
+};
 
 export function renderRemotes(list, editors = connected) {
   remotes = list;
@@ -238,7 +242,7 @@ function detail(panel, authority, host, rows, o, draft) {
     (a
       ? '服务器使用 ChatGPT 官方服务和这个账号。登录会保存到服务器上（只有当前用户可读）；本机和服务器同时用这个账号时，切换器会让两边的登录保持一致。'
       : '服务器直接访问这个 API，地址、模型和密钥写入服务器的 config.toml（只有当前用户可读）。') +
-    '应用后这台服务器的窗口会重载，本机不受影响。';
+    '应用后会重启这台服务器窗口里的扩展，不重连服务器；本机不受影响。';
   panel.append(title, context);
   let model = null;
   if (a) panel.append(accountFacts(a), quotaNode(a.quota));
@@ -284,7 +288,7 @@ function detail(panel, authority, host, rows, o, draft) {
                   a.email +
                   '」。\n\n这个账号的登录会保存到服务器 ' +
                   where +
-                  ' 中的 auth.json（只有当前用户可读），config.toml 改为官方登录，并重载这台服务器的窗口，窗口里正在运行的 Codex 任务会中断。本机和服务器同时用这个账号时，切换器会让两边的登录保持一致。本机不受影响。继续？'
+                  ' 中的 auth.json（只有当前用户可读），config.toml 改为官方登录，并重启这台服务器窗口里的扩展（不重连服务器，打开的文件和终端不受影响），正在运行的 Codex 任务会中断。本机和服务器同时用这个账号时，切换器会让两边的登录保持一致。本机不受影响。继续？'
               : '把服务器 ' +
                   host +
                   ' 的 Codex 切换到「' +
@@ -293,7 +297,7 @@ function detail(panel, authority, host, rows, o, draft) {
                   chosen +
                   '。\n\nAPI 地址、模型和密钥会写入这台服务器 ' +
                   where +
-                  ' 中的 config.toml（只有当前用户可读），并重载这台服务器的窗口，窗口里正在运行的 Codex 任务会中断。本机不受影响。继续？',
+                  ' 中的 config.toml（只有当前用户可读），并重启这台服务器窗口里的扩展（不重连服务器，打开的文件和终端不受影响），正在运行的 Codex 任务会中断。本机不受影响。继续？',
           )
         )
           return;

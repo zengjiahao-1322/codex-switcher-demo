@@ -166,6 +166,8 @@ function activate(context) {
   const ack = (c, data, commandId, ackStatus, extra = {}) =>
     post(c, 'clientHeartbeat', { ...data, ack: commandId, ackStatus, ...extra }, controller.signal);
   // 记下待确认的重载后重载窗口；新窗口的心跳带 completedReload 让后台确认。
+  // SSH 窗口只重启扩展宿主：Codex 后台是扩展宿主的子进程，会随之换新并读到新登录和配置，
+  // 而窗口不重载、SSH 不重连，打开的文件和终端都保留（2026-10-25 隔离实测：不到 1 秒换新后台）。
   async function reloadWindow(c, data, commandId) {
     await context.workspaceState.update('codexSwitcher.lastReload', commandId);
     await context.workspaceState.update('codexSwitcher.pendingReload', {
@@ -174,7 +176,9 @@ function activate(context) {
     });
     setTimeout(async () => {
       try {
-        await vscode.commands.executeCommand('workbench.action.reloadWindow');
+        await vscode.commands.executeCommand(
+          sshRemote() ? 'workbench.action.restartExtensionHost' : 'workbench.action.reloadWindow',
+        );
       } catch (error) {
         await context.workspaceState.update('codexSwitcher.pendingReload', undefined);
         // 请求已收到但编辑器未能执行时，不能继续显示为成功或误报服务未运行。
@@ -228,11 +232,12 @@ function activate(context) {
     // 不等待用户点按钮，避免阻塞心跳。
     vscode.window
       .showInformationMessage(
-        '已在服务器上安装 Codex Switcher 远端代理。如果切换器里仍显示未安装，请重载窗口。',
-        '重载窗口',
+        '已在服务器上安装 Codex Switcher 远端代理。如果切换器里仍显示未安装，请重启扩展（不会断开服务器连接）。',
+        '重启扩展',
       )
       .then((choice) => {
-        if (choice === '重载窗口') vscode.commands.executeCommand('workbench.action.reloadWindow');
+        if (choice === '重启扩展')
+          vscode.commands.executeCommand('workbench.action.restartExtensionHost');
       });
   }
   async function tick() {

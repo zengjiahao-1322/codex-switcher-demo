@@ -187,7 +187,7 @@ test('本机窗口不调用远端命令，也不上报远端字段', async () =>
   assert.equal(requests[0].authority, null);
 });
 
-test('read → write：回执带结果，写入服务器配置，记下待确认重载并重载窗口', async () => {
+test('read → write：回执带结果，写入服务器配置，记下待确认重载并只重启扩展宿主', async () => {
   let readResult;
   const next = original.replace('gpt-5.5', 'gpt-6.1-sol');
   const { requests, executed, state, home } = await runCompanion({
@@ -218,7 +218,9 @@ test('read → write：回执带结果，写入服务器配置，记下待确认
   // 写入成功只回 completed，后台据此记为已请求重载；不再另发 reload_requested。
   assert.equal(requests.filter((r) => r.ack === 'cmd-write').length, 1);
   assert.deepEqual(state.get('codexSwitcher.pendingReload').commandId, 'cmd-write');
-  assert.ok(executed.includes('workbench.action.reloadWindow'));
+  // SSH 窗口不重载、不重连，只重启扩展宿主让服务器上的 Codex 换新后台。
+  assert.ok(executed.includes('workbench.action.restartExtensionHost'));
+  assert.equal(executed.includes('workbench.action.reloadWindow'), false);
 });
 
 // 远程窗口没有本机后端，连接状态一直是 unmatched；只能以后台的 reloadConfirmed 为准清掉待确认记录。
@@ -256,7 +258,10 @@ test('写入被拒绝时回执 failed 和原因，不重载、不改文件', asy
   assert.equal(write.ackStatus, 'failed');
   assert.match(write.ackError, /被修改过/);
   assert.equal(write.ackResult, undefined);
-  assert.equal(executed.includes('workbench.action.reloadWindow'), false);
+  assert.equal(
+    executed.some((n) => /reloadWindow|restartExtensionHost/.test(n)),
+    false,
+  );
   assert.equal(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), original);
 });
 
@@ -324,7 +329,10 @@ test('readAuth → 只写登录：回执带登录正文和结果，配置不动�
   assert.deepEqual(sync.ackResult, { ok: true, sha256: null, authSha256: sha(newer) });
   assert.equal(fs.readFileSync(path.join(home, 'auth.json'), 'utf8'), newer);
   assert.equal(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), original);
-  assert.equal(executed.includes('workbench.action.reloadWindow'), false);
+  assert.equal(
+    executed.some((n) => /reloadWindow|restartExtensionHost/.test(n)),
+    false,
+  );
 });
 
 test('安装远端代理：写临时 VSIX 交给编辑器安装，装完删除临时文件', async () => {
