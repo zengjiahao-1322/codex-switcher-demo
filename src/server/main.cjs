@@ -117,11 +117,14 @@ function listeningPid(port) {
     }
     return Number(output.split(/\s+/)[0]) || null;
   }
-  const output = require('../clients/desktop-account.cjs').powershell(
-    '$c=Get-NetTCPConnection -LocalPort $env:SWITCHER_PORT -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess;if($c){$c}else{""}',
-    { SWITCHER_PORT: String(port) },
+  const output = cp.execFileSync('netstat.exe', ['-ano', '-p', 'TCP'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  const match = output.match(
+    new RegExp('^\\s*TCP\\s+127\\.0\\.0\\.1:' + port + '\\s+\\S+\\s+LISTENING\\s+(\\d+)\\s*$', 'mi'),
   );
-  return Number(output) || null;
+  return match ? Number(match[1]) : null;
 }
 async function waitPortFree(port) {
   const deadline = Date.now() + 1000;

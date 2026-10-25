@@ -105,8 +105,7 @@ test('仅复制发布清单也能从稳定入口启动并提供网页，不依�
 
 test(
   '同版本新副本替换旧后台，同一构建重复启动复用后台，配置和凭证不变',
-  // Windows CI 的后台接管/退出可能受进程回收调度影响；每次启动仍有 15 秒上限。
-  { timeout: 60000 },
+  { timeout: 30000 },
   async (t) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-upgrade-'));
     const children = [];
