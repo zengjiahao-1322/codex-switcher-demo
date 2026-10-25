@@ -2,9 +2,9 @@
 
 管理 Codex 官方账号、自定义 API 和 VS Code 窗口的本机工具，支持 Windows 与 macOS。
 
-**0.1.4 Demo · 官方账号与 API 的 Remote-SSH 切换**。本机和服务器分别应用来源，同一官方账号的文件登录按刷新时间同步；修复固定端口旧后台、Windows 更新检查和 Remote-SSH 窗口误关联，补充远端代理更新识别与诊断。远程功能尚待真实服务器验收。
+**0.1.5 Demo · VS Code 快捷切换与配置备份**。从编辑器状态栏选择本机或 SSH 服务器的账号/API；配置改写前自动保留最近 10 份副本，可在设置中恢复。额度不足时可手动一键换到备用账号。远程功能仍需在具体服务器环境验证。
 
-[发布说明与全部下载](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/tag/v0.1.4)
+[发布说明与全部下载](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/tag/v0.1.5)
 
 ## 下载和安装
 
@@ -12,11 +12,11 @@
 
 | 平台              | 下载                                                                                                                            | 启动                                                |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Windows x64       | [Windows 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-windows-x64.zip)    | 完整解压，双击 `Start.cmd`；可运行 `install.cmd`    |
-| Mac Apple Silicon | [Mac M 系列包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-macos-arm64.zip)  | 运行 `Install.command`，或打开 `Codex Switcher.app` |
-| Mac Intel         | [Mac Intel 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-macos-x64.zip)    | 同上                                                |
-| 本机伴随扩展      | [Companion VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-companion.vsix) | 在本机编辑器安装并重载已有窗口                      |
-| 远端代理          | [Remote Agent VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.4/codex-switcher-remote.vsix) | 通过远程页安装，或在 SSH 服务器侧安装               |
+| Windows x64       | [Windows 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-windows-x64.zip)    | 完整解压，双击 `Start.cmd`；可运行 `install.cmd`    |
+| Mac Apple Silicon | [Mac M 系列包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-macos-arm64.zip)  | 运行 `Install.command`，或打开 `Codex Switcher.app` |
+| Mac Intel         | [Mac Intel 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-macos-x64.zip)    | 同上                                                |
+| 本机伴随扩展      | [Companion VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-companion.vsix) | 在本机编辑器安装并重载已有窗口                      |
+| 远端代理          | [Remote Agent VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-remote.vsix) | 通过远程页安装，或在 SSH 服务器侧安装               |
 
 五个下载均附 SHA-256 校验文件。不要只取出启动脚本；运行时需保留完整目录。Mac 使用 ad-hoc 签名，首次打开可能需在“系统设置 → 隐私与安全性”允许，尚无 Apple Developer ID 签名或公证。
 
@@ -26,6 +26,10 @@
 2. 如需切换已打开的编辑器窗口，安装本版伴随扩展并重载。关联由实际后端 PID 与配置目录确认；状态栏“已接入”表示可以自动重载，“后端未关联”表示还未确认对应后端。
 3. 切换时重启或重载共用当前配置目录的客户端，独立目录保持原样。旧对话默认跟随新来源，保留目标支持的原模型；部分失败可继续同步。
 4. 额度按账号独立刷新，也可全部刷新。套餐与可用的订阅日期来自最新保存的登录信息；失败不显示旧额度数字。
+
+点击 VS Code 状态栏的“Codex Switcher”即可选择来源，确认后切换。本机窗口切换本机，SSH 窗口切换该服务器；额度不足的提示可直接选择备用账号并确认切换，始终由用户手动发起。
+
+在“设置 → 配置备份”可恢复最近 10 份配置副本。副本不包含 `auth.json` 登录文件，恢复前会先保存当前配置，再按正常切换流程重载共用窗口；恢复配置不会回滚账号登录。
 
 切换有效的其他官方账号时会直接复用已保存登录，减少后台启动和网络校验。批量刷新额度会限制同时运行的账号数量，避免占满本机资源。
 
@@ -39,15 +43,15 @@
 
 同一官方账号以 `last_refresh` 最新的文件登录为准，同步到已使用该账号的本机和在线服务器；同步登录不重载窗口。仅支持文件凭证存储，服务器显式使用 `keyring` 或 `ephemeral` 时会拒绝应用。不同步经本机转换的 API 或远端聊天，不配置服务器网络。WSL、容器及 SSH 到一台本身运行切换器的机器的方式暂不支持。
 
-伴随扩展固定在本机 UI 宿主，代理在远端 workspace 宿主；版本必须一致，远端代理还需支持协议号 2。页面会提示更新同为 `0.1.4` 的旧代理。同窗口其他扩展也能调用代理命令，遵循 VS Code 扩展信任边界。
+伴随扩展固定在本机 UI 宿主，代理在远端 workspace 宿主；两者需配套更新到 `0.1.5`，远端代理还需支持协议号 2。页面会提示更新旧代理。同窗口其他扩展也能调用代理命令，遵循 VS Code 扩展信任边界。
 
 **远程功能尚待真实 Remote-SSH Linux 验收。** 自动化读写与安装检查不能代替服务器上的实际 API 请求和聊天恢复验证。
 
 ## 升级与数据
 
-**0.1.3 的更新地址固定在旧版本，需手动下载并安装 0.1.4 一次。** 0.1.4 起检查本仓库最新 Release；只接受更大的发行序号，同时校验 SHA-256、包内构建号与序号。保留旧版备份，启动检查失败恢复；开发目录通过 Git 更新。
+**0.1.3 的更新地址固定在旧版本，需手动下载并安装 0.1.5 一次。** 0.1.4 起检查本仓库最新 Release；只接受更大的发行序号，同时校验 SHA-256、包内构建号与序号。保留旧版备份，启动检查失败恢复；开发目录通过 Git 更新。
 
-已安装早先 `0.1.4` 可通过“检查更新”获取本次替换构建。若 Windows 提示证书吊销检查无法完成、无法检查更新，请手动下载安装本次构建一次；本版已修正此问题，保留 TLS 校验。升级后在“编辑器与诊断”点击“一键更新扩展”，再到“远程服务器”页按提示更新远端代理。
+已安装 `0.1.4` 可通过页面“检查更新”升级到 `0.1.5`。若检查更新因网络或证书错误失败，可手动下载安装。升级后在“编辑器与诊断”点击“一键更新扩展”，再到“远程服务器”页更新远端代理；旧代理版本不同会提示需要更新。
 
 更新时保留原数据目录，并同时更新伴随扩展及远端代理。Windows 解压版请保留 `private/`，安装版运行新安装器；Mac 使用 `Install.command`。自定义数据目录继续沿用原路径。
 

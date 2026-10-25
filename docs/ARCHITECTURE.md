@@ -60,6 +60,12 @@ flowchart LR
   DIAG --> ACC
 ```
 
+## 配置备份与编辑器快捷切换（0.1.5）
+
+`src/config/backups.cjs` 在配置写入边界保存 TOML 原文，内容与最新副本相同时跳过，按时间只保留最近 10 份。`backups` 接口仅返回时间、原因与来源摘要；`restoreBackup` 将选中的备份交给现有后台切换任务，在客户端释放前校验配置，恢复前再次保存当前配置。恢复跳过账号准备与登录同步，不改写 `auth.json`，仍复用旧对话同步和窗口重载。转换模式按已有 API 配置找回原上游，原配置不存在时明确回报。
+
+伴随扩展的快捷列表按点击读取现有接口，没有新增常驻轮询。确认后调用与网页相同的 `accountSwitch`、`desktopSwitch` 或 `remoteSwitch`；日志用 `source` 区分 `web`、`vscode-local`、`vscode-ssh`。额度不足的一键换号同样由用户确认后发起。
+
 ## 一次官方账号切换
 
 1. 页面把账号 id 发给 `src/server/service.cjs`。
