@@ -179,13 +179,18 @@ async function apply(bridgeHome, authority, source) {
   if (typeof authority !== 'string' || !/^ssh-remote\+[^\s/\\?#]{1,240}$/.test(authority))
     throw Error('请选择已连接的 Remote-SSH 服务器');
   const clients = require('./client-status.cjs'),
-    targets = groups(bridgeHome).filter((group) => group.authority === authority);
+    targets = groups(bridgeHome).filter((group) => group.authority === authority),
+    // 配置的 SHA 无法区分不同官方账号，日志单独记录脱敏目标。
+    target = source.auth
+      ? { account: require('../accounts/accounts.cjs').identity(source.auth).email }
+      : { provider: source.provider.name, model: source.model };
   if (!targets.length) throw Error('这台服务器当前没有已连接的窗口');
   return Promise.all(
     targets.map(async (group) => {
       const result = { codexHome: group.codexHome, status: 'skipped' };
       const skip = (reason) => {
         log(bridgeHome, 'remote.sync', {
+          ...target,
           host: group.host,
           codexHome: group.codexHome,
           status: 'skipped',
@@ -266,6 +271,7 @@ async function apply(bridgeHome, authority, source) {
             onlyStopped: true,
           });
         log(bridgeHome, 'remote.sync', {
+          ...target,
           host: group.host,
           codexHome: group.codexHome,
           step,
@@ -284,6 +290,7 @@ async function apply(bridgeHome, authority, source) {
           previousAuth?.auth,
         );
         log(bridgeHome, 'remote.sync', {
+          ...target,
           host: group.host,
           codexHome: group.codexHome,
           step: error.code === 'REMOTE_TIMEOUT' ? 'timeout' : step,

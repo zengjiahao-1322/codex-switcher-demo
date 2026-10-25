@@ -502,6 +502,10 @@ test('官方remoteSwitch读写auth与config，显式keyring服务器拒绝且不
     authSha256: sha(command.auth.text),
   });
   assert.deepEqual(await pending, [{ codexHome: input.remoteAgent.codexHome, status: 'synced' }]);
+  assert.equal(
+    require('../src/diagnostics/event-log.cjs').readRecent(home, 1)[0].account,
+    'of***@example.test',
+  );
   // 常驻服务动作再次覆盖账号 id 边界，不能按邮箱或工作区猜测。
   const service = require('../src/server/service.cjs').createService({
       codexHome: path.join(home, 'local-codex'),

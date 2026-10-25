@@ -270,13 +270,31 @@ function activate(context) {
         unmatched: '后端未关联',
         separate: '独立配置',
       };
-      status.tooltip =
-        new URL(c.url).origin +
-        '\n切换器目录：' +
-        r.connection.home +
-        '\n已关联 Codex PID：' +
-        (r.connection.backendPids.join(', ') || '无');
-      status.text = '$(plug) Codex Switcher · ' + labels[r.connection.state];
+      if (sshRemote()) {
+        // SSH 窗口的 Codex 跑在服务器上，本机本来就关联不到后端；改看服务器上的远端代理。
+        status.text =
+          '$(plug) Codex Switcher · ' +
+          (!remoteAgent
+            ? '服务器未装远端代理'
+            : remoteAgent.protocol !== 2 || remoteAgent.agentVersion !== data.companionVersion
+              ? '远端代理需更新'
+              : '服务器已接入');
+        status.tooltip = remoteAgent
+          ? '服务器 ' +
+            remoteAgent.host +
+            '\nCodex 目录：' +
+            remoteAgent.codexHome +
+            '\n在切换器的“远程服务器”页为这台服务器单独切换'
+          : '在切换器的“远程服务器”页为这台服务器安装远端代理';
+      } else {
+        status.tooltip =
+          new URL(c.url).origin +
+          '\n切换器目录：' +
+          r.connection.home +
+          '\n已关联 Codex PID：' +
+          (r.connection.backendPids.join(', ') || '无');
+        status.text = '$(plug) Codex Switcher · ' + labels[r.connection.state];
+      }
       if (r.command?.type === 'reload') {
         // 后台只给已确认共用配置的本机后端派发命令；远程窗口标签
         // 不再重复否决它，否则会出现“已关联但拒绝重载”。

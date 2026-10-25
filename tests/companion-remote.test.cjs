@@ -25,14 +25,19 @@ async function runCompanion({
   confirmFor = () => false,
   pendingReload,
   authText,
+  agentVersion,
   until,
 }) {
+  const statusItem = { show() {}, text: '', tooltip: '' };
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-companion-remote-'));
   const home = path.join(root, 'server-codex');
   fs.mkdirSync(home);
   fs.writeFileSync(path.join(home, 'config.toml'), original);
   if (authText) fs.writeFileSync(path.join(home, 'auth.json'), authText);
-  const agent = createAgent({ home, version: '0.1.3' });
+  const agent = createAgent({
+    home,
+    version: agentVersion ?? require('../vscode-companion/package.json').version,
+  });
   const requests = [],
     executed = [],
     installed = [];
@@ -64,7 +69,7 @@ async function runCompanion({
     StatusBarAlignment: { Right: 2 },
     Uri: { file: (fsPath) => ({ scheme: 'file', fsPath }) },
     window: {
-      createStatusBarItem: () => ({ show() {}, text: '', tooltip: '' }),
+      createStatusBarItem: () => statusItem,
       showInformationMessage: async () => undefined,
     },
     commands: {
@@ -125,7 +130,7 @@ async function runCompanion({
   for (const s of subscriptions) s.dispose?.();
   fake.closeAllConnections();
   await new Promise((r) => fake.close(r));
-  return { requests, executed, installed, state, home };
+  return { requests, executed, installed, state, home, statusItem };
 }
 const acked = (id) => (requests) => requests.some((r) => r.ack === id);
 
@@ -154,6 +159,15 @@ test('SSH 窗口心跳附带远端代理状态（约定字段、不含密钥）�
     baseUrl: 'https://api.example.com/v1',
   });
   assert.equal(JSON.stringify(requests).includes(SECRET), false);
+});
+
+// 本机找不到 SSH 窗口的后端是正常的，状态栏按服务器上的远端代理显示，不显示“后端未关联”。
+test('SSH 窗口状态栏显示服务器接入情况', async () => {
+  const label = async (options) =>
+    (await runCompanion({ ...options, until: (r) => r.length >= 2 })).statusItem.text;
+  assert.match(await label({}), /服务器已接入$/);
+  assert.match(await label({ agentVersion: '0.0.1' }), /远端代理需更新$/);
+  assert.match(await label({ agentInstalled: false }), /服务器未装远端代理$/);
 });
 
 test('远端代理没装时 remoteAgent 为 null', async () => {
