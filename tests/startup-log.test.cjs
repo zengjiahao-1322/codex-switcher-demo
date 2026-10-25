@@ -25,6 +25,8 @@ test(
         BRIDGE_HOME: path.join(root, 'bridge'),
         BRIDGE_CODEX_HOME: path.join(root, 'codex'),
         BRIDGE_HERMES_HOME: path.join(root, 'none'),
+        // CI 为其他测试提供 CODEX_EXE；启动耗时只测服务本身，不应读取该外部路径。
+        CODEX_EXE: '',
         // 避开正在使用的 47831，不影响用户本机运行中的切换器。
         BRIDGE_PORT: String(49000 + Math.floor(Math.random() * 9000)),
       },
@@ -35,9 +37,18 @@ test(
       await closed;
       fs.rmSync(root, { recursive: true, force: true });
     });
+    let errors = '';
+    child.stderr.on('data', (d) => (errors += d));
     await new Promise((resolve, reject) => {
       child.stdout.on('data', (d) => String(d).includes('BRIDGE_READY') && resolve());
-      child.once('exit', (code) => reject(Error('后台提前退出：' + code)));
+      // 提前退出时带上子进程的报错和 main-error.log，CI 上才能看出原因。
+      child.once('exit', (code) => {
+        let fatal = '';
+        try {
+          fatal = fs.readFileSync(path.join(root, 'bridge', 'main-error.log'), 'utf8');
+        } catch {}
+        reject(Error('后台提前退出：' + code + '\n' + errors + fatal));
+      });
     });
     const { url } = JSON.parse(fs.readFileSync(path.join(root, 'bridge', 'running.json'), 'utf8'));
     const u = new URL(url);

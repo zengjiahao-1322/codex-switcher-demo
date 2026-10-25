@@ -92,7 +92,7 @@ test('同一窗口十次相同心跳只记一次，关联状态改变后才追�
     exe: path.join(root, 'openai.chatgpt-test', 'bin', 'codex.exe'),
     context: { ok: true, home: codexHome },
   });
-  now += 30000;
+  now += 5000;
   for (let i = 0; i < 10; i++) await service.actions.clientHeartbeat(input);
   events = readRecent(bridgeHome, 100);
   assert.equal(events.length, 2);

@@ -64,7 +64,7 @@ test('已接入窗口十秒内十次心跳只扫描一次，PID 改变和重载�
   assert.equal(options.at(-1).force, true);
 });
 
-test('未关联和已接入窗口均三十秒后重查，管理目录改变后立即重新判断', async (t) => {
+test('未关联五秒、已接入三十秒后重查，管理目录改变后立即重新判断', async (t) => {
   const f = fixture(t),
     clients = require('../src/clients/client-status.cjs'),
     current = inventory(f.codexHome),
@@ -80,7 +80,7 @@ test('未关联和已接入窗口均三十秒后重查，管理目录改变后�
     input = { id: 'waiting-window', pid: 710 };
   assert.equal((await service.actions.clientHeartbeat(input)).connection.state, 'unmatched');
   current.processes.push(processRow);
-  now += 29999;
+  now += 4999;
   assert.equal((await service.actions.clientHeartbeat(input)).connection.state, 'unmatched');
   assert.equal(scans, 1);
   now++;

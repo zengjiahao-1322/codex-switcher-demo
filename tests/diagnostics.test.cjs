@@ -318,7 +318,7 @@ test('心跳返回真实后端关联结果，已连接不能代替已接入', as
     exe: 'codex',
     context: { ok: true, home: f.home },
   });
-  now += 30000;
+  now += 5000;
   const ready = await service.actions.clientHeartbeat(input);
   assert.equal(ready.connection.state, 'ready');
   assert.deepEqual(ready.connection.backendPids, [811]);

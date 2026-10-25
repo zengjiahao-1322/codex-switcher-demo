@@ -521,7 +521,7 @@ function createService({
       cached &&
       cached.pid === Number(input.pid) &&
       !input.completedReload &&
-      Date.now() - cached.checkedAt < 30000
+      Date.now() - cached.checkedAt < (cached.connection.state === 'unmatched' ? 5000 : 30000)
     )
       return cached.connection;
     const status = clients.snapshot(codexHome, bridgeHome, {

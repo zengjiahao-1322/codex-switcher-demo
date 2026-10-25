@@ -71,7 +71,7 @@ function nodeCommand(pid) {
         { SWITCHER_UPDATE_PID: String(pid) },
       ),
     );
-    if (!found || path.basename(found.exe).toLowerCase() !== 'node.exe') return null;
+    if (!found || !found.exe || path.basename(found.exe).toLowerCase() !== 'node.exe') return null;
     command = found.command;
   }
   return command;
@@ -262,9 +262,9 @@ async function existing() {
   };
   let handoverResult = null;
   const handleListenError = async (e) => {
-    if (e.code !== 'EADDRINUSE') throw e;
-    const ownerPid = listeningPid(a.port);
-    if (await reclaimFixedPort(a.port)) {
+    if (!['EADDRINUSE', 'EACCES'].includes(e.code)) throw e;
+    const ownerPid = e.code === 'EADDRINUSE' ? listeningPid(a.port) : null;
+    if (e.code === 'EADDRINUSE' && (await reclaimFixedPort(a.port))) {
       handoverResult = { reclaimed: { pid: ownerPid } };
       console.log('BRIDGE_RECLAIMED_OLD_SERVICE ' + a.port);
       server.once('error', handleListenError);
@@ -276,16 +276,20 @@ async function existing() {
       portFallback: {
         port: a.port,
         ownerPid: ownerPid || null,
-        reason: ownerPid ? 'different_process' : 'port_in_use',
+        reason: e.code === 'EACCES' ? 'EACCES' : ownerPid ? 'different_process' : 'port_in_use',
       },
     };
-    const prior = await existing();
-    if (prior) {
-      console.log('BRIDGE_ALREADY_RUNNING ' + new URL(prior.url).origin);
-      openUrl(prior.url);
-      return;
+    if (e.code === 'EADDRINUSE') {
+      const prior = await existing();
+      if (prior) {
+        console.log('BRIDGE_ALREADY_RUNNING ' + new URL(prior.url).origin);
+        openUrl(prior.url);
+        return;
+      }
     }
-    console.log('BRIDGE_PORT_IN_USE ' + a.port);
+    console.log(
+      (e.code === 'EACCES' ? 'BRIDGE_PORT_PERMISSION_DENIED ' : 'BRIDGE_PORT_IN_USE ') + a.port,
+    );
     server.listen(0, '127.0.0.1');
   };
   server.once('error', handleListenError);
