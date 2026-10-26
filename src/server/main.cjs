@@ -107,6 +107,21 @@ function sameInstall(pid) {
     throw error;
   }
 }
+function inspectOtherInstall(pid) {
+  const command = nodeCommand(pid),
+    entry = command?.match(/(?:^|[\\/])node(?:\.exe)?"?\s+"?(.+?[\\/]main\.cjs)"?(?:\s|$)/i)?.[1];
+  if (!entry) return null;
+  try {
+    const root = path.dirname(path.resolve(entry)),
+      packageInfo = readJson(path.join(root, 'package.json')),
+      releaseInfo = readJson(path.join(root, 'src', 'platform', 'release-info.json'));
+    if (packageInfo?.name !== 'codex-api-switcher' || !Number.isSafeInteger(releaseInfo?.sequence))
+      return null;
+    return { root, sequence: releaseInfo.sequence };
+  } catch {
+    return null;
+  }
+}
 function listeningPid(port) {
   if (process.platform === 'darwin') {
     let output;
@@ -143,7 +158,12 @@ async function waitPortFree(port) {
 }
 async function reclaimFixedPort(port) {
   const pid = listeningPid(port);
-  if (!pid || !sameInstall(pid)) return false;
+  if (!pid) return false;
+  if (!sameInstall(pid)) {
+    const other = inspectOtherInstall(pid);
+    if (!other || other.sequence >= Number(runtimeInfo.sequence || 0)) return false;
+    otherInstall = { pid, sequence: other.sequence, action: 'stopped' };
+  }
   await require('../platform/process-stop.cjs').stopProcesses([pid]);
   await waitPortFree(port);
   return true;

@@ -42,13 +42,14 @@ $values = @{
   DisplayVersion = $package.version
   Publisher = 'Codex Switcher'
   InstallLocation = $InstallDir
-  UninstallString = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $InstallDir 'uninstall.ps1') + '"'
+  UninstallString = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $InstallDir 'uninstall.ps1') + '" -KeepData'
   DisplayIcon = (Join-Path $InstallDir 'runtime\node.exe') + ',0'
 }
 foreach ($name in $values.Keys) { New-ItemProperty -Path $registry -Name $name -Value $values[$name] -PropertyType String -Force | Out-Null }
 foreach ($name in @('NoModify', 'NoRepair')) { New-ItemProperty -Path $registry -Name $name -Value 1 -PropertyType DWord -Force | Out-Null }
 if (-not $RegisterOnly) {
   New-Item -ItemType Directory -Path $DiscoveryDir -Force | Out-Null
-  @{created=$true;target=$InstallDir;sequence=$sequence} | ConvertTo-Json -Compress | Set-Content -LiteralPath $markerFile -Encoding UTF8
+  $markerText = @{created=$true;target=$InstallDir;sequence=$sequence} | ConvertTo-Json -Compress
+  [IO.File]::WriteAllText($markerFile, $markerText, (New-Object Text.UTF8Encoding($false)))
 }
 Write-Output ([pscustomobject]@{ shortcutChanged=$changed } | ConvertTo-Json -Compress)

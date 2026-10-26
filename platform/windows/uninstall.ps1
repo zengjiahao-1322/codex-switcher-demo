@@ -20,7 +20,7 @@ $running = Join-Path $InstallDir 'private\running.json'
 if (Test-Path $running) { try { $r = Get-Content $running -Raw | ConvertFrom-Json; $serviceProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($r.pid)"; if ($serviceProcess.ExecutablePath -ne $node -or -not $serviceProcess.CommandLine.Contains((Join-Path $InstallDir 'main.cjs'))) { throw 'Unexpected process' }; Stop-Process -Id $r.pid -Force -ErrorAction Stop; Step 'Stopped the running service' } catch {} }
 
 if ((Test-Path $node) -and (Test-Path $cli)) {
-  if (-not $KeepCodexConfig) {
+  if (-not $KeepCodexConfig -and (& $node $cli status) -eq 'BRIDGED') {
     Step 'Switching Codex back to its official login'
     & $node $cli restore; if ($LASTEXITCODE -ne 0) { throw 'Could not restore the official Codex config; nothing was removed.' }
     Step 'Cleaning the switcher entries from Codex config'
