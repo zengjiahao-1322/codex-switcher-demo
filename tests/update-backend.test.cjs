@@ -174,7 +174,10 @@ test('系统代理不可达时更新提示带代理地址', async (t) => {
     transport,
   });
   await manager.actions.checkUpdate();
-  assert.equal(manager.state().error, '连不上系统代理 http://127.0.0.1:1080，请确认代理软件在运行。');
+  assert.equal(
+    manager.state().error,
+    '连不上系统代理 http://127.0.0.1:1080，请确认代理软件在运行。',
+  );
   const other = createUpdateManager({
     bridgeHome: path.join(root, 'other-bridge'),
     codexHome: path.join(root, 'codex'),
@@ -796,10 +799,7 @@ test(
           running.build.id,
       );
     }
-    assert.equal(
-      (await runtimeResponse.json()).id,
-      newBuild,
-    );
+    assert.equal((await runtimeResponse.json()).id, newBuild);
     assert.notEqual(url.hash, oldUrl.hash, '新后台必须生成新页面令牌');
     assert.equal(
       fs.readFileSync(path.join(bridge, 'opened-pages.txt'), 'utf8').trim().split('\n').length,

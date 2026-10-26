@@ -19,16 +19,16 @@ const hostOf = (url) => url.replace(/^https?:\/\//, '').split('/')[0];
 const sameUrl = (x, y) => x.replace(/\/+$/, '') === y.replace(/\/+$/, '');
 // 协议号 2 起带官方登录读写；同版本号重新发布时，旧代理只能靠协议号认出。
 const agentState = (rows) =>
-  rows.some((r) => r.remoteAgentState === 'unreachable')
+  rows.some((r) => r.windows.some((w) => w.remoteAgentState === 'unreachable'))
     ? ['服务器连接中', 'changed', 'unreachable']
     : rows.some((r) => !r.agentVersion)
-    ? ['未安装远端代理', 'changed']
-    : rows.some(
-          (r) =>
-            r.agentProtocol !== 2 || r.windows.some((w) => w.agentVersion !== w.companionVersion),
-        )
-      ? ['远端代理需更新', 'changed']
-      : ['已接入', 'done'];
+      ? ['未安装远端代理', 'changed']
+      : rows.some(
+            (r) =>
+              r.agentProtocol !== 2 || r.windows.some((w) => w.agentVersion !== w.companionVersion),
+          )
+        ? ['远端代理需更新', 'changed']
+        : ['已接入', 'done'];
 // 服务器连不到本机的转换服务，所以只有可直连且有密钥的 API 能用；官方账号的登录会写到服务器上。
 const blockedReason = (p) =>
   p.access?.mode === 'adapter'
@@ -150,7 +150,11 @@ function serverCard(authority, rows) {
       busy(
         install,
         async () => {
-          if (!confirm('会重启这台服务器窗口里的扩展，不断开连接；服务器上正在运行的 Codex 任务会中断。继续安装/更新远端代理吗？'))
+          if (
+            !confirm(
+              '会重启服务器上的扩展（SSH 不断开，几秒后恢复）；服务器上正在运行的 Codex 任务会中断。继续安装/更新远端代理吗？',
+            )
+          )
             return;
           installs.set(authority, '正在服务器上安装远端代理…');
           renderRemotes(remotes);
@@ -164,6 +168,8 @@ function serverCard(authority, rows) {
         },
       );
     card.append(install);
+    if (rows.some((r) => r.windows.some((w) => w.installStatus === 'notActive')))
+      card.append(note('已安装，但服务器仍在运行旧版。请在该窗口运行‘开发人员: 重新加载窗口’。'));
     if (installs.has(authority)) card.append(note(installs.get(authority)));
   } else card.append(chooser(authority, host, rows));
   return card;
@@ -248,7 +254,7 @@ function detail(panel, authority, host, rows, o, draft) {
     (a
       ? '服务器使用 ChatGPT 官方服务和这个账号。登录会保存到服务器上（只有当前用户可读）；本机和服务器同时用这个账号时，切换器会让两边的登录保持一致。'
       : '服务器直接访问这个 API，地址、模型和密钥写入服务器的 config.toml（只有当前用户可读）。') +
-    '应用后会重启这台服务器窗口里的扩展，不重连服务器；本机不受影响。';
+    '应用后会重启服务器上的扩展（SSH 不断开，几秒后恢复）；本机不受影响。';
   panel.append(title, context);
   let model = null;
   if (a) panel.append(accountFacts(a), quotaNode(a.quota));
@@ -294,7 +300,7 @@ function detail(panel, authority, host, rows, o, draft) {
                   a.email +
                   '」。\n\n这个账号的登录会保存到服务器 ' +
                   where +
-                  ' 中的 auth.json（只有当前用户可读），config.toml 改为官方登录，并重启这台服务器窗口里的扩展（不重连服务器，打开的文件和终端不受影响），正在运行的 Codex 任务会中断。本机和服务器同时用这个账号时，切换器会让两边的登录保持一致。本机不受影响。继续？'
+                  ' 中的 auth.json（只有当前用户可读），config.toml 改为官方登录，并重启服务器上的扩展（SSH 不断开，几秒后恢复），正在运行的 Codex 任务会中断。本机和服务器同时用这个账号时，切换器会让两边的登录保持一致。本机不受影响。继续？'
               : '把服务器 ' +
                   host +
                   ' 的 Codex 切换到「' +
@@ -303,7 +309,7 @@ function detail(panel, authority, host, rows, o, draft) {
                   chosen +
                   '。\n\nAPI 地址、模型和密钥会写入这台服务器 ' +
                   where +
-                  ' 中的 config.toml（只有当前用户可读），并重启这台服务器窗口里的扩展（不重连服务器，打开的文件和终端不受影响），正在运行的 Codex 任务会中断。本机不受影响。继续？',
+                  ' 中的 config.toml（只有当前用户可读），并重启服务器上的扩展（SSH 不断开，几秒后恢复），正在运行的 Codex 任务会中断。本机不受影响。继续？',
           )
         )
           return;

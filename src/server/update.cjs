@@ -8,8 +8,7 @@ const REPOSITORY = 'zengjiahao-1322/codex-switcher-demo';
 const releaseUrl = `https://github.com/${REPOSITORY}/releases/latest/download/`;
 function withProxyHint(message, error, proxy) {
   if (proxy?.type !== 'manual') return message;
-  if (error?.curl?.code === 7)
-    return `连不上系统代理 ${proxy.value}，请确认代理软件在运行。`;
+  if (error?.curl?.code === 7) return `连不上系统代理 ${proxy.value}，请确认代理软件在运行。`;
   return `${message}（经系统代理 ${proxy.value}）`;
 }
 

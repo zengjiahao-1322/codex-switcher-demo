@@ -727,13 +727,14 @@ function createService({
       if (input.remoteType === 'ssh-remote') {
         const agent = input.remoteAgent,
           key = JSON.stringify([input.authority, agent?.codexHome || null]),
-          status = input.remoteAgentState === 'unreachable'
-            ? 'unreachable'
-            : !agent
-            ? 'missing'
-            : agent.protocol !== 2 || agent.agentVersion !== input.companionVersion
-              ? 'needsUpdate'
-              : 'connected',
+          status =
+            input.remoteAgentState === 'unreachable'
+              ? 'unreachable'
+              : !agent
+                ? 'missing'
+                : agent.protocol !== 2 || agent.agentVersion !== input.companionVersion
+                  ? 'needsUpdate'
+                  : 'connected',
           detail = {
             authority: input.authority,
             codexHome: agent?.codexHome || null,
@@ -790,7 +791,11 @@ function createService({
           result = await remote.dispatch(
             bridgeHome,
             id,
-            { type: 'installRemoteAgent', base64: fs.readFileSync(file).toString('base64'), reload: true },
+            {
+              type: 'installRemoteAgent',
+              base64: fs.readFileSync(file).toString('base64'),
+              reload: true,
+            },
             { timeout: 60000 },
           );
         if (result?.installed !== true) throw Error('编辑器未确认远端代理安装成功');
@@ -804,6 +809,8 @@ function createService({
           companionVersion: to,
           agentVersion: window.remoteAgent?.agentVersion || null,
           requestedAt: Date.now(),
+          method: result?.reload?.method || 'remoteHostExit',
+          reason: result?.reload?.reason || null,
         });
         eventLog.log(bridgeHome, 'remote.install', { host, from, to, status: 'installed' });
         return result;

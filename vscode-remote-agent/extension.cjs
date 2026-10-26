@@ -4,7 +4,8 @@
 const fs = require('node:fs'),
   os = require('node:os'),
   path = require('node:path'),
-  crypto = require('node:crypto');
+  crypto = require('node:crypto'),
+  childProcess = require('node:child_process');
 const CONFIG = 'config.toml',
   CATALOG = 'switcher-model-catalog.json',
   AUTH = 'auth.json',
@@ -63,7 +64,47 @@ function writeAtomic(file, text) {
   fs.renameSync(temp, file);
 }
 
+function directChildren() {
+  const command =
+      process.platform === 'win32'
+        ? [
+            'powershell.exe',
+            [
+              '-NoProfile',
+              '-Command',
+              `(Get-CimInstance Win32_Process -Filter 'ParentProcessId=${process.pid}').ProcessId`,
+            ],
+          ]
+        : ['ps', ['-eo', 'pid=,ppid=']],
+    text = childProcess.execFileSync(command[0], command[1], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+  if (process.platform === 'win32')
+    return text
+      .split(/\s+/)
+      .map((value) => Number(value))
+      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .filter(([pid, parent]) => Number.isInteger(pid) && parent === process.pid)
+    .map(([pid]) => pid);
+}
+
+function stopDirectChildren() {
+  for (const pid of directChildren()) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+    }
+  }
+  process.kill(process.pid, 'SIGTERM');
+}
+
 function createAgent({ home, version }) {
+  const startedAt = new Date().toISOString();
   const file = (name) => path.join(home, name);
   const content = (name) => (fs.existsSync(file(name)) ? fs.readFileSync(file(name), 'utf8') : '');
   const snapshot = (name) => {
@@ -80,6 +121,7 @@ function createAgent({ home, version }) {
       const exists = fs.existsSync(file(CONFIG));
       return {
         agentVersion: version,
+        startedAt,
         protocol: PROTOCOL,
         host: os.hostname(),
         platform: process.platform,
@@ -135,6 +177,10 @@ function createAgent({ home, version }) {
         authSha256: auth ? sha256(auth.text) : null,
       };
     },
+    restart() {
+      setTimeout(stopDirectChildren, 300).unref?.();
+      return { restarting: true };
+    },
   };
 }
 
@@ -144,7 +190,7 @@ function activate(context) {
     home: path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex')),
     version: require('./package.json').version,
   });
-  for (const name of ['status', 'read', 'readAuth', 'write'])
+  for (const name of ['status', 'read', 'readAuth', 'write', 'restart'])
     context.subscriptions.push(
       vscode.commands.registerCommand('codexSwitcherRemote.' + name, (input) => agent[name](input)),
     );

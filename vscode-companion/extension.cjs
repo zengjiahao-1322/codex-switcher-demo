@@ -74,27 +74,28 @@ function activate(context) {
           new Promise((_, reject) => setTimeout(() => reject(Error('远端代理状态查询超时')), 5000)),
         ]);
         if (generation !== remoteAgentGeneration) return;
-      // 只转发约定字段，远端代理多给的内容不上报。
-      remoteAgent = {
-        agentVersion: s.agentVersion,
-        protocol: s.protocol,
-        host: s.host,
-        platform: s.platform,
-        arch: s.arch,
-        codexHome: s.codexHome,
-        configExists: s.configExists,
-        current: s.current && {
-          model: s.current.model,
-          modelProvider: s.current.modelProvider,
-          baseUrl: s.current.baseUrl,
-        },
-        account: s.account && {
-          id: s.account.id,
-          email: s.account.email,
-          plan: s.account.plan,
-          lastRefresh: s.account.lastRefresh,
-        },
-      };
+        // 只转发约定字段，远端代理多给的内容不上报。
+        remoteAgent = {
+          agentVersion: s.agentVersion,
+          startedAt: s.startedAt,
+          protocol: s.protocol,
+          host: s.host,
+          platform: s.platform,
+          arch: s.arch,
+          codexHome: s.codexHome,
+          configExists: s.configExists,
+          current: s.current && {
+            model: s.current.model,
+            modelProvider: s.current.modelProvider,
+            baseUrl: s.current.baseUrl,
+          },
+          account: s.account && {
+            id: s.account.id,
+            email: s.account.email,
+            plan: s.account.plan,
+            lastRefresh: s.account.lastRefresh,
+          },
+        };
         remoteAgentError = null;
         remoteAgentState = 'connected';
         status.text = '$(plug) Codex Switcher · 服务器已接入';
@@ -102,7 +103,9 @@ function activate(context) {
         if (generation !== remoteAgentGeneration) return;
         remoteAgent = null;
         remoteAgentError = String(error.message).slice(0, 300);
-        remoteAgentState = /command '.+' not found/.test(remoteAgentError) ? 'missing' : 'unreachable';
+        remoteAgentState = /command '.+' not found/.test(remoteAgentError)
+          ? 'missing'
+          : 'unreachable';
         status.text =
           remoteAgentState === 'unreachable'
             ? '$(plug) Codex Switcher · 服务器连接中'
@@ -194,10 +197,31 @@ function activate(context) {
     );
   const ack = (c, data, commandId, ackStatus, extra = {}) =>
     post(c, 'clientHeartbeat', { ...data, ack: commandId, ackStatus, ...extra }, controller.signal);
-  // 记下待确认的重载后重载窗口；新窗口的心跳带 completedReload 让后台确认。
-  // SSH 窗口只重启扩展宿主：Codex 后台是扩展宿主的子进程，会随之换新并读到新登录和配置，
-  // 而窗口不重载、SSH 不重连，打开的文件和终端都保留（2026-10-25 隔离实测：不到 1 秒换新后台）。
-  async function reloadWindow(c, data, commandId) {
+  const remoteRestartKey = 'codexSwitcher.remoteRestarts';
+  async function planRemoteRestart() {
+    if (!sshRemote()) return null;
+    const now = Date.now(),
+      recent = (context.workspaceState.get(remoteRestartKey) || []).filter(
+        (at) => now - at < 5 * 60 * 1000,
+      );
+    if (recent.length >= 2) {
+      await context.workspaceState.update(remoteRestartKey, recent);
+      return { method: 'restartExtensionHost', reason: 'crashLimit' };
+    }
+    await context.workspaceState.update(remoteRestartKey, [...recent, now]);
+    return { method: 'remoteHostExit' };
+  }
+  // SSH 窗口让远端代理退出，由 Remote-SSH 只拉起服务器上的扩展宿主；
+  // 本机宿主、窗口和 SSH 连接都保留。5 分钟内连续两次后才回退到整窗重启。
+  async function reloadWindow(c, data, commandId, reload) {
+    if (reload?.method === 'remoteHostExit') {
+      try {
+        await vscode.commands.executeCommand('codexSwitcherRemote.restart');
+      } catch (error) {
+        await ack(c, data, commandId, 'reload_failed', { ackError: error.message }).catch(() => {});
+      }
+      return;
+    }
     await context.workspaceState.update('codexSwitcher.lastReload', commandId);
     await context.workspaceState.update('codexSwitcher.pendingReload', {
       clientId: id,
@@ -239,8 +263,11 @@ function activate(context) {
       return;
     }
     if (command.step === 'write') remoteCheckedAt = 0;
-    await ack(c, data, command.id, 'completed', { ackResult: result });
-    if (command.step === 'write' && command.reload) await reloadWindow(c, data, command.id);
+    const reload = command.step === 'write' && command.reload ? await planRemoteRestart() : null;
+    await ack(c, data, command.id, 'completed', {
+      ackResult: reload ? { ...result, reload } : result,
+    });
+    if (reload) await reloadWindow(c, data, command.id, reload);
   }
   // 远端代理随切换器发行；在这个 SSH 窗口里安装，workspace 扩展会装到服务器一侧。
   async function installRemoteAgent(c, data, command) {
@@ -258,8 +285,11 @@ function activate(context) {
       fs.rmSync(file, { force: true });
     }
     remoteCheckedAt = 0;
-    await ack(c, data, command.id, 'completed', { ackResult: { installed: true } });
-    await reloadWindow(c, data, command.id);
+    const reload = await planRemoteRestart();
+    await ack(c, data, command.id, 'completed', {
+      ackResult: { installed: true, reload },
+    });
+    await reloadWindow(c, data, command.id, reload);
   }
   async function tick() {
     if (busy || stopped) return;
@@ -430,7 +460,7 @@ function activate(context) {
             (t.kind === 'account'
               ? '这个账号的登录会保存到服务器上（只有当前用户可读）；本机和服务器同时用这个账号时，切换器会让两边登录保持一致。'
               : 'API 地址、模型和密钥会写入服务器的 config.toml（只有当前用户可读）。') +
-            '会重启这个窗口里的扩展（不重连服务器），服务器上正在运行的 Codex 任务会中断。本机不受影响。'
+            '会重启服务器上的扩展（SSH 不断开，几秒后恢复）；服务器上正在运行的 Codex 任务会中断。本机不受影响。'
         : '把本机 Codex 切换到' +
             what +
             '？Codex 桌面端会重启，已接入、共用这份配置的编辑器窗口会重载，正在运行的 Codex 任务会中断。',

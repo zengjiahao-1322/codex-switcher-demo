@@ -36,7 +36,27 @@ test('状态只给模型、provider 和 API 地址，不含密钥', () => {
   });
   assert.equal(status.codexHome, home);
   assert.equal(status.agentVersion, '0.1.3');
+  assert.ok(status.startedAt);
+  assert.doesNotThrow(() => new Date(status.startedAt).toISOString());
   assert.equal(JSON.stringify(status).includes(SECRET), false);
+});
+
+test('restart先返回确认，再结束直接子进程和当前扩展宿主', async (t) => {
+  const killed = [];
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(require('node:child_process'), 'execFileSync', () =>
+    process.platform === 'win32' ? '101\n102\n' : `101 ${process.pid}\n102 ${process.pid}\n103 1\n`,
+  );
+  t.mock.method(process, 'kill', (pid, signal) => killed.push([pid, signal]));
+  const { agent } = setup();
+  assert.deepEqual(agent.restart(), { restarting: true });
+  assert.deepEqual(killed, []);
+  t.mock.timers.tick(300);
+  assert.deepEqual(killed, [
+    [101, 'SIGTERM'],
+    [102, 'SIGTERM'],
+    [process.pid, 'SIGTERM'],
+  ]);
 });
 
 test('没有配置文件时状态为空，读取得到空文本', () => {

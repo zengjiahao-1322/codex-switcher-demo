@@ -109,6 +109,7 @@ async function runCompanion({
         if (name.startsWith('codexSwitcherRemote.')) {
           if (!agentInstalled) throw Error(`command '${name}' not found`);
           if (name === 'codexSwitcherRemote.status' && statusNever) return new Promise(() => {});
+          if (name === 'codexSwitcherRemote.restart') return { restarting: true };
           return agent[name.split('.')[1]](input);
         }
         if (name === 'workbench.extensions.installExtension') {
@@ -182,6 +183,7 @@ test('SSH 窗口心跳附带远端代理状态（约定字段、不含密钥）�
     'host',
     'platform',
     'protocol',
+    'startedAt',
   ]);
   assert.equal(first.remoteAgent.account, null);
   assert.equal(first.remoteAgent.protocol, 2);
@@ -203,7 +205,10 @@ test('SSH 窗口状态栏显示服务器接入情况', async () => {
 });
 
 test('远端代理没装时 remoteAgent 为 null，并把问不到的原因交给后台记日志', async () => {
-  const { requests } = await runCompanion({ agentInstalled: false, until: (r) => r.length >= 2 && r[1].remoteAgentError });
+  const { requests } = await runCompanion({
+    agentInstalled: false,
+    until: (r) => r.length >= 2 && r[1].remoteAgentError,
+  });
   const latest = requests.find((item) => item.remoteAgentError);
   assert.equal(latest.remoteAgent, null);
   assert.match(latest.remoteAgentError, /codexSwitcherRemote\.status' not found/);
@@ -222,7 +227,7 @@ test('本机窗口不调用远端命令，也不上报远端字段', async () =>
   assert.equal(requests[0].authority, null);
 });
 
-test('read → write：回执带结果，写入服务器配置，记下待确认重载并只重启扩展宿主', async () => {
+test('read → write：回执带结果，写入服务器配置并让远端扩展宿主退出', async () => {
   let readResult;
   const next = original.replace('gpt-5.5', 'gpt-6.1-sol');
   const { requests, executed, state, home } = await runCompanion({
@@ -248,13 +253,17 @@ test('read → write：回执带结果，写入服务器配置，记下待确认
   assert.deepEqual(readResult, { text: original, sha256: sha(original) });
   const write = requests.find((r) => r.ack === 'cmd-write');
   assert.equal(write.ackStatus, 'completed');
-  assert.deepEqual(write.ackResult, { ok: true, sha256: sha(next), authSha256: null });
+  assert.deepEqual(write.ackResult, {
+    ok: true,
+    sha256: sha(next),
+    authSha256: null,
+    reload: { method: 'remoteHostExit' },
+  });
   assert.equal(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), next);
-  // 写入成功只回 completed，后台据此记为已请求重载；不再另发 reload_requested。
+  // 写入成功只回 completed，后台据此记为已请求重载；远端代理自行退出。
   assert.equal(requests.filter((r) => r.ack === 'cmd-write').length, 1);
-  assert.deepEqual(state.get('codexSwitcher.pendingReload').commandId, 'cmd-write');
-  // SSH 窗口不重载、不重连，只重启扩展宿主让服务器上的 Codex 换新后台。
-  assert.ok(executed.includes('workbench.action.restartExtensionHost'));
+  assert.equal(state.get('codexSwitcher.pendingReload'), undefined);
+  assert.ok(executed.includes('codexSwitcherRemote.restart'));
   assert.equal(executed.includes('workbench.action.reloadWindow'), false);
 });
 
@@ -393,8 +402,42 @@ test('安装远端代理：写临时 VSIX 交给编辑器安装，装完删除�
   assert.equal(fs.existsSync(installed[0].path), false);
   const done = requests.find((r) => r.ack === 'cmd-install');
   assert.equal(done.ackStatus, 'completed');
-  assert.deepEqual(done.ackResult, { installed: true });
-  assert.equal(executed.includes('workbench.action.restartExtensionHost'), true);
+  assert.deepEqual(done.ackResult, { installed: true, reload: { method: 'remoteHostExit' } });
+  assert.equal(executed.includes('codexSwitcherRemote.restart'), true);
+});
+
+test('五分钟内远端宿主退出两次后回退restartExtensionHost并带crashLimit', async () => {
+  const { requests, executed, state } = await runCompanion({
+    commandsFor: (reqs) => {
+      const count = reqs.filter((r) => r.ack?.startsWith('limit-write-')).length;
+      return count < 3
+        ? {
+            id: 'limit-write-' + (count + 1),
+            type: 'remoteApply',
+            step: 'write',
+            text: original,
+            expectedSha256: sha(original),
+            catalog: null,
+            reload: true,
+          }
+        : null;
+    },
+    until: acked('limit-write-3'),
+  });
+  assert.deepEqual(
+    requests.filter((r) => r.ack?.startsWith('limit-write-')).map((r) => r.ackResult.reload),
+    [
+      { method: 'remoteHostExit' },
+      { method: 'remoteHostExit' },
+      { method: 'restartExtensionHost', reason: 'crashLimit' },
+    ],
+  );
+  assert.equal(executed.filter((name) => name === 'codexSwitcherRemote.restart').length, 2);
+  assert.equal(
+    executed.filter((name) => name === 'workbench.action.restartExtensionHost').length,
+    1,
+  );
+  assert.equal(state.get('codexSwitcher.pendingReload').commandId, 'limit-write-3');
 });
 
 test('安装失败时回执 failed，临时文件同样删除', async () => {
@@ -490,7 +533,7 @@ test('SSH 窗口快捷切换：只列服务器能用的来源，额度充足排�
   ]);
   const direct = shown.find((s) => s.items).items.find((i) => i.label === '$(plug) Direct API');
   assert.match(direct.description, /正在使用/, '服务器当前就是这个 API 地址');
-  assert.match(shown.find((s) => s.warning).warning, /不重连服务器/);
+  assert.match(shown.find((s) => s.warning).warning, /SSH 不断开/);
   assert.match(shown.find((s) => s.warning).warning, /登录会保存到服务器上/);
   assert.deepEqual(calls.find((c) => c.route === 'remoteSwitch').body, {
     authority: 'ssh-remote+gpu-box',

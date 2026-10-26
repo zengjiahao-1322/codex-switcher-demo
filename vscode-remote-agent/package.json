@@ -12,10 +12,9 @@
     "onCommand:codexSwitcherRemote.status",
     "onCommand:codexSwitcherRemote.read",
     "onCommand:codexSwitcherRemote.readAuth",
-    "onCommand:codexSwitcherRemote.write"
+    "onCommand:codexSwitcherRemote.write",
+    "onCommand:codexSwitcherRemote.restart"
   ],
-  "extensionKind": [
-    "workspace"
-  ],
+  "extensionKind": ["workspace"],
   "license": "MIT"
 }

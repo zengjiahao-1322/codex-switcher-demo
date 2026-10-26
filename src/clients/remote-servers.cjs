@@ -4,6 +4,7 @@ const path = require('node:path'),
   crypto = require('node:crypto'),
   { EventEmitter } = require('node:events');
 const { redact, log } = require('../diagnostics/event-log.cjs');
+const { readJson, writeJson } = require('../accounts/accounts.cjs');
 // 远端配置正文和回执只经过常驻服务内存，不能复用落盘的窗口命令字段。
 const pending = new Map();
 const commandEvents = new EventEmitter();
@@ -14,34 +15,57 @@ function markReload(bridgeHome, id, target) {
   const key = keyFor(bridgeHome, id),
     previous = reloads.get(key);
   if (previous?.timer) clearTimeout(previous.timer);
-  const entry = { ...target };
+  const entry = { ...target, clientId: id };
+  if (entry.kind === 'install') setInstallStatus(bridgeHome, id, 'installed');
   entry.timer = setTimeout(() => {
     if (reloads.get(key) !== entry) return;
     reloads.delete(key);
-    if (entry.kind === 'install')
+    const latest = latestVersions(bridgeHome, entry);
+    if (entry.kind === 'install') {
+      setInstallStatus(bridgeHome, id, 'notActive');
       log(bridgeHome, 'remote.install', {
         host: entry.host || entry.authority,
         from: entry.from,
         to: entry.to,
         status: 'notActive',
-        agentVersion: entry.agentVersion || null,
+        agentVersion: latest.agentVersion,
+        ...(entry.method ? { method: entry.method } : {}),
+        ...(entry.reason ? { reason: entry.reason } : {}),
       });
-    else
+    } else
       log(bridgeHome, 'remote.reload', {
         host: entry.host || entry.authority,
         codexHome: entry.codexHome,
         source: entry.source || 'web',
         status: 'failed',
+        ...(entry.method ? { method: entry.method } : {}),
         reason: redact(
-          '120秒内未确认重载；agentVersion=' +
-            (entry.agentVersion || 'null') +
+          (entry.reason ? entry.reason + '；' : '') +
+            '120秒内未确认重载；agentVersion=' +
+            (latest.agentVersion || 'null') +
             '，companionVersion=' +
-            (entry.companionVersion || 'null'),
+            (latest.companionVersion || 'null'),
         ),
       });
   }, 120000);
   entry.timer.unref?.();
   reloads.set(key, entry);
+}
+
+function latestVersions(bridgeHome, entry) {
+  const row = readJson(path.join(bridgeHome, 'clients', entry.clientId + '.json'));
+  return {
+    agentVersion: row?.remoteAgent?.agentVersion || null,
+    companionVersion: row?.companionVersion || null,
+  };
+}
+function setInstallStatus(bridgeHome, id, status) {
+  const file = path.join(bridgeHome, 'clients', id + '.json'),
+    row = readJson(file);
+  if (row?.lastAck) {
+    row.lastAck.installStatus = status;
+    writeJson(file, row);
+  }
 }
 function recordReload(bridgeHome, id, { status, reason } = {}) {
   const key = keyFor(bridgeHome, id),
@@ -50,6 +74,7 @@ function recordReload(bridgeHome, id, { status, reason } = {}) {
   reloads.delete(key);
   if (reload.timer) clearTimeout(reload.timer);
   if (reload.kind === 'install') {
+    setInstallStatus(bridgeHome, id, status === 'confirmed' ? 'active' : 'notActive');
     log(bridgeHome, 'remote.install', {
       host: reload.host || reload.authority,
       from: reload.from,
@@ -57,7 +82,9 @@ function recordReload(bridgeHome, id, { status, reason } = {}) {
       status: status === 'confirmed' ? 'active' : 'notActive',
       ...(status === 'confirmed'
         ? { elapsedMs: Date.now() - reload.requestedAt }
-        : { agentVersion: reload.agentVersion || null }),
+        : { agentVersion: latestVersions(bridgeHome, reload).agentVersion }),
+      ...(reload.method ? { method: reload.method } : {}),
+      ...(reload.reason ? { reason: reload.reason } : {}),
     });
     return;
   }
@@ -66,9 +93,13 @@ function recordReload(bridgeHome, id, { status, reason } = {}) {
     codexHome: reload.codexHome,
     source: reload.source || 'web',
     status,
+    ...(reload.method ? { method: reload.method } : {}),
+    ...(status === 'confirmed' && reload.reason ? { reason: reload.reason } : {}),
     ...(status === 'confirmed'
       ? { elapsedMs: Date.now() - reload.requestedAt }
-      : { reason: redact(reason || '远程窗口未能执行重载') }),
+      : {
+          reason: redact(reason || reload.reason || '远程窗口未能执行重载'),
+        }),
   });
 }
 
@@ -99,6 +130,7 @@ function agentStatus(value) {
   }
   return {
     agentVersion: string(value.agentVersion),
+    startedAt: value.startedAt == null ? null : string(value.startedAt),
     protocol: Number(value.protocol || 0),
     host: string(value.host),
     platform,
@@ -150,6 +182,7 @@ function groups(bridgeHome) {
       agentProtocol: agent?.protocol || 0,
       companionVersion: row.companionVersion,
       remoteAgentState: row.remoteAgentState || null,
+      installStatus: row.lastAck?.installStatus || null,
     });
   }
   return [...found.values()];
@@ -210,6 +243,18 @@ function confirmsReload(input, previous) {
 }
 function hasReload(bridgeHome, id) {
   return reloads.has(keyFor(bridgeHome, id));
+}
+function confirmsRemoteRestart(bridgeHome, id, input) {
+  const reload = reloads.get(keyFor(bridgeHome, id));
+  return !!(
+    reload?.method === 'remoteHostExit' &&
+    input.authority === reload.authority &&
+    (!reload.codexHome || input.remoteAgent?.codexHome === reload.codexHome) &&
+    input.remoteAgent?.startedAt &&
+    Date.parse(input.remoteAgent.startedAt) > reload.requestedAt &&
+    input.remoteAgent.agentVersion === input.companionVersion &&
+    (reload.kind !== 'install' || input.remoteAgent.agentVersion === reload.to)
+  );
 }
 function windowFor(bridgeHome, group) {
   return require('./client-status.cjs')
@@ -343,6 +388,8 @@ async function apply(bridgeHome, authority, source, origin = 'web') {
           codexHome: group.codexHome,
           requestedAt,
           source: origin,
+          method: written?.reload?.method || 'remoteHostExit',
+          reason: written?.reload?.reason || null,
         });
         const others = group.windows.filter((item) => item.id !== window.id);
         if (others.length)
@@ -404,5 +451,6 @@ module.exports = {
   redactReason,
   markReload,
   recordReload,
+  confirmsRemoteRestart,
   apply,
 };

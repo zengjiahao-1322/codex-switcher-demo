@@ -44,6 +44,7 @@ function registration(id, extra = {}) {
       platform: 'linux',
       arch: 'x64',
       codexHome: '/home/tester/.codex',
+      startedAt: '2026-10-26T05:00:00.000Z',
       configExists: true,
       current: { model: 'old', modelProvider: 'openai', baseUrl: null },
     },
@@ -265,31 +266,82 @@ test('重载确认超过120秒记录failed并删除待确认项', (t) => {
     companionVersion: input.companionVersion,
     agentVersion: input.remoteAgent.agentVersion,
     requestedAt: Date.now(),
+    method: 'remoteHostExit',
   });
-  t.mock.timers.tick(120000);
+  t.mock.timers.tick(119000);
+  clients.heartbeat(home, {
+    ...input,
+    remoteAgent: { ...input.remoteAgent, agentVersion: '0.1.4' },
+  });
+  t.mock.timers.tick(1000);
   const events = require('../src/diagnostics/event-log.cjs').readRecent(home, 10);
   assert.equal(events.at(-1).event, 'remote.reload');
   assert.equal(events.at(-1).status, 'failed');
-  assert.match(events.at(-1).reason, /agentVersion/);
+  assert.match(events.at(-1).reason, /agentVersion=0\.1\.4/);
+  assert.equal(events.at(-1).method, 'remoteHostExit');
   assert.equal(remote.hasReload(home, input.id), false);
   t.mock.timers.reset();
+});
+
+test('远端代理自退出后用新startedAt确认重载并记录方法', (t) => {
+  const home = fixture(t),
+    input = registration('remote-exit-window'),
+    requestedAt = Date.parse('2026-10-26T05:00:01.000Z');
+  clients.heartbeat(home, input);
+  remote.markReload(home, input.id, {
+    kind: 'install',
+    host: input.remoteAgent.host,
+    authority: input.authority,
+    codexHome: input.remoteAgent.codexHome,
+    from: '0.1.4',
+    to: input.companionVersion,
+    companionVersion: input.companionVersion,
+    agentVersion: input.remoteAgent.agentVersion,
+    requestedAt,
+    method: 'remoteHostExit',
+  });
+  const next = {
+    ...input,
+    remoteAgent: { ...input.remoteAgent, startedAt: '2026-10-26T05:00:02.000Z' },
+  };
+  assert.equal(remote.confirmsRemoteRestart(home, input.id, input), false);
+  assert.equal(remote.confirmsRemoteRestart(home, input.id, next), true);
+  assert.equal(clients.heartbeat(home, next).reloadConfirmed, true);
+  assert.equal(remote.hasReload(home, input.id), false);
+  const event = require('../src/diagnostics/event-log.cjs').readRecent(home, 1)[0];
+  assert.deepEqual(
+    { event: event.event, status: event.status, method: event.method },
+    { event: 'remote.install', status: 'active', method: 'remoteHostExit' },
+  );
 });
 
 test('远端代理安装重启确认按版本记录active或notActive', (t) => {
   const home = fixture(t);
   remote.markReload(home, 'install-active', {
-    kind: 'install', host: 'fixture', from: '0.1.4', to: '0.1.5', requestedAt: Date.now(),
+    kind: 'install',
+    host: 'fixture',
+    from: '0.1.4',
+    to: '0.1.5',
+    requestedAt: Date.now(),
   });
   remote.recordReload(home, 'install-active', { status: 'confirmed' });
   remote.markReload(home, 'install-old', {
-    kind: 'install', host: 'fixture', from: '0.1.4', to: '0.1.5', agentVersion: '0.1.4', requestedAt: Date.now(),
+    kind: 'install',
+    host: 'fixture',
+    from: '0.1.4',
+    to: '0.1.5',
+    agentVersion: '0.1.4',
+    requestedAt: Date.now(),
   });
   remote.recordReload(home, 'install-old', { status: 'failed' });
   const events = require('../src/diagnostics/event-log.cjs').readRecent(home, 10);
-  assert.deepEqual(events.map((row) => [row.event, row.status, row.from, row.to]), [
-    ['remote.install', 'active', '0.1.4', '0.1.5'],
-    ['remote.install', 'notActive', '0.1.4', '0.1.5'],
-  ]);
+  assert.deepEqual(
+    events.map((row) => [row.event, row.status, row.from, row.to]),
+    [
+      ['remote.install', 'active', '0.1.4', '0.1.5'],
+      ['remote.install', 'notActive', '0.1.4', '0.1.5'],
+    ],
+  );
 });
 
 test('HTTP心跳接受超过16KiB的远端read回执，其他动作请求上限不变', async (t) => {

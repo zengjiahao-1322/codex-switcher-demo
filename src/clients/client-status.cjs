@@ -218,6 +218,12 @@ function heartbeat(bridgeHome, input) {
   // 新扩展宿主启动后回报上次重载编号；只有编号匹配才能把“已接收”推进到“扩展已重载”。
   const completed = input.completedReload;
   let reloadConfirmed = false;
+  if (remoteServers.confirmsRemoteRestart(bridgeHome, id, row)) {
+    row.lastAck = { ...row.lastAck, status: 'reloaded', at: Date.now() };
+    if (row.lastAck.installStatus) row.lastAck.installStatus = 'active';
+    remoteServers.recordReload(bridgeHome, id, { status: 'confirmed' });
+    reloadConfirmed = true;
+  }
   if (completed && /^[\w-]{8,80}$/.test(completed.clientId || '')) {
     const oldFile = path.join(bridgeHome, 'clients', completed.clientId + '.json');
     const old = readJson(oldFile);
@@ -229,6 +235,7 @@ function heartbeat(bridgeHome, input) {
     ) {
       if (old.lastAck.status !== 'reloaded')
         old.lastAck = { ...old.lastAck, status: 'reloaded', at: Date.now() };
+      if (old.lastAck.installStatus) old.lastAck.installStatus = 'active';
       row.lastAck = old.lastAck;
       reloadConfirmed = true;
       remoteServers.recordReload(bridgeHome, completed.clientId, { status: 'confirmed' });
@@ -246,7 +253,7 @@ function heartbeat(bridgeHome, input) {
     writeJson(file, row);
   return {
     command: remoteServers.command(bridgeHome, id) || row.command,
-    ...(completed ? { reloadConfirmed } : {}),
+    ...(completed || reloadConfirmed ? { reloadConfirmed } : {}),
   };
 }
 function waitForCommand(bridgeHome, id, wait, signal) {
