@@ -6,30 +6,35 @@ const { log } = require('../diagnostics/event-log.cjs');
 function otherInstallAction(oldSequence, currentSequence) {
   return Number(oldSequence || 0) >= Number(currentSequence || 0) ? 'deferred' : 'stopped';
 }
-function integrateDesktop(
-  projectDir,
-  discoveryDir,
-  bridgeHome,
-  { execute = cp.execFileSync } = {},
-) {
-  const output = execute(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-File',
-      path.join(projectDir, 'platform/windows/desktop-integration.ps1'),
-      '-InstallDir',
-      projectDir,
-      '-DiscoveryDir',
-      discoveryDir,
-    ],
-    { windowsHide: true, encoding: 'utf8' },
-  );
-  const result = JSON.parse(output.replace(/^\uFEFF/, '').trim());
-  if (result.shortcutChanged) log(bridgeHome, 'app.shortcuts', {});
+function integrateDesktop(projectDir, discoveryDir, bridgeHome, { execute = cp.execFile } = {}) {
+  return new Promise((resolve, reject) => {
+    execute(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        path.join(projectDir, 'platform/windows/desktop-integration.ps1'),
+        '-InstallDir',
+        projectDir,
+        '-DiscoveryDir',
+        discoveryDir,
+      ],
+      { windowsHide: true, encoding: 'utf8' },
+      (error, output) => {
+        if (error) return reject(error);
+        try {
+          const result = JSON.parse(output.replace(/^\uFEFF/, '').trim());
+          if (result.shortcutChanged) log(bridgeHome, 'app.shortcuts', {});
+          resolve(result);
+        } catch (parseError) {
+          reject(parseError);
+        }
+      },
+    );
+  });
 }
 function createLifecycle({
   projectDir,

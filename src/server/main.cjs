@@ -174,15 +174,21 @@ async function existing() {
     signal: AbortSignal.timeout(3000),
   });
   const oldRuntime = response.ok ? await response.json() : null;
+  const compareDiscovered = () => {
+    if (!fromDiscovery) return null;
+    const oldSequence = Number(r.build?.sequence || oldRuntime?.sequence || 0),
+      currentSequence = Number(runtimeInfo.sequence || 0),
+      action = require('../platform/app-lifecycle.cjs').otherInstallAction(
+        oldSequence,
+        currentSequence,
+      );
+    otherInstall = { pid: r.pid, sequence: oldSequence, action };
+    return action;
+  };
   if (oldRuntime?.id === runtimeInfo.id && oldRuntime.pid === r.pid) {
-    const oldSequence = Number(r.build?.sequence || oldRuntime.sequence || 0),
-      currentSequence = Number(runtimeInfo.sequence || 0);
-    if (fromDiscovery && oldSequence >= currentSequence) {
-      otherInstall = { pid: r.pid, sequence: oldSequence, action: 'deferred' };
-      return r;
-    }
-    if (fromDiscovery && oldSequence < currentSequence) {
-      otherInstall = { pid: r.pid, sequence: oldSequence, action: 'stopped' };
+    const action = compareDiscovered();
+    if (action === 'deferred') return r;
+    if (action === 'stopped') {
       await require('../platform/process-stop.cjs').stopProcesses([r.pid]);
       return null;
     }
@@ -205,13 +211,7 @@ async function existing() {
   // 更新包接管旧后台时也使用统一的退出策略：先给服务清理机会，
   // 但不能因为旧进程卡住而让新版本永远打不开。
   if (fromDiscovery) {
-    const oldSequence = Number(r.build?.sequence || oldRuntime?.sequence || 0),
-      currentSequence = Number(runtimeInfo.sequence || 0),
-      action = require('../platform/app-lifecycle.cjs').otherInstallAction(
-        oldSequence,
-        currentSequence,
-      );
-    otherInstall = { pid: r.pid, sequence: oldSequence, action };
+    const action = compareDiscovered();
     if (action === 'deferred') return r;
   }
   await require('../platform/process-stop.cjs').stopProcesses([r.pid]);
@@ -299,15 +299,11 @@ async function existing() {
     });
     if (desktopIntegrationNeeded)
       setImmediate(() => {
-        try {
-          require('../platform/app-lifecycle.cjs').integrateDesktop(
-            PROJECT_ROOT,
-            discoveryDir,
-            bridgeHome,
+        require('../platform/app-lifecycle.cjs')
+          .integrateDesktop(PROJECT_ROOT, discoveryDir, bridgeHome)
+          .catch((error) =>
+            logEvent(bridgeHome, 'app.shortcuts', { status: 'error', error: error.message }),
           );
-        } catch (error) {
-          logEvent(bridgeHome, 'app.shortcuts', { status: 'error', error: error.message });
-        }
       });
     console.log('BRIDGE_READY http://127.0.0.1:' + port);
     openUrl(url);
