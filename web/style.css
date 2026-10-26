@@ -143,6 +143,8 @@ h1 {
   color: #fff;
   box-shadow: var(--lift);
 }
+.danger-text { color: var(--warn); }
+.lifecycle-finished { max-width: 560px; margin: 18vh auto; text-align: center; }
 .banner-mark {
   flex: none;
   width: 8px;

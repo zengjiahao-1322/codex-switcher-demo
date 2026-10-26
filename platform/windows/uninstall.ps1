@@ -12,6 +12,9 @@ if ($packageInfo.name -ne 'codex-api-switcher') { throw 'Unexpected uninstall fo
 $node = Join-Path $InstallDir 'runtime\node.exe'
 $cli = Join-Path $InstallDir 'scripts/cli.cjs'
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
+if ($env:BRIDGE_UNINSTALL_PID) {
+  while (Get-Process -Id ([int]$env:BRIDGE_UNINSTALL_PID) -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 200 }
+}
 
 $running = Join-Path $InstallDir 'private\running.json'
 if (Test-Path $running) { try { $r = Get-Content $running -Raw | ConvertFrom-Json; $serviceProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($r.pid)"; if ($serviceProcess.ExecutablePath -ne $node -or -not $serviceProcess.CommandLine.Contains((Join-Path $InstallDir 'main.cjs'))) { throw 'Unexpected process' }; Stop-Process -Id $r.pid -Force -ErrorAction Stop; Step 'Stopped the running service' } catch {} }
@@ -31,6 +34,7 @@ Step 'Removing shortcuts'
 foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
   Remove-Item (Join-Path $dir 'Codex API Switcher.lnk') -Force -ErrorAction SilentlyContinue
 }
+& (Join-Path $InstallDir 'platform\windows\desktop-integration.ps1') -InstallDir $InstallDir -RemoveRegistration
 # Autostart shortcut (normally removed by "cli.cjs cleanup"): any Startup shortcut pointing at this install's launcher.
 $startup = [Environment]::GetFolderPath('Startup'); $shell = New-Object -ComObject WScript.Shell
 Get-ChildItem $startup -Filter '*.lnk' -ErrorAction SilentlyContinue | ForEach-Object { if ($shell.CreateShortcut($_.FullName).Arguments -like "*$InstallDir*launch-hidden.vbs*") { Remove-Item $_.FullName -Force } }

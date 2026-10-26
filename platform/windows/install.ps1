@@ -2,7 +2,7 @@
 # Online: powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/__REPO__/main/platform/windows/install.ps1 | iex"
 # Local:   double-click install.cmd in a downloaded copy.
 # Installs to %LOCALAPPDATA%\CodexApiSwitcher, downloads the official Node.js runtime (SHA-256 verified) and two
-# small dependencies (sha512 verified), creates Desktop / Start Menu shortcuts and starts the tool.
+# small dependencies (sha512 verified), creates a Desktop shortcut and starts the tool.
 # Re-running upgrades in place and keeps your saved configs (the private folder).
 # Keep this file ASCII-only: Windows PowerShell 5.1 reads scripts without a BOM using the ANSI code page.
 param(
@@ -91,21 +91,8 @@ try {
   & $nodeExe (Join-Path $InstallDir 'scripts/install-deps.cjs')
   if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
 
-  # 6. Shortcuts: Desktop + Start Menu, launching the hidden service and opening the UI.
-  if (-not $NoShortcuts) {
-    Step 'Creating shortcuts'
-    $shell = New-Object -ComObject WScript.Shell
-    $targets = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))
-    foreach ($dir in $targets) {
-      $lnk = $shell.CreateShortcut((Join-Path $dir 'Codex API Switcher.lnk'))
-      $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
-      $lnk.Arguments = '"' + (Join-Path $InstallDir 'launch-hidden.vbs') + '" open'
-      $lnk.WorkingDirectory = $InstallDir
-      $lnk.IconLocation = "$nodeExe,0"
-      $lnk.Description = 'Codex API Switcher'
-      $lnk.Save()
-    }
-  }
+  # 6. Share the first-launch shortcut marker and installed-app registration.
+  & (Join-Path $InstallDir 'platform\windows\desktop-integration.ps1') -InstallDir $InstallDir -RegisterOnly:$NoShortcuts
 
   # 7. Codex check (informational).
   $codexBin = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'

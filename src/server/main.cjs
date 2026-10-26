@@ -149,7 +149,11 @@ async function reclaimFixedPort(port) {
 }
 // 只复用相同构建；更新应用不能继续打开仍在内存中的旧后台和旧页面。
 async function existing() {
-  const r = readJson(runningPath);
+  const local = readJson(runningPath),
+    discovered =
+      !local && discoveryDir ? readJson(path.join(discoveryDir, 'connection.json')) : null,
+    r = local || discovered,
+    fromDiscovery = !!discovered;
   if (!r) return null;
   try {
     process.kill(r.pid, 0);
@@ -169,7 +173,16 @@ async function existing() {
     signal: AbortSignal.timeout(3000),
   });
   const oldRuntime = response.ok ? await response.json() : null;
-  if (oldRuntime?.id === runtimeInfo.id && oldRuntime.pid === r.pid) return r;
+  if (oldRuntime?.id === runtimeInfo.id && oldRuntime.pid === r.pid) {
+    const oldSequence = Number(r.build?.sequence || oldRuntime.sequence || 0),
+      currentSequence = Number(runtimeInfo.sequence || 0);
+    if (fromDiscovery && oldSequence > currentSequence) return r;
+    if (fromDiscovery && oldSequence < currentSequence) {
+      await require('../platform/process-stop.cjs').stopProcesses([r.pid]);
+      return null;
+    }
+    return r;
+  }
   // 旧版没有构建接口，用既有鉴权接口确认服务，再核对 PID 确实属于 Node 主入口。
   let verified = oldRuntime?.pid === r.pid;
   if (!oldRuntime) {
@@ -196,13 +209,18 @@ async function existing() {
   const phases = { existing: Math.round(performance.now() - phaseStarted) };
   if (prior) {
     if (discoveryDir) {
-      require('../platform/data-protection.cjs').protectDataDirs([discoveryDir]);
       writeJson(path.join(discoveryDir, 'connection.json'), prior);
     }
     console.log('BRIDGE_ALREADY_RUNNING ' + new URL(prior.url).origin);
     openUrl(prior.url);
     return;
   }
+  if (process.platform === 'win32' && Number.isSafeInteger(runtimeInfo.sequence))
+    require('../platform/app-lifecycle.cjs').integrateDesktop(
+      PROJECT_ROOT,
+      discoveryDir,
+      bridgeHome,
+    );
   const protectedDirs = [bridgeHome, discoveryDir].filter(Boolean),
     protectSkipped =
       protectedDirs.length > 0 &&

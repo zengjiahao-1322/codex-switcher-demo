@@ -73,6 +73,13 @@ function createService({
     shutdown: shutdownForUpdate,
     discoveryDir,
   });
+  const lifecycle = require('../platform/app-lifecycle.cjs').createLifecycle({
+    projectDir,
+    bridgeHome,
+    codexHome,
+    discoveryDir,
+    shutdown: shutdownForUpdate,
+  });
   let listeningPort = null;
   const passed = new Map();
   const companionStates = new Map();
@@ -637,6 +644,8 @@ function createService({
     return connection;
   }
   const actions = {
+    quit: () => lifecycle.quit(),
+    uninstall: (input) => lifecycle.uninstall(input),
     backups: () => ({ items: backups.list(bridgeHome) }),
     restoreBackup: ({ id, reloadEditors = true, source } = {}) =>
       exclusive(async () => {

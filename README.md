@@ -12,7 +12,7 @@
 
 | 平台              | 下载                                                                                                                            | 启动                                                |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Windows x64       | [Windows 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-windows-x64.zip)    | 完整解压，双击 `Start.cmd`；可运行 `install.cmd`    |
+| Windows x64       | [Windows 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-windows-x64.zip)    | 推荐运行 `install.cmd`；也可完整解压后双击 `Start.cmd`，首次启动会静默创建桌面图标    |
 | Mac Apple Silicon | [Mac M 系列包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-macos-arm64.zip)  | 运行 `Install.command`，或打开 `Codex Switcher.app` |
 | Mac Intel         | [Mac Intel 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-macos-x64.zip)    | 同上                                                |
 | 本机伴随扩展      | [Companion VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-companion.vsix) | 在本机编辑器安装并重载已有窗口                      |
