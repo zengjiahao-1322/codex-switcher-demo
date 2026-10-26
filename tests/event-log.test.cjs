@@ -124,7 +124,7 @@ test('SSH窗口不扫描本机，只在远端代理状态变化时记录脱敏�
   await service.actions.clientHeartbeat(input);
   input.remoteAgent = {
     codexHome: '/srv/.codex',
-    protocol: 2,
+    protocol: 3,
     agentVersion: '0.1.4',
     host: 'fixture',
     platform: 'linux',
@@ -138,7 +138,7 @@ test('SSH窗口不扫描本机，只在远端代理状态变化时记录脱敏�
   assert.deepEqual(
     readRecent(f.bridgeHome, 10).map(({ event, state, account }) => ({ event, state, account })),
     [
-      { event: 'remote.agent', state: 'missing', account: null },
+      { event: 'remote.agent', state: 'checking', account: null },
       { event: 'remote.agent', state: 'connected', account: 'al***@example.test' },
       { event: 'remote.agent', state: 'needsUpdate', account: 'al***@example.test' },
     ],

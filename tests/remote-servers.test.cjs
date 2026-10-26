@@ -38,7 +38,7 @@ function registration(id, extra = {}) {
     authority: 'ssh-remote+fixture-server',
     remote: 'ssh-remote+fixture-server',
     remoteAgent: {
-      protocol: 2,
+      protocol: 3,
       agentVersion: '0.1.3',
       host: 'fixture-server',
       platform: 'linux',
@@ -168,6 +168,9 @@ test('同服务器同目录只写一次，保留远端设置并使用远端模�
   assert.equal(parsed.model_catalog_json, '/home/tester/.codex/switcher-model-catalog.json');
   assert.equal(parsed.projects['/srv/keep'].trust_level, 'trusted');
   ack(home, first, write, { ok: true, sha256: sha(write.text) });
+  const otherReload = await nextCommand(home, second.id);
+  assert.equal(otherReload.type, 'remoteReload');
+  ack(home, second, otherReload, { reload: { method: 'remoteHostExit' } });
   const result = await pending;
   assert.equal(result.length, 1);
   assert.equal(result[0].status, 'synced');
@@ -178,13 +181,21 @@ test('同服务器同目录只写一次，保留远端设置并使用远端模�
     completedReload: { clientId: first.id, commandId: writeCommandId },
   });
   assert.equal(remote.command(home, second.id), null);
-  assert.equal(clients.records(home).find((item) => item.id === second.id).command.type, 'reload');
+  const confirmation = clients.heartbeat(home, {
+    ...second,
+    remoteAgent: { ...second.remoteAgent, startedAt: new Date(Date.now() + 1).toISOString() },
+  });
+  assert.equal(confirmation.reloadConfirmed, true);
+  assert.equal(
+    clients.records(home).find((item) => item.id === second.id).lastAck.status,
+    'reloaded',
+  );
   assert.equal(fileText(home).includes(secret), false);
   assert.equal(fileText(home).includes('trust_level'), false);
   const events = require('../src/diagnostics/event-log.cjs').readRecent(home, 10);
   assert.deepEqual(
     events.map((row) => row.event),
-    ['remote.sync', 'remote.reload'],
+    ['remote.sync', 'remote.reload', 'remote.reload'],
   );
   assert.equal(events[0].sha256.length, 8);
   assert.equal(typeof events[0].elapsedMs, 'number');
@@ -203,6 +214,8 @@ test('未装代理和版本不同均跳过，非SSH与未连接服务器明确�
   clients.heartbeat(home, { ...input, remoteAgent: null });
   assert.match((await remote.apply(home, input.authority, source))[0].reason, /尚未接入/);
   clients.heartbeat(home, { ...input, companionVersion: '0.1.4' });
+  assert.match((await remote.apply(home, input.authority, source))[0].reason, /请更新远端代理/);
+  clients.heartbeat(home, { ...input, remoteAgent: { ...input.remoteAgent, protocol: 2 } });
   assert.match((await remote.apply(home, input.authority, source))[0].reason, /请更新远端代理/);
   assert.equal(remote.command(home, input.id), null);
 });
@@ -639,6 +652,9 @@ test('官方remoteSwitch读写auth与config，显式keyring服务器拒绝且不
     sha256: sha(command.text),
     authSha256: sha(command.auth.text),
   });
+  const sibling = await nextCommand(home, input.id);
+  assert.equal(sibling.type, 'remoteReload');
+  ack(home, input, sibling, { reload: { method: 'remoteHostExit' } });
   assert.deepEqual(await serviceRun, {
     results: [{ codexHome: second.remoteAgent.codexHome, status: 'synced' }],
   });

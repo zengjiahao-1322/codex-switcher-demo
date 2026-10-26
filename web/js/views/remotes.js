@@ -17,18 +17,25 @@ let rendered = '',
   server = null;
 const hostOf = (url) => url.replace(/^https?:\/\//, '').split('/')[0];
 const sameUrl = (x, y) => x.replace(/\/+$/, '') === y.replace(/\/+$/, '');
-// 协议号 2 起带官方登录读写；同版本号重新发布时，旧代理只能靠协议号认出。
+// 协议号 3 起支持远端自退出和 startedAt 确认。
 const agentState = (rows) =>
-  rows.some((r) => r.windows.some((w) => w.remoteAgentState === 'unreachable'))
-    ? ['服务器连接中', 'changed', 'unreachable']
-    : rows.some((r) => !r.agentVersion)
-      ? ['未安装远端代理', 'changed']
-      : rows.some(
-            (r) =>
-              r.agentProtocol !== 2 || r.windows.some((w) => w.agentVersion !== w.companionVersion),
-          )
-        ? ['远端代理需更新', 'changed']
-        : ['已接入', 'done'];
+  rows.some((r) =>
+    r.windows.some(
+      (w) => w.remoteAgentState === 'checking' || (!w.agentVersion && !w.remoteAgentState),
+    ),
+  )
+    ? ['检查中', 'changed', 'checking']
+    : rows.some((r) => r.windows.some((w) => w.remoteAgentState === 'unreachable'))
+      ? ['服务器连接中', 'changed', 'unreachable']
+      : rows.some((r) => !r.agentVersion)
+        ? ['未安装远端代理', 'changed']
+        : rows.some(
+              (r) =>
+                r.agentProtocol < 3 ||
+                r.windows.some((w) => w.agentProtocol < 3 || w.agentVersion !== w.companionVersion),
+            )
+          ? ['远端代理需更新', 'changed']
+          : ['已接入', 'done'];
 // 服务器连不到本机的转换服务，所以只有可直连且有密钥的 API 能用；官方账号的登录会写到服务器上。
 const blockedReason = (p) =>
   p.access?.mode === 'adapter'
@@ -139,7 +146,9 @@ function serverCard(authority, rows) {
     line.textContent = r.codexHome + (currentText(r) ? ' · ' + currentText(r) : '');
     card.append(line);
   }
-  if (state === 'unreachable') {
+  if (state === 'checking') {
+    card.append(note('正在检查远端代理。'));
+  } else if (state === 'unreachable') {
     card.append(note('服务器连接中，恢复后自动刷新。'));
   } else if (cls === 'changed') {
     // 在这台服务器的窗口里安装本版远端代理；workspace 扩展会装到服务器一侧。
@@ -152,7 +161,10 @@ function serverCard(authority, rows) {
         async () => {
           if (
             !confirm(
-              '会重启服务器上的扩展（SSH 不断开，约 20 秒后恢复）；服务器上正在运行的 Codex 任务会中断。继续安装/更新远端代理吗？',
+              (rows.some((r) => r.agentProtocol < 3)
+                ? '安装后会重启扩展宿主，SSH 会重连一次；'
+                : '会重启服务器上的扩展（SSH 不断开，约 20 秒后恢复）；') +
+                '服务器上正在运行的 Codex 任务会中断。继续安装/更新远端代理吗？',
             )
           )
             return;

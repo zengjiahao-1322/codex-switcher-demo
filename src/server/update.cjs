@@ -305,7 +305,7 @@ function createUpdateManager({
             proxy,
             ...(error.curl ? { curl: error.curl } : {}),
           });
-          throw error;
+          throw Object.assign(error, { message });
         }
       })
       .catch((error) => {

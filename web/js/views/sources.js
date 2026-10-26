@@ -4,6 +4,7 @@ import { showTab } from '../tabs.js';
 import { accessTag, busy, combo, merge, status, tag } from '../ui.js';
 import {
   accountRemaining,
+  accountPlan,
   accountStatus,
   ago,
   membership,
@@ -119,7 +120,7 @@ export function sourceCard(o, { checked, using = null, model, blocked = '', onPi
     if (using) head.append(using);
     if (membershipExpired(a)) head.append(tag('会员已到期', 'changed'));
     detail.textContent = [
-      (a.label === a.email ? 'ChatGPT ' : a.email + ' · ') + a.plan,
+      (a.label === a.email ? 'ChatGPT ' : a.email + ' · ') + accountPlan(a),
       membership(a),
       a.quota?.checkedAt && ago(a.quota.checkedAt) + '读取',
     ]

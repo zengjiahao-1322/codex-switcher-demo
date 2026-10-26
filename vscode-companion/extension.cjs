@@ -40,7 +40,7 @@ function activate(context) {
     longPoll = false,
     timer,
     completedReload = context.workspaceState.get('codexSwitcher.pendingReload'),
-    remoteAgentState = null,
+    remoteAgentState = 'checking',
     remoteAgentFlight = null,
     remoteAgentGeneration = 0,
     remoteRestart = null;
@@ -203,6 +203,8 @@ function activate(context) {
   const remoteRestartKey = 'codexSwitcher.remoteRestarts';
   async function planRemoteRestart() {
     if (!sshRemote()) return null;
+    if (!remoteAgent || remoteAgent.protocol < 3)
+      return { method: 'restartExtensionHost', reason: 'agentUpgrade' };
     const now = Date.now(),
       recent = (context.workspaceState.get(remoteRestartKey) || []).filter(
         (at) => now - at < 5 * 60 * 1000,
@@ -340,13 +342,15 @@ function activate(context) {
         // SSH 窗口的 Codex 跑在服务器上，本机本来就关联不到后端；改看服务器上的远端代理。
         status.text =
           '$(plug) Codex Switcher · ' +
-          (remoteAgentState === 'unreachable'
-            ? '服务器连接中'
-            : !remoteAgent
-              ? '服务器未装远端代理'
-              : remoteAgent.protocol !== 2 || remoteAgent.agentVersion !== data.companionVersion
-                ? '远端代理需更新'
-                : '服务器已接入');
+          (remoteAgentState === 'checking'
+            ? '服务器检查中'
+            : remoteAgentState === 'unreachable'
+              ? '服务器连接中'
+              : !remoteAgent
+                ? '服务器未装远端代理'
+                : remoteAgent.protocol < 3 || remoteAgent.agentVersion !== data.companionVersion
+                  ? '远端代理需更新'
+                  : '服务器已接入');
         status.tooltip = remoteAgent
           ? '服务器 ' +
             remoteAgent.host +
@@ -368,6 +372,10 @@ function activate(context) {
         // 不再重复否决它，否则会出现“已关联但拒绝重载”。
         await ack(c, data, r.command.id, 'reload_requested');
         await reloadWindow(c, data, r.command.id);
+      } else if (r.command?.type === 'remoteReload') {
+        const reload = await planRemoteRestart();
+        await ack(c, data, r.command.id, 'completed', { ackResult: { reload } });
+        await reloadWindow(c, data, r.command.id, reload);
       } else if (r.command?.type === 'remoteApply') await remoteApply(c, data, r.command);
       else if (r.command?.type === 'installRemoteAgent')
         await installRemoteAgent(c, data, r.command);
@@ -430,7 +438,7 @@ function activate(context) {
     }
     const open = () => vscode.env.openExternal(vscode.Uri.parse(c.url));
     const remote = sshRemote();
-    if (remote && (!remoteAgent || remoteAgent.protocol !== 2)) {
+    if (remote && (!remoteAgent || remoteAgent.protocol < 3)) {
       const choice = await vscode.window.showWarningMessage(
         '这台服务器还没有接入可用的远端代理，请先在切换器的“远程服务器”页安装或更新。',
         '打开切换器',

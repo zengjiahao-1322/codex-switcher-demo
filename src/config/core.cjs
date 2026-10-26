@@ -363,13 +363,25 @@ function withLock(home, fn) {
     fs.unlinkSync(file);
   }
 }
-function restoreBackup(codexHome, bridgeHome, id) {
+function restoreBackup(codexHome, bridgeHome, id, catalog) {
   const backups = require('./backups.cjs'),
     { text, config } = backups.read(bridgeHome, id),
     configPath = path.join(codexHome, 'config.toml'),
     current = readOptional(configPath);
   backups.save(codexHome, bridgeHome, 'restore');
-  atomicWrite(configPath, text, current);
+  const next =
+    catalog === undefined
+      ? text
+      : editSelection(
+          text,
+          {
+            model: config.model,
+            model_provider: config.model_provider,
+            model_catalog_json: catalog || undefined,
+          },
+          config.model_providers?.hermes_bridge,
+        );
+  atomicWrite(configPath, next, current);
   return { model: config.model || null, modelProvider: config.model_provider || 'openai' };
 }
 module.exports = {
@@ -382,7 +394,7 @@ module.exports = {
   restoreOfficial: (home, b) => withLock(home, () => restoreOfficial(home, b)),
   applyOfficial: (home, m, cat, credentialsStore, bridgeHome) =>
     withLock(home, () => applyOfficial(home, m, cat, credentialsStore, bridgeHome)),
-  restoreBackup: (home, bridgeHome, id) =>
-    withLock(home, () => restoreBackup(home, bridgeHome, id)),
+  restoreBackup: (home, bridgeHome, id, catalog) =>
+    withLock(home, () => restoreBackup(home, bridgeHome, id, catalog)),
   cleanupBridge: (home, cat) => withLock(home, () => cleanupBridge(home, cat)),
 };

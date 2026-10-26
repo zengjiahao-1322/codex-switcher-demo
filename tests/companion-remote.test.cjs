@@ -26,6 +26,7 @@ async function runCompanion({
   pendingReload,
   authText,
   agentVersion,
+  agentProtocol,
   statusNever = false,
   restartChangesStatus = false,
   // routes：切换器普通接口的假回复；ui：快捷列表和确认框的选择；act：心跳就绪后执行的操作。
@@ -115,8 +116,12 @@ async function runCompanion({
             if (restartChangesStatus) restartedAt = new Date(Date.now() + 1).toISOString();
             return { restarting: true };
           }
-          if (name === 'codexSwitcherRemote.status' && restartedAt)
-            return { ...agent.status(), startedAt: restartedAt };
+          if (name === 'codexSwitcherRemote.status')
+            return {
+              ...agent.status(),
+              ...(agentProtocol ? { protocol: agentProtocol } : {}),
+              ...(restartedAt ? { startedAt: restartedAt } : {}),
+            };
           return agent[name.split('.')[1]](input);
         }
         if (name === 'workbench.extensions.installExtension') {
@@ -193,7 +198,7 @@ test('SSH 窗口心跳附带远端代理状态（约定字段、不含密钥）�
     'startedAt',
   ]);
   assert.equal(first.remoteAgent.account, null);
-  assert.equal(first.remoteAgent.protocol, 2);
+  assert.equal(first.remoteAgent.protocol, 3);
   assert.deepEqual(first.remoteAgent.current, {
     model: 'gpt-5.5',
     modelProvider: 'hermes_bridge',
@@ -352,7 +357,7 @@ test('远端代理状态查询卡住时心跳继续发送并标记连接中', as
     until: (r) => r.some((item) => item.remoteAgentState === 'unreachable'),
   });
   assert.equal(requests.length >= 2, true);
-  assert.equal(requests[0].remoteAgentState, null);
+  assert.equal(requests[0].remoteAgentState, 'checking');
   assert.match(statusItem.text, /服务器连接中/);
 });
 
@@ -594,4 +599,38 @@ test('本机窗口快捷切换：列出全部 API，确认后按默认模型切�
     source: 'vscode-local',
   });
   assert.equal(calls.find((c) => c.route === 'state').method, 'GET');
+});
+
+test('协议2旧代理升级用一次整宿主重启，不调用尚未注册的restart', async () => {
+  const { requests, executed } = await runCompanion({
+    agentProtocol: 2,
+    commandsFor: (reqs) =>
+      reqs.length === 2
+        ? {
+            id: 'old-agent-install',
+            type: 'installRemoteAgent',
+            base64: Buffer.from('old-upgrade-vsix').toString('base64'),
+          }
+        : null,
+    until: (reqs) => reqs.some((r) => r.ack === 'old-agent-install') && reqs.length > 3,
+  });
+  assert.deepEqual(requests.find((r) => r.ack === 'old-agent-install').ackResult.reload, {
+    method: 'restartExtensionHost',
+    reason: 'agentUpgrade',
+  });
+  assert.equal(executed.includes('codexSwitcherRemote.restart'), false);
+  assert.equal(executed.includes('workbench.action.restartExtensionHost'), true);
+});
+
+test('同组额外SSH窗口收到remoteReload后也走远端自退出', async () => {
+  const { requests, executed } = await runCompanion({
+    commandsFor: (reqs) =>
+      reqs.length === 2 ? { id: 'sibling-reload', type: 'remoteReload', reload: true } : null,
+    until: acked('sibling-reload'),
+  });
+  assert.deepEqual(requests.find((r) => r.ack === 'sibling-reload').ackResult.reload, {
+    method: 'remoteHostExit',
+  });
+  assert.equal(executed.includes('codexSwitcherRemote.restart'), true);
+  assert.equal(executed.includes('workbench.action.restartExtensionHost'), false);
 });

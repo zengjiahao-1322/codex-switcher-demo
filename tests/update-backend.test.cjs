@@ -834,3 +834,42 @@ test(
     );
   },
 );
+
+test('下载阶段的代理提示进入页面错误状态', async (t) => {
+  const root = temp('download-proxy'),
+    project = path.join(root, 'installed');
+  fs.mkdirSync(project);
+  fs.mkdirSync(path.join(root, 'bridge'));
+  t.mock.method(require('../src/platform/platform.cjs'), 'proxyInfo', () => ({
+    type: 'manual',
+    value: 'http://127.0.0.1:1080',
+  }));
+  const manager = createUpdateManager({
+    bridgeHome: path.join(root, 'bridge'),
+    codexHome: path.join(root, 'codex'),
+    projectDir: project,
+    build: 'a'.repeat(12),
+    version: '0.1.5',
+    sequence: 1,
+    platform: 'win32',
+    arch: 'x64',
+    transport: {
+      readJson: async () => ({
+        version: '0.1.5',
+        build: 'b'.repeat(12),
+        sequence: 2,
+        commit: 'c'.repeat(40),
+        publishedAt: new Date().toISOString(),
+        notes: 'fixture',
+        assets: { 'codex-switcher-windows-x64.zip': 'd'.repeat(64) },
+      }),
+      download: async () => {
+        throw Object.assign(Error('连接 GitHub 超时'), { curl: { code: 28, detail: 'timeout' } });
+      },
+    },
+  });
+  await manager.actions.checkUpdate();
+  await manager.actions.installUpdate({});
+  await manager.finished();
+  assert.equal(manager.state().error, '连接 GitHub 超时（经系统代理 http://127.0.0.1:1080）');
+});

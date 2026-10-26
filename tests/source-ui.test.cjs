@@ -388,3 +388,44 @@ test('管理分页默认收起；打开时才读取数据，再点一次收起',
   page.byId('tab-editors').onclick();
   assert.equal(page.byId('client-details').hidden, true);
 });
+
+test('续费实时plus覆盖过期free令牌，来源和详情显示待官方更新', async () => {
+  const page = await runPage({
+    respond: backend({
+      accounts: [
+        {
+          id: 'a1',
+          label: 'a1@example.com',
+          email: 'a1@example.com',
+          plan: 'free',
+          current: false,
+          subscriptionUntil: new Date(Date.now() - 86400000).toISOString(),
+          quota: { ...quota(90), buckets: [{ ...quota(90).buckets[0], plan: 'plus' }] },
+        },
+      ],
+    }),
+  });
+  assert.equal(
+    page.created.some((c) => c.tag === 'span' && c.node.textContent === '会员已到期'),
+    false,
+  );
+  assert.ok(
+    page.created.some(
+      (c) =>
+        c.tag === 'small' &&
+        c.node.textContent.startsWith('ChatGPT plus · 已续期，新日期待官方更新'),
+    ),
+  );
+  page.created
+    .find((c) => c.node.className === 'source-card' && c.node.dataset.source === 'account:a1')
+    .node.onclick();
+  assert.ok(page.created.some((c) => c.tag === 'dd' && c.node.textContent === 'plus'));
+  assert.ok(
+    page.created.some(
+      (c) =>
+        c.tag === 'dd' &&
+        c.node.textContent === '已续期，新日期待官方更新' &&
+        c.node.className !== 'warn',
+    ),
+  );
+});

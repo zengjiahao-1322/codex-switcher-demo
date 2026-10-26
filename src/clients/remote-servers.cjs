@@ -238,6 +238,7 @@ function confirmsReload(input, previous) {
     input.authority === previous.authority &&
     input.remoteAgent?.codexHome === previous.remoteAgent?.codexHome &&
     input.remoteAgent?.agentVersion === input.companionVersion &&
+    input.remoteAgent?.protocol >= 3 &&
     !!input.remoteAgent
   );
 }
@@ -253,6 +254,7 @@ function confirmsRemoteRestart(bridgeHome, id, input) {
     input.remoteAgent?.startedAt &&
     Date.parse(input.remoteAgent.startedAt) > reload.requestedAt &&
     input.remoteAgent.agentVersion === input.companionVersion &&
+    input.remoteAgent.protocol >= 3 &&
     (reload.kind !== 'install' || input.remoteAgent.agentVersion === reload.to)
   );
 }
@@ -265,7 +267,7 @@ function windowFor(bridgeHome, group) {
         row.remoteType === 'ssh-remote' &&
         row.remoteAgent?.codexHome === group.codexHome &&
         row.remoteAgent.agentVersion === row.companionVersion &&
-        row.remoteAgent.protocol === 2,
+        row.remoteAgent.protocol >= 3,
     );
 }
 function redactReason(error, ...secrets) {
@@ -297,8 +299,7 @@ async function readAuth(bridgeHome, windowId) {
 async function apply(bridgeHome, authority, source, origin = 'web') {
   if (typeof authority !== 'string' || !/^ssh-remote\+[^\s/\\?#]{1,240}$/.test(authority))
     throw Error('请选择已连接的 Remote-SSH 服务器');
-  const clients = require('./client-status.cjs'),
-    targets = groups(bridgeHome).filter((group) => group.authority === authority),
+  const targets = groups(bridgeHome).filter((group) => group.authority === authority),
     // 配置的 SHA 无法区分不同官方账号，日志单独记录脱敏目标。
     target = source.auth
       ? { account: require('../accounts/accounts.cjs').identity(source.auth).email }
@@ -392,15 +393,24 @@ async function apply(bridgeHome, authority, source, origin = 'web') {
           reason: written?.reload?.reason || null,
         });
         const others = group.windows.filter((item) => item.id !== window.id);
-        if (others.length)
-          clients.requestReload(null, bridgeHome, {
-            stoppedEditors: others.map((item) => ({
-              editorId: item.id,
-              name: item.name,
-              workspace: item.workspace,
-            })),
-            onlyStopped: true,
-          });
+        await Promise.all(
+          others.map(async (item) => {
+            const requestedAt = Date.now();
+            const response = await dispatch(bridgeHome, item.id, {
+              type: 'remoteReload',
+              reload: true,
+            });
+            markReload(bridgeHome, item.id, {
+              host: group.host,
+              authority: group.authority,
+              codexHome: group.codexHome,
+              requestedAt,
+              source: origin,
+              method: response.reload.method,
+              reason: response.reload.reason || null,
+            });
+          }),
+        );
         log(bridgeHome, 'remote.sync', {
           ...target,
           source: origin,

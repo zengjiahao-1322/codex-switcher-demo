@@ -538,16 +538,42 @@ function createService({
     if (adapter && !saved)
       throw Error('这份备份使用的 API 配置已删除或改名，无法恢复本机转换目标。');
     if (adapter && !(await serviceUp())) throw Error('本机转换服务未运行，无法恢复这份配置。');
+    const managedCatalog =
+        config.model_provider === 'hermes_bridge' && config.model_catalog_json === catalogPath,
+      stagedCatalog = catalogPath + '.' + crypto.randomUUID() + '.prepared',
+      cleanup = () => fs.rmSync(stagedCatalog, { force: true });
+    let catalog;
+    if (managedCatalog)
+      catalog = await buildCatalog(
+        saved || {
+          name: target.name,
+          baseUrl: target.base_url,
+          apiKey: target.experimental_bearer_token,
+          model: config.model,
+          apiMode: target.wire_api === 'responses' ? 'responses' : 'chat_completions',
+        },
+        config.model,
+        stagedCatalog,
+      );
     const compatible = await require('../platform/compatibility.cjs').validateConfig(
-      text,
+      managedCatalog ? toml.stringify({ ...config, model_catalog_json: catalog?.path }) : text,
       findCodex({ dataHome: bridgeHome }),
     );
-    if (!compatible.ok) throw Error(compatible.message);
+    if (!compatible.ok) {
+      cleanup();
+      throw Error(compatible.message);
+    }
     return {
       label: backups.summary(config),
-      cleanup() {},
+      cleanup,
       apply() {
-        core.restoreBackup(codexHome, bridgeHome, backupId);
+        if (catalog) fs.renameSync(stagedCatalog, catalogPath);
+        core.restoreBackup(
+          codexHome,
+          bridgeHome,
+          backupId,
+          managedCatalog ? (catalog ? catalogPath : null) : undefined,
+        );
         if (adapter) {
           a.target = { providerId: saved.id, model: config.model, apiMode: saved.apiMode };
           saveAdapter(a);
@@ -728,13 +754,15 @@ function createService({
         const agent = input.remoteAgent,
           key = JSON.stringify([input.authority, agent?.codexHome || null]),
           status =
-            input.remoteAgentState === 'unreachable'
-              ? 'unreachable'
-              : !agent
-                ? 'missing'
-                : agent.protocol !== 2 || agent.agentVersion !== input.companionVersion
-                  ? 'needsUpdate'
-                  : 'connected',
+            input.remoteAgentState === 'checking' || (!agent && !input.remoteAgentState)
+              ? 'checking'
+              : input.remoteAgentState === 'unreachable'
+                ? 'unreachable'
+                : !agent
+                  ? 'missing'
+                  : agent.protocol < 3 || agent.agentVersion !== input.companionVersion
+                    ? 'needsUpdate'
+                    : 'connected',
           detail = {
             authority: input.authority,
             codexHome: agent?.codexHome || null,

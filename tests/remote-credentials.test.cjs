@@ -66,7 +66,7 @@ test('远端心跳按已保存账号触发同步，列表查询不触发且不�
     pid: process.pid,
     remoteType: 'ssh-remote',
     remoteAgent: {
-      protocol: 2,
+      protocol: 3,
       agentVersion: '0.1.4',
       host: 'fixture',
       platform: 'linux',

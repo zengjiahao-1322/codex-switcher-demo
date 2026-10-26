@@ -100,3 +100,40 @@ test('切换请求的来源进入后台任务，外部输入只能使用约定�
   const queued = JSON.parse(fs.readFileSync(path.join(f.bridgeHome, 'account-switch-job.json')));
   assert.equal(queued.source, 'vscode-local');
 });
+
+test('恢复API备份按该来源和模型重建目录，不沿用后切来源的模型', async (t) => {
+  const f = fixture(t),
+    store = require('../src/config/providers.cjs'),
+    core = require('../src/config/core.cjs');
+  const input = {
+    name: 'API A',
+    baseUrl: 'https://api-a.example.test/v1',
+    apiKey: 'sk-test-fake',
+    apiMode: 'responses',
+    model: 'model-a',
+    models: ['model-a', 'model-a-mini'],
+  };
+  store.add(f.bridgeHome, input);
+  const catalog = path.join(f.bridgeHome, 'model-catalog.json');
+  fs.writeFileSync(
+    path.join(f.codexHome, 'models_cache.json'),
+    JSON.stringify({ models: [{ slug: 'template', visibility: 'list' }] }),
+  );
+  core.applySwitch(f.codexHome, input, 'model-a', f.bridgeHome, catalog);
+  backups.save(f.codexHome, f.bridgeHome, 'switch');
+  const id = backups.list(f.bridgeHome)[0].id;
+  fs.writeFileSync(catalog, JSON.stringify({ models: [{ slug: 'model-b' }] }));
+  fs.writeFileSync(path.join(f.codexHome, 'config.toml'), 'model="model-b"\n');
+  const prepared = await f.service.prepareBackup({ backupId: id });
+  prepared.apply();
+  prepared.cleanup();
+  const parsed = require('smol-toml').parse(
+    fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8'),
+  );
+  assert.equal(parsed.model, 'model-a');
+  assert.equal(parsed.model_provider, 'hermes_bridge');
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(catalog)).models.map((m) => m.slug),
+    ['model-a', 'model-a-mini'],
+  );
+});
