@@ -22,7 +22,7 @@ function transportFor(
   codexHome,
   { platform = process.platform, execute = require('node:util').promisify(cp.execFile) } = {},
 ) {
-  const request = async (url, output) => {
+  const request = async (url, output, quick = false) => {
     const env = require('../platform/platform.cjs').codexEnv(codexHome);
     const args = [
       '--fail',
@@ -30,10 +30,11 @@ function transportFor(
       '--silent',
       '--show-error',
       '--connect-timeout',
-      '15',
+      quick ? '10' : '15',
       '--max-time',
-      '240',
+      quick ? '20' : '240',
     ];
+    if (!quick) args.push('--speed-limit', '1', '--speed-time', '20');
     // Schannel可访问吊销服务器时仍检查；仅忽略其离线状态，保留证书链和主机名验证。
     if (platform === 'win32') args.push('--ssl-revoke-best-effort');
     if (output) args.push('--output', output);
@@ -67,7 +68,7 @@ function transportFor(
     }
   };
   return {
-    readJson: async (url) => JSON.parse((await request(url)).toString('utf8')),
+    readJson: async (url) => JSON.parse((await request(url, undefined, true)).toString('utf8')),
     download: request,
   };
 }
@@ -150,6 +151,7 @@ function createUpdateManager({
   extract = extractArchive,
   launchWorker = startWorker,
   shutdown,
+  discoveryDir = null,
 }) {
   const proxyInfo = () => require('../platform/platform.cjs').proxyInfo(codexHome);
   const resultFile = path.join(bridgeHome, 'updates', 'result.json');
@@ -291,6 +293,7 @@ function createUpdateManager({
             target: projectDir,
             bridgeHome,
             codexHome,
+            discoveryDir,
             build: metadata.build,
             platform,
             arch,

@@ -45,6 +45,15 @@ test('Windows检查与下载启用吊销离线best-effort，Mac不加且均保�
     for (const call of calls) {
       assert.equal(call.exe, platform === 'win32' ? 'curl.exe' : '/usr/bin/curl');
       assert.equal(call.args.includes('--ssl-revoke-best-effort'), platform === 'win32');
+      assert.equal(
+        call.args[call.args.indexOf('--connect-timeout') + 1],
+        call === calls[0] ? '10' : '15',
+      );
+      assert.equal(
+        call.args[call.args.indexOf('--max-time') + 1],
+        call === calls[0] ? '20' : '240',
+      );
+      assert.equal(call.args.includes('--speed-time'), call !== calls[0]);
       assert.ok(call.args.includes('--location'));
       for (const unsafe of ['-k', '--insecure', '--ssl-no-revoke'])
         assert.equal(call.args.includes(unsafe), false);
@@ -614,7 +623,7 @@ test(
     const bridge=process.env.BRIDGE_HOME, token=require('node:crypto').randomBytes(16).toString('hex');
     const network=transportFor(process.env.BRIDGE_CODEX_HOME);
     const map=(url)=>${JSON.stringify(origin)}+'/'+url.split('/').pop();
-    const manager=createUpdateManager({bridgeHome:bridge,codexHome:process.env.BRIDGE_CODEX_HOME,projectDir:__dirname,version:'0.1.3',build:build.id,sequence:build.sequence,
+    const manager=createUpdateManager({bridgeHome:bridge,codexHome:process.env.BRIDGE_CODEX_HOME,discoveryDir:process.env.BRIDGE_DISCOVERY_DIR||null,projectDir:__dirname,version:'0.1.3',build:build.id,sequence:build.sequence,
       transport:{readJson:url=>network.readJson(map(url)),download:(url,file)=>network.download(map(url),file)},
       shutdown:()=>process.exit(0)});
     const server=http.createServer(async(req,res)=>{
@@ -628,6 +637,7 @@ test(
     });
     server.listen(0,'127.0.0.1',()=>{const url='http://127.0.0.1:'+server.address().port+'/#'+token;
       fs.writeFileSync(path.join(bridge,'running.json'),JSON.stringify({pid:process.pid,url,build}));
+      if(process.env.BRIDGE_DISCOVERY_DIR){fs.mkdirSync(process.env.BRIDGE_DISCOVERY_DIR,{recursive:true});fs.writeFileSync(path.join(process.env.BRIDGE_DISCOVERY_DIR,'connection.json'),JSON.stringify({pid:process.pid,url,build}));}
       fs.appendFileSync(path.join(bridge,'opened-pages.txt'),url+'\\n');
       console.log('READY');});
     process.on('SIGTERM',()=>process.exit(0));
@@ -698,6 +708,7 @@ test(
         ...process.env,
         BRIDGE_HOME: bridge,
         BRIDGE_CODEX_HOME: codex,
+        BRIDGE_DISCOVERY_DIR: path.join(root, 'discovery'),
         NO_PROXY: '127.0.0.1,localhost',
       },
       windowsHide: true,
@@ -801,6 +812,11 @@ test(
     }
     assert.equal((await runtimeResponse.json()).id, newBuild);
     assert.notEqual(url.hash, oldUrl.hash, '新后台必须生成新页面令牌');
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(root, 'discovery', 'connection.json'))),
+      running,
+      '升级后的新后台写回原发现目录',
+    );
     assert.equal(
       fs.readFileSync(path.join(bridge, 'opened-pages.txt'), 'utf8').trim().split('\n').length,
       2,

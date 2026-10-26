@@ -1234,3 +1234,80 @@ test('rejected API preparation leaves desktop, config and model catalog untouche
   assert.equal(fs.readFileSync(path.join(f.codexHome, 'config.toml'), 'utf8'), before);
   assert.equal(fs.existsSync(path.join(f.bridgeHome, 'model-catalog.json')), false);
 });
+
+test('额度成功后按同一账号的固定订阅响应保存到期日，不刷新登录也不公开令牌', async (t) => {
+  const f = configured(t),
+    login = JSON.parse(fs.readFileSync(path.join(f.codexHome, 'auth.json'))),
+    accountId = login.tokens.account_id;
+  const reader = require('../src/accounts/quota-reader.cjs'),
+    cp = require('node:child_process'),
+    saved = path.join(f.bridgeHome, 'auth-fixture.json');
+  writeJson(saved, login);
+  let commandArgs, requestConfig;
+  t.mock.method(require('../src/platform/platform.cjs'), 'codexEnv', () => ({}));
+  t.mock.method(cp, 'execFile', (_exe, args, _options, callback) => {
+    commandArgs = args;
+    process.nextTick(() =>
+      callback(
+        null,
+        JSON.stringify({
+          accounts: {
+            [accountId]: {
+              entitlement: {
+                expires_at: '2026-11-26T12:00:00+00:00',
+                renews_at: '2026-11-25T12:00:00+00:00',
+              },
+              last_active_subscription: { will_renew: false },
+            },
+            default: { entitlement: { expires_at: '2030-01-01T00:00:00Z' } },
+          },
+        }),
+      ),
+    );
+    return {
+      stdin: {
+        on() {},
+        end(config) {
+          requestConfig = config;
+        },
+      },
+    };
+  });
+  const q = reader.createQuotaReader({
+    bridgeHome: f.bridgeHome,
+    root: f.bridgeHome,
+    load: () => [{ id: 'fixture', email: 'fixture@example.test' }],
+    authFile: () => saved,
+    captureCurrent() {},
+    openSession: () => ({
+      ready: async () => {},
+      rpc: async (method) =>
+        method === 'account/read'
+          ? { account: { type: 'chatgpt' } }
+          : {
+              rateLimits: {
+                planType: 'plus',
+                primary: { usedPercent: 10, windowDurationMins: 300 },
+              },
+            },
+      close: async () => {},
+    }),
+    readJson: (file, fallback) =>
+      fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : fallback,
+    writeJson,
+    readSubscription: reader.readSubscription,
+  });
+  const result = await q.quota('fixture');
+  assert.equal(result.status, 'ok');
+  assert.equal(result.subscriptionUntil, '2026-11-26T12:00:00+00:00');
+  assert.equal(result.subscriptionWillRenew, false);
+  assert.equal(
+    JSON.parse(fs.readFileSync(path.join(f.bridgeHome, 'fixture', 'quota.json'))).subscriptionUntil,
+    result.subscriptionUntil,
+  );
+  assert.ok(requestConfig.includes('ChatGPT-Account-Id: ' + accountId));
+  assert.ok(requestConfig.includes('originator: codex_cli_rs'));
+  assert.equal(commandArgs.includes('--location'), false);
+  assert.equal(commandArgs.join(' ').includes(login.tokens.access_token), false);
+  assert.equal(JSON.stringify(result).includes(login.tokens.access_token), false);
+});

@@ -4,6 +4,72 @@ const path = require('node:path');
 const { officialErrorKind } = require('./official-session.cjs');
 const { log } = require('../diagnostics/event-log.cjs');
 
+function subscriptionFrom(body, accountId) {
+  const account = body.accounts?.[accountId],
+    until = account?.entitlement?.expires_at || account?.entitlement?.renews_at;
+  return until && Number.isFinite(Date.parse(until))
+    ? {
+        until,
+        willRenew: account.last_active_subscription?.will_renew ?? null,
+        checkedAt: new Date().toISOString(),
+      }
+    : null;
+}
+async function readSubscription(authFile) {
+  const auth = JSON.parse(require('node:fs').readFileSync(authFile, 'utf8')),
+    home = path.dirname(authFile),
+    env = require('../platform/platform.cjs').codexEnv(home),
+    quote = (s) => '"' + String(s).replaceAll('\\', '\\\\').replaceAll('"', '\\"') + '"';
+  const config =
+    [
+      'url = "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27"',
+      'header = ' + quote('Authorization: Bearer ' + auth.tokens.access_token),
+      'header = ' + quote('ChatGPT-Account-Id: ' + auth.tokens.account_id),
+      'header = "originator: codex_cli_rs"',
+      'header = ' +
+        quote(
+          'User-Agent: codex_cli_rs/0.163.0 (' +
+            require('node:os').type() +
+            ' ' +
+            require('node:os').release() +
+            '; ' +
+            process.arch +
+            ')',
+        ),
+      'header = "Accept: application/json"',
+    ].join('\n') + '\n';
+  const body = await new Promise((resolve) => {
+    const args = [
+      '--config',
+      '-',
+      '--fail',
+      '--silent',
+      '--show-error',
+      '--connect-timeout',
+      '10',
+      '--max-time',
+      '20',
+    ];
+    if (process.platform === 'win32') args.push('--ssl-revoke-best-effort');
+    const child = require('node:child_process').execFile(
+      process.platform === 'win32' ? 'curl.exe' : '/usr/bin/curl',
+      args,
+      { env, encoding: 'utf8', windowsHide: true, timeout: 25000, maxBuffer: 2 * 1024 * 1024 },
+      (error, stdout) => {
+        if (error) return resolve(null);
+        try {
+          resolve(JSON.parse(stdout));
+        } catch {
+          resolve(null);
+        }
+      },
+    );
+    child.stdin.on('error', () => resolve(null));
+    child.stdin.end(config);
+  });
+  return body ? subscriptionFrom(body, auth.tokens.account_id) : null;
+}
+
 function quotaBuckets(result) {
   const buckets =
     result.rateLimitsByLimitId && Object.keys(result.rateLimitsByLimitId).length
@@ -76,6 +142,7 @@ function createQuotaReader({
   openSession,
   readJson,
   writeJson,
+  readSubscription,
 }) {
   const tasks = new Map(),
     waiting = [];
@@ -142,7 +209,15 @@ function createQuotaReader({
       const result = await check.rpc('account/rateLimits/read', {}),
         buckets = quotaBuckets(result);
       if (!buckets.length) throw Error('官方服务未返回额度');
-      const value = { status: 'ok', checkedAt: new Date().toISOString(), buckets };
+      const subscription = readSubscription ? await readSubscription(authFile(id)) : null;
+      const value = {
+        status: 'ok',
+        checkedAt: new Date().toISOString(),
+        buckets,
+        ...(subscription?.until ? { subscriptionUntil: subscription.until } : {}),
+        ...(subscription?.checkedAt ? { subscriptionCheckedAt: subscription.checkedAt } : {}),
+        ...(subscription ? { subscriptionWillRenew: subscription.willRenew } : {}),
+      };
       writeJson(file, value);
       return { id, ...value };
     } catch (error) {
@@ -170,4 +245,10 @@ function createQuotaReader({
   return { quota };
 }
 
-module.exports = { createQuotaReader, quotaBuckets, quotaError };
+module.exports = {
+  createQuotaReader,
+  quotaBuckets,
+  quotaError,
+  readSubscription,
+  subscriptionFrom,
+};

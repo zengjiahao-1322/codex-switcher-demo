@@ -74,7 +74,7 @@ async function mockUpstream() {
   await new Promise((r) => s.listen(0, '127.0.0.1', r));
   return { url: 'http://127.0.0.1:' + s.address().port + '/v1', close: () => s.close() };
 }
-async function startMain(t, dirs, port) {
+async function startMain(t, dirs, port, extraEnv = {}) {
   const child = spawn(process.execPath, [path.join(PROJECT_ROOT, 'main.cjs'), '--no-open'], {
     env: {
       ...process.env,
@@ -83,6 +83,7 @@ async function startMain(t, dirs, port) {
       BRIDGE_HOME: dirs.bridge,
       BRIDGE_PORT: String(port),
       BRIDGE_STARTUP_DIR: dirs.startup,
+      ...extraEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -412,3 +413,32 @@ test(
     );
   },
 );
+
+test('再次启动已运行实例时修复发现文件且保留原实例pid/url/build', async (t) => {
+  const dirs = makeDirs('switcher-discovery-repair-'),
+    discovery = path.join(dirs.bridge, 'discovery'),
+    port = await freePort();
+  await startMain(t, dirs, port, { BRIDGE_DISCOVERY_DIR: discovery });
+  const prior = JSON.parse(fs.readFileSync(path.join(dirs.bridge, 'running.json')));
+  fs.writeFileSync(
+    path.join(discovery, 'connection.json'),
+    JSON.stringify({ url: 'http://127.0.0.1:9/#stale', pid: 1 }),
+  );
+  const child = spawn(process.execPath, [path.join(PROJECT_ROOT, 'main.cjs'), '--no-open'], {
+    env: {
+      ...process.env,
+      BRIDGE_HOME: dirs.bridge,
+      BRIDGE_CODEX_HOME: dirs.codex,
+      BRIDGE_HERMES_HOME: dirs.hermes,
+      BRIDGE_DISCOVERY_DIR: discovery,
+    },
+    windowsHide: true,
+    stdio: 'ignore',
+  });
+  const code = await new Promise((resolve, reject) => {
+    child.once('exit', resolve);
+    child.once('error', reject);
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(discovery, 'connection.json'))), prior);
+});

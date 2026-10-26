@@ -31,7 +31,12 @@ async function launch(target, job) {
     detached: true,
     windowsHide: true,
     stdio: 'ignore',
-    env: { ...process.env, BRIDGE_HOME: job.bridgeHome, BRIDGE_CODEX_HOME: job.codexHome },
+    env: {
+      ...process.env,
+      BRIDGE_HOME: job.bridgeHome,
+      BRIDGE_CODEX_HOME: job.codexHome,
+      BRIDGE_DISCOVERY_DIR: job.discoveryDir || '',
+    },
   });
   await require('node:events').once(child, 'spawn');
   child.unref();

@@ -220,9 +220,14 @@ const livePlan = (a) => a.quota?.buckets?.find((b) => b.plan && b.plan !== 'unkn
 export const accountPlan = (a) => livePlan(a) || a.plan;
 const subscriptionPast = (a) =>
   !!a.subscriptionUntil && Date.parse(a.subscriptionUntil) < Date.now();
-export const membershipExpired = (a) => subscriptionPast(a) && accountPlan(a) === 'free';
+const liveUntil = (a) => a.quota?.subscriptionUntil;
+export const membershipExpired = (a) =>
+  liveUntil(a)
+    ? Date.parse(liveUntil(a)) < Date.now()
+    : subscriptionPast(a) && accountPlan(a) === 'free';
 const renewed = (a) => subscriptionPast(a) && !!livePlan(a) && livePlan(a) !== 'free';
 export function membership(a) {
+  if (liveUntil(a)) return '会员到期 ' + day(liveUntil(a));
   if (!a.subscriptionUntil) return '';
   if (renewed(a)) return '已续期，新日期待官方更新';
   if (subscriptionPast(a) && !membershipExpired(a)) return '会员日期待官方更新';
@@ -242,12 +247,14 @@ export function accountFacts(a) {
     facts.append(dt, dd);
   };
   fact('套餐', accountPlan(a));
-  if (a.subscriptionUntil)
+  if (liveUntil(a) || a.subscriptionUntil)
     fact(
       '会员到期',
-      subscriptionPast(a) && !membershipExpired(a)
-        ? membership(a)
-        : stamp(a.subscriptionUntil) +
+      liveUntil(a)
+        ? day(liveUntil(a))
+        : subscriptionPast(a) && !membershipExpired(a)
+          ? membership(a)
+          : stamp(a.subscriptionUntil) +
             (membershipExpired(a)
               ? '（已到期）'
               : '（还剩 ' +

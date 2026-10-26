@@ -24,6 +24,10 @@ const hermesHome =
 fs.mkdirSync(bridgeHome, { recursive: true });
 const runningPath = path.join(bridgeHome, 'running.json'),
   noOpen = process.argv.includes('--no-open');
+const discoveryDir =
+  !process.env.BRIDGE_HOME || process.env.BRIDGE_DISCOVERY_DIR
+    ? process.env.BRIDGE_DISCOVERY_DIR || path.join(os.homedir(), '.codex-api-switcher')
+    : null;
 const runtimeInfo = {
   ...require('../platform/build-info.cjs').buildInfo(),
   pid: process.pid,
@@ -122,7 +126,10 @@ function listeningPid(port) {
     windowsHide: true,
   });
   const match = output.match(
-    new RegExp('^\\s*TCP\\s+127\\.0\\.0\\.1:' + port + '\\s+\\S+\\s+LISTENING\\s+(\\d+)\\s*$', 'mi'),
+    new RegExp(
+      '^\\s*TCP\\s+127\\.0\\.0\\.1:' + port + '\\s+\\S+\\s+LISTENING\\s+(\\d+)\\s*$',
+      'mi',
+    ),
   );
   return match ? Number(match[1]) : null;
 }
@@ -188,14 +195,14 @@ async function existing() {
   const prior = await existing();
   const phases = { existing: Math.round(performance.now() - phaseStarted) };
   if (prior) {
+    if (discoveryDir) {
+      require('../platform/data-protection.cjs').protectDataDirs([discoveryDir]);
+      writeJson(path.join(discoveryDir, 'connection.json'), prior);
+    }
     console.log('BRIDGE_ALREADY_RUNNING ' + new URL(prior.url).origin);
     openUrl(prior.url);
     return;
   }
-  const discoveryDir =
-    !process.env.BRIDGE_HOME || process.env.BRIDGE_DISCOVERY_DIR
-      ? process.env.BRIDGE_DISCOVERY_DIR || path.join(os.homedir(), '.codex-api-switcher')
-      : null;
   const protectedDirs = [bridgeHome, discoveryDir].filter(Boolean),
     protectSkipped =
       protectedDirs.length > 0 &&
@@ -215,6 +222,7 @@ async function existing() {
     projectDir: PROJECT_ROOT,
     defaultPort: Number(process.env.BRIDGE_PORT) || 47831,
     dataDirProtection,
+    discoveryDir,
     shutdownForUpdate: () => {
       server.close();
       server.closeAllConnections();
@@ -246,12 +254,7 @@ async function existing() {
     const url = 'http://127.0.0.1:' + port + '/#' + token;
     const connection = { pid: process.pid, url, build: runtimeInfo };
     writeJson(runningPath, connection);
-    if (!process.env.BRIDGE_HOME || process.env.BRIDGE_DISCOVERY_DIR) {
-      const dir =
-        process.env.BRIDGE_DISCOVERY_DIR || path.join(os.homedir(), '.codex-api-switcher');
-      fs.mkdirSync(dir, { recursive: true });
-      writeJson(path.join(dir, 'connection.json'), connection);
-    }
+    if (discoveryDir) writeJson(path.join(discoveryDir, 'connection.json'), connection);
     logEvent(bridgeHome, 'startup', {
       readyMs: Math.round(process.uptime() * 1000),
       phases,
@@ -285,6 +288,7 @@ async function existing() {
     if (e.code === 'EADDRINUSE') {
       const prior = await existing();
       if (prior) {
+        if (discoveryDir) writeJson(path.join(discoveryDir, 'connection.json'), prior);
         console.log('BRIDGE_ALREADY_RUNNING ' + new URL(prior.url).origin);
         openUrl(prior.url);
         return;

@@ -49,7 +49,7 @@ function identity(auth) {
     subscriptionCheckedAt: subscription.chatgpt_subscription_last_checked || null,
   };
 }
-function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
+function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess, readSubscription }) {
   const root = path.join(bridgeHome, 'accounts'),
     indexFile = path.join(root, 'index.json'),
     liveFile = path.join(codexHome, 'auth.json');
@@ -154,14 +154,16 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
       items: load().map((row) => {
         const auth = readJson(authFile(row.id)),
           latest = identity(auth);
+        const quota = readJson(path.join(root, row.id, 'quota.json'));
         return {
           ...row,
           plan: latest?.plan || 'unknown',
-          subscriptionUntil: latest?.subscriptionUntil || null,
-          subscriptionCheckedAt: latest?.subscriptionCheckedAt || null,
+          subscriptionUntil: quota?.subscriptionUntil || latest?.subscriptionUntil || null,
+          subscriptionCheckedAt:
+            quota?.subscriptionCheckedAt || latest?.subscriptionCheckedAt || null,
           refreshedAt: auth?.last_refresh || null,
           current: row.id === current?.id,
-          quota: readJson(path.join(root, row.id, 'quota.json')),
+          quota,
         };
       }),
       credentialsNotice,
@@ -239,6 +241,7 @@ function createAccounts({ codexHome, bridgeHome, codexExe, spawnProcess }) {
       openSession,
       readJson,
       writeJson,
+      readSubscription,
     });
   async function prepare(id) {
     captureCurrent();

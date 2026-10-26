@@ -46,6 +46,7 @@ function createService({
   startService,
   shutdownForUpdate,
   dataDirProtection = { ok: true, path: bridgeHome },
+  discoveryDir = null,
 } = {}) {
   const build = require('../platform/build-info.cjs').buildInfo();
   fs.mkdirSync(bridgeHome, { recursive: true });
@@ -53,6 +54,7 @@ function createService({
     codexHome,
     bridgeHome,
     codexExe: () => findCodex({ dataHome: bridgeHome }),
+    readSubscription: require('../accounts/quota-reader.cjs').readSubscription,
   });
   const remoteCredentials = require('../accounts/remote-credentials.cjs').createRemoteCredentials({
     bridgeHome,
@@ -69,6 +71,7 @@ function createService({
     sequence: build.sequence,
     codexHome,
     shutdown: shutdownForUpdate,
+    discoveryDir,
   });
   let listeningPort = null;
   const passed = new Map();
@@ -741,6 +744,7 @@ function createService({
           codexHome,
           bridgeHome,
           codexExe: () => findCodex({ dataHome: bridgeHome }),
+          readSubscription: require('../accounts/quota-reader.cjs').readSubscription,
         });
         versionCache = null;
         companionConnections.clear();
