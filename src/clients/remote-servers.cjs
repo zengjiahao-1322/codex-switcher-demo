@@ -11,13 +11,56 @@ const reloads = new Map();
 const keyFor = (home, id) => path.resolve(home) + '\0' + id;
 const digest = (text) => crypto.createHash('sha256').update(text).digest('hex');
 function markReload(bridgeHome, id, target) {
-  reloads.set(keyFor(bridgeHome, id), target);
+  const key = keyFor(bridgeHome, id),
+    previous = reloads.get(key);
+  if (previous?.timer) clearTimeout(previous.timer);
+  const entry = { ...target };
+  entry.timer = setTimeout(() => {
+    if (reloads.get(key) !== entry) return;
+    reloads.delete(key);
+    if (entry.kind === 'install')
+      log(bridgeHome, 'remote.install', {
+        host: entry.host || entry.authority,
+        from: entry.from,
+        to: entry.to,
+        status: 'notActive',
+        agentVersion: entry.agentVersion || null,
+      });
+    else
+      log(bridgeHome, 'remote.reload', {
+        host: entry.host || entry.authority,
+        codexHome: entry.codexHome,
+        source: entry.source || 'web',
+        status: 'failed',
+        reason: redact(
+          '120秒内未确认重载；agentVersion=' +
+            (entry.agentVersion || 'null') +
+            '，companionVersion=' +
+            (entry.companionVersion || 'null'),
+        ),
+      });
+  }, 120000);
+  entry.timer.unref?.();
+  reloads.set(key, entry);
 }
 function recordReload(bridgeHome, id, { status, reason } = {}) {
   const key = keyFor(bridgeHome, id),
     reload = reloads.get(key);
   if (!reload) return;
   reloads.delete(key);
+  if (reload.timer) clearTimeout(reload.timer);
+  if (reload.kind === 'install') {
+    log(bridgeHome, 'remote.install', {
+      host: reload.host || reload.authority,
+      from: reload.from,
+      to: reload.to,
+      status: status === 'confirmed' ? 'active' : 'notActive',
+      ...(status === 'confirmed'
+        ? { elapsedMs: Date.now() - reload.requestedAt }
+        : { agentVersion: reload.agentVersion || null }),
+    });
+    return;
+  }
   log(bridgeHome, 'remote.reload', {
     host: reload.host || reload.authority,
     codexHome: reload.codexHome,
@@ -106,6 +149,7 @@ function groups(bridgeHome) {
       agentVersion: agent?.agentVersion || null,
       agentProtocol: agent?.protocol || 0,
       companionVersion: row.companionVersion,
+      remoteAgentState: row.remoteAgentState || null,
     });
   }
   return [...found.values()];
@@ -163,6 +207,9 @@ function confirmsReload(input, previous) {
     input.remoteAgent?.agentVersion === input.companionVersion &&
     !!input.remoteAgent
   );
+}
+function hasReload(bridgeHome, id) {
+  return reloads.has(keyFor(bridgeHome, id));
 }
 function windowFor(bridgeHome, group) {
   return require('./client-status.cjs')
@@ -351,6 +398,7 @@ module.exports = {
   dispatch,
   acknowledge,
   confirmsReload,
+  hasReload,
   windowFor,
   readAuth,
   redactReason,

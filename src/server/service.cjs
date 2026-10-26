@@ -727,7 +727,9 @@ function createService({
       if (input.remoteType === 'ssh-remote') {
         const agent = input.remoteAgent,
           key = JSON.stringify([input.authority, agent?.codexHome || null]),
-          status = !agent
+          status = input.remoteAgentState === 'unreachable'
+            ? 'unreachable'
+            : !agent
             ? 'missing'
             : agent.protocol !== 2 || agent.agentVersion !== input.companionVersion
               ? 'needsUpdate'
@@ -778,6 +780,8 @@ function createService({
       if (window?.remoteType !== 'ssh-remote') throw Error('请选择已连接的 Remote-SSH 窗口');
       if (window.remoteProtocol !== 1) throw Error('请先更新本机伴随扩展并重载这个窗口');
       const host = window.remoteAgent?.host || window.authority;
+      const from = window.remoteAgent?.agentVersion || null,
+        to = build.version;
       try {
         const file = require('../clients/editor-integration.cjs').buildRemote(
             projectDir,
@@ -786,15 +790,26 @@ function createService({
           result = await remote.dispatch(
             bridgeHome,
             id,
-            { type: 'installRemoteAgent', base64: fs.readFileSync(file).toString('base64') },
+            { type: 'installRemoteAgent', base64: fs.readFileSync(file).toString('base64'), reload: true },
             { timeout: 60000 },
           );
         if (result?.installed !== true) throw Error('编辑器未确认远端代理安装成功');
-        eventLog.log(bridgeHome, 'remote.install', { host, status: 'installed' });
+        remote.markReload(bridgeHome, id, {
+          kind: 'install',
+          host,
+          authority: window.authority,
+          codexHome: window.remoteAgent?.codexHome || null,
+          from,
+          to,
+          companionVersion: to,
+          agentVersion: window.remoteAgent?.agentVersion || null,
+          requestedAt: Date.now(),
+        });
+        eventLog.log(bridgeHome, 'remote.install', { host, from, to, status: 'installed' });
         return result;
       } catch (error) {
         const reason = eventLog.redact(error.message);
-        eventLog.log(bridgeHome, 'remote.install', { host, status: 'failed', reason });
+        eventLog.log(bridgeHome, 'remote.install', { host, from, to, status: 'failed', reason });
         throw Error(reason);
       }
     },

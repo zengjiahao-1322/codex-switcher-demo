@@ -6,6 +6,12 @@ const fs = require('node:fs'),
 const { log } = require('../diagnostics/event-log.cjs');
 const REPOSITORY = 'zengjiahao-1322/codex-switcher-demo';
 const releaseUrl = `https://github.com/${REPOSITORY}/releases/latest/download/`;
+function withProxyHint(message, error, proxy) {
+  if (proxy?.type !== 'manual') return message;
+  if (error?.curl?.code === 7)
+    return `连不上系统代理 ${proxy.value}，请确认代理软件在运行。`;
+  return `${message}（经系统代理 ${proxy.value}）`;
+}
 
 function assetName(platform = process.platform, arch = process.arch) {
   if (platform === 'win32') return 'codex-switcher-windows-x64.zip';
@@ -209,12 +215,13 @@ function createUpdateManager({
           proxy,
         });
       } catch (error) {
+        const message = withProxyHint(error.message, error, proxy);
         state.status = 'error';
-        state.error = error.message;
+        state.error = message;
         log(bridgeHome, 'update.check', {
           build,
           durationMs: Math.round(performance.now() - started),
-          error: error.message,
+          error: message,
           proxy,
           ...(error.curl ? { curl: error.curl } : {}),
         });
@@ -291,10 +298,11 @@ function createUpdateManager({
           });
           shutdown();
         } catch (error) {
+          const message = withProxyHint(error.message, error, proxy);
           log(bridgeHome, state.status === 'downloading' ? 'update.download' : 'update.install', {
             build: metadata.build,
             durationMs: Math.round(performance.now() - started),
-            error: error.message,
+            error: message,
             proxy,
             ...(error.curl ? { curl: error.curl } : {}),
           });

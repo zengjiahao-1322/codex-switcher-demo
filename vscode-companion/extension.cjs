@@ -39,7 +39,10 @@ function activate(context) {
     stopped = false,
     longPoll = false,
     timer,
-    completedReload = context.workspaceState.get('codexSwitcher.pendingReload');
+    completedReload = context.workspaceState.get('codexSwitcher.pendingReload'),
+    remoteAgentState = null,
+    remoteAgentFlight = null,
+    remoteAgentGeneration = 0;
   const controller = new AbortController();
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 20);
   status.text = '$(plug) Codex Switcher';
@@ -58,11 +61,19 @@ function activate(context) {
   let remoteAgent = null,
     remoteAgentError = null,
     remoteCheckedAt = 0;
-  async function refreshRemoteAgent() {
-    if (!sshRemote() || Date.now() - remoteCheckedAt < 30000) return;
+  function refreshRemoteAgent() {
+    if (!sshRemote()) return;
+    const interval = remoteAgentState === 'unreachable' ? 5000 : 30000;
+    if (remoteAgentFlight || Date.now() - remoteCheckedAt < interval) return;
     remoteCheckedAt = Date.now();
-    try {
-      const s = await vscode.commands.executeCommand('codexSwitcherRemote.status');
+    const generation = ++remoteAgentGeneration;
+    remoteAgentFlight = (async () => {
+      try {
+        const s = await Promise.race([
+          vscode.commands.executeCommand('codexSwitcherRemote.status'),
+          new Promise((_, reject) => setTimeout(() => reject(Error('远端代理状态查询超时')), 5000)),
+        ]);
+        if (generation !== remoteAgentGeneration) return;
       // 只转发约定字段，远端代理多给的内容不上报。
       remoteAgent = {
         agentVersion: s.agentVersion,
@@ -84,11 +95,22 @@ function activate(context) {
           lastRefresh: s.account.lastRefresh,
         },
       };
-      remoteAgentError = null;
-    } catch (error) {
-      remoteAgent = null;
-      remoteAgentError = String(error.message).slice(0, 300);
-    }
+        remoteAgentError = null;
+        remoteAgentState = 'connected';
+        status.text = '$(plug) Codex Switcher · 服务器已接入';
+      } catch (error) {
+        if (generation !== remoteAgentGeneration) return;
+        remoteAgent = null;
+        remoteAgentError = String(error.message).slice(0, 300);
+        remoteAgentState = /command '.+' not found/.test(remoteAgentError) ? 'missing' : 'unreachable';
+        status.text =
+          remoteAgentState === 'unreachable'
+            ? '$(plug) Codex Switcher · 服务器连接中'
+            : '$(plug) Codex Switcher · 服务器未装远端代理';
+      } finally {
+        if (generation === remoteAgentGeneration) remoteAgentFlight = null;
+      }
+    })();
   }
   const report = () => {
     const folders = vscode.workspace.workspaceFolders || [],
@@ -159,6 +181,7 @@ function activate(context) {
         : null,
       remoteAgent: sshRemote() ? remoteAgent : null,
       remoteAgentError: sshRemote() ? remoteAgentError : null,
+      remoteAgentState: sshRemote() ? remoteAgentState : null,
     };
   };
   const connection = () =>
@@ -179,6 +202,7 @@ function activate(context) {
     await context.workspaceState.update('codexSwitcher.pendingReload', {
       clientId: id,
       commandId,
+      requestedAt: Date.now(),
     });
     setTimeout(async () => {
       try {
@@ -235,24 +259,19 @@ function activate(context) {
     }
     remoteCheckedAt = 0;
     await ack(c, data, command.id, 'completed', { ackResult: { installed: true } });
-    // 不等待用户点按钮，避免阻塞心跳。
-    vscode.window
-      .showInformationMessage(
-        '已在服务器上安装 Codex Switcher 远端代理。如果切换器里仍显示未安装，请重启扩展（不会断开服务器连接）。',
-        '重启扩展',
-      )
-      .then((choice) => {
-        if (choice === '重启扩展')
-          vscode.commands.executeCommand('workbench.action.restartExtensionHost');
-      });
+    await reloadWindow(c, data, command.id);
   }
   async function tick() {
     if (busy || stopped) return;
     clearTimeout(timer);
+    if (completedReload?.requestedAt && Date.now() - completedReload.requestedAt > 120000) {
+      await context.workspaceState.update('codexSwitcher.pendingReload', undefined);
+      completedReload = undefined;
+    }
     busy = true;
     let delay = 2000;
     try {
-      await refreshRemoteAgent();
+      refreshRemoteAgent();
       const c = connection(),
         data = report(),
         r = await post(
@@ -285,11 +304,13 @@ function activate(context) {
         // SSH 窗口的 Codex 跑在服务器上，本机本来就关联不到后端；改看服务器上的远端代理。
         status.text =
           '$(plug) Codex Switcher · ' +
-          (!remoteAgent
-            ? '服务器未装远端代理'
-            : remoteAgent.protocol !== 2 || remoteAgent.agentVersion !== data.companionVersion
-              ? '远端代理需更新'
-              : '服务器已接入');
+          (remoteAgentState === 'unreachable'
+            ? '服务器连接中'
+            : !remoteAgent
+              ? '服务器未装远端代理'
+              : remoteAgent.protocol !== 2 || remoteAgent.agentVersion !== data.companionVersion
+                ? '远端代理需更新'
+                : '服务器已接入');
         status.tooltip = remoteAgent
           ? '服务器 ' +
             remoteAgent.host +

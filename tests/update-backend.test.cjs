@@ -146,6 +146,55 @@ test('其他curl错误使用退出码中文提示，不展示命令行或stderr'
   }
 });
 
+test('系统代理不可达时更新提示带代理地址', async (t) => {
+  const root = temp('proxy-hint'),
+    bridge = path.join(root, 'bridge'),
+    project = path.join(root, 'installed');
+  fs.mkdirSync(bridge);
+  fs.mkdirSync(project);
+  t.mock.method(require('../src/platform/platform.cjs'), 'proxyInfo', () => ({
+    type: 'manual',
+    value: 'http://127.0.0.1:1080',
+  }));
+  const transport = {
+    readJson: async () => {
+      throw Object.assign(Error('连接失败'), { curl: { code: 7, detail: 'Failed to connect' } });
+    },
+    download: async () => assert.fail('不可达代理不应下载'),
+  };
+  const manager = createUpdateManager({
+    bridgeHome: bridge,
+    codexHome: path.join(root, 'codex'),
+    projectDir: project,
+    build: 'a'.repeat(12),
+    version: '0.1.5',
+    sequence: 1,
+    platform: 'win32',
+    arch: 'x64',
+    transport,
+  });
+  await manager.actions.checkUpdate();
+  assert.equal(manager.state().error, '连不上系统代理 http://127.0.0.1:1080，请确认代理软件在运行。');
+  const other = createUpdateManager({
+    bridgeHome: path.join(root, 'other-bridge'),
+    codexHome: path.join(root, 'codex'),
+    projectDir: path.join(root, 'other-installed'),
+    build: 'a'.repeat(12),
+    version: '0.1.5',
+    sequence: 1,
+    platform: 'win32',
+    arch: 'x64',
+    transport: {
+      readJson: async () => {
+        throw Object.assign(Error('连接 GitHub 超时'), { curl: { code: 28, detail: 'timeout' } });
+      },
+      download: async () => assert.fail('不可达代理不应下载'),
+    },
+  });
+  await other.actions.checkUpdate();
+  assert.equal(other.state().error, '连接 GitHub 超时（经系统代理 http://127.0.0.1:1080）');
+});
+
 test('校验和失败时不触碰安装目录', async () => {
   const root = temp('checksum'),
     bridge = path.join(root, 'bridge'),

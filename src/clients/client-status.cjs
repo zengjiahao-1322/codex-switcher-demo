@@ -170,6 +170,7 @@ function heartbeat(bridgeHome, input) {
     remoteProtocol: input.remoteProtocol || 0,
     authority: input.authority ? String(input.authority) : null,
     remoteAgent: remoteServers.agentStatus(input.remoteAgent),
+    remoteAgentState: input.remoteAgentState || null,
     wsl: !!input.wsl,
     companionVersion: input.companionVersion || null,
     reloadProtocol: input.reloadProtocol || 0,
@@ -223,6 +224,7 @@ function heartbeat(bridgeHome, input) {
     if (
       old?.lastAck?.id === completed.commandId &&
       ['reload_requested', 'reloaded'].includes(old.lastAck.status) &&
+      (!old.remoteAgent || remoteServers.hasReload(bridgeHome, completed.clientId)) &&
       (!old.remoteAgent || remoteServers.confirmsReload(input, old))
     ) {
       if (old.lastAck.status !== 'reloaded')

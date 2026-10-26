@@ -19,7 +19,9 @@ const hostOf = (url) => url.replace(/^https?:\/\//, '').split('/')[0];
 const sameUrl = (x, y) => x.replace(/\/+$/, '') === y.replace(/\/+$/, '');
 // 协议号 2 起带官方登录读写；同版本号重新发布时，旧代理只能靠协议号认出。
 const agentState = (rows) =>
-  rows.some((r) => !r.agentVersion)
+  rows.some((r) => r.remoteAgentState === 'unreachable')
+    ? ['服务器连接中', 'changed', 'unreachable']
+    : rows.some((r) => !r.agentVersion)
     ? ['未安装远端代理', 'changed']
     : rows.some(
           (r) =>
@@ -128,7 +130,7 @@ function serverCard(authority, rows) {
     host = hostName(authority, rows);
   card.className = 'remote-card';
   name.textContent = host;
-  const [text, cls] = agentState(rows);
+  const [text, cls, state] = agentState(rows);
   head.append(name, tag(text, cls));
   if (rows[0].platform) head.append(tag(rows[0].platform));
   card.append(head);
@@ -137,7 +139,9 @@ function serverCard(authority, rows) {
     line.textContent = r.codexHome + (currentText(r) ? ' · ' + currentText(r) : '');
     card.append(line);
   }
-  if (cls === 'changed') {
+  if (state === 'unreachable') {
+    card.append(note('服务器连接中，恢复后自动刷新。'));
+  } else if (cls === 'changed') {
     // 在这台服务器的窗口里安装本版远端代理；workspace 扩展会装到服务器一侧。
     const install = document.createElement('button');
     install.type = 'button';
@@ -146,6 +150,8 @@ function serverCard(authority, rows) {
       busy(
         install,
         async () => {
+          if (!confirm('会重启这台服务器窗口里的扩展，不断开连接；服务器上正在运行的 Codex 任务会中断。继续安装/更新远端代理吗？'))
+            return;
           installs.set(authority, '正在服务器上安装远端代理…');
           renderRemotes(remotes);
           await api('installRemoteAgent', { id: rows[0].windows[0].id });

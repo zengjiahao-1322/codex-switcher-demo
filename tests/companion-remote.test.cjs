@@ -26,10 +26,12 @@ async function runCompanion({
   pendingReload,
   authText,
   agentVersion,
+  statusNever = false,
   // routes：切换器普通接口的假回复；ui：快捷列表和确认框的选择；act：心跳就绪后执行的操作。
   routes = {},
   ui = {},
   act = async () => {},
+  maxMs = 5000,
   until,
 }) {
   const statusItem = { show() {}, text: '', tooltip: '' };
@@ -106,6 +108,7 @@ async function runCompanion({
         executed.push(name);
         if (name.startsWith('codexSwitcherRemote.')) {
           if (!agentInstalled) throw Error(`command '${name}' not found`);
+          if (name === 'codexSwitcherRemote.status' && statusNever) return new Promise(() => {});
           return agent[name.split('.')[1]](input);
         }
         if (name === 'workbench.extensions.installExtension') {
@@ -151,7 +154,7 @@ async function runCompanion({
   } finally {
     Module._load = load;
   }
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + maxMs;
   while (!until(requests) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
   await act({ registered });
   // 等重载的 200 ms 延时执行完。
@@ -164,8 +167,8 @@ async function runCompanion({
 const acked = (id) => (requests) => requests.some((r) => r.ack === id);
 
 test('SSH 窗口心跳附带远端代理状态（约定字段、不含密钥）和 authority', async () => {
-  const { requests } = await runCompanion({ until: (r) => r.length >= 1 });
-  const first = requests[0];
+  const { requests } = await runCompanion({ until: (r) => r[0]?.remoteAgent && r.length >= 2 });
+  const first = requests.find((item) => item.remoteAgent);
   assert.equal(first.remoteProtocol, 1);
   assert.equal(first.remoteType, 'ssh-remote');
   assert.equal(first.authority, 'ssh-remote+gpu-box');
@@ -200,17 +203,19 @@ test('SSH 窗口状态栏显示服务器接入情况', async () => {
 });
 
 test('远端代理没装时 remoteAgent 为 null，并把问不到的原因交给后台记日志', async () => {
-  const { requests } = await runCompanion({ agentInstalled: false, until: (r) => r.length >= 1 });
-  assert.equal(requests[0].remoteAgent, null);
-  assert.match(requests[0].remoteAgentError, /codexSwitcherRemote\.status' not found/);
-  assert.equal(requests[0].authority, 'ssh-remote+gpu-box');
+  const { requests } = await runCompanion({ agentInstalled: false, until: (r) => r.length >= 2 && r[1].remoteAgentError });
+  const latest = requests.find((item) => item.remoteAgentError);
+  assert.equal(latest.remoteAgent, null);
+  assert.match(latest.remoteAgentError, /codexSwitcherRemote\.status' not found/);
+  assert.equal(latest.authority, 'ssh-remote+gpu-box');
 });
 
 test('本机窗口不调用远端命令，也不上报远端字段', async () => {
   const { requests, executed } = await runCompanion({
     // 传 undefined 会被参数默认值换成 ssh-remote，这里用 null 表示本机窗口。
     remoteName: null,
-    until: (r) => r.length >= 2,
+    maxMs: 8000,
+    until: (r) => r.some((item) => item.remoteAgentState === 'unreachable'),
   });
   assert.equal(executed.filter((n) => n.startsWith('codexSwitcherRemote.')).length, 0);
   assert.equal(requests[0].remoteAgent, null);
@@ -315,13 +320,24 @@ const login = (refresh) =>
 test('服务器有官方登录时心跳带账号摘要，不带令牌', async () => {
   const { requests } = await runCompanion({
     authText: login('2026-10-24T10:00:00Z'),
-    until: (r) => r.length >= 1,
+    until: (r) => r.length >= 2 && r[1].remoteAgent?.account,
   });
-  const { account } = requests[0].remoteAgent;
+  const { account } = requests.find((item) => item.remoteAgent)?.remoteAgent || {};
   assert.deepEqual(Object.keys(account).sort(), ['email', 'id', 'lastRefresh', 'plan']);
   assert.equal(account.email, 'team@example.com');
   assert.equal(account.lastRefresh, '2026-10-24T10:00:00Z');
   assert.equal(JSON.stringify(requests).includes('rt-remote-secret'), false);
+});
+
+test('远端代理状态查询卡住时心跳继续发送并标记连接中', async () => {
+  const { requests, statusItem } = await runCompanion({
+    statusNever: true,
+    maxMs: 8000,
+    until: (r) => r.some((item) => item.remoteAgentState === 'unreachable'),
+  });
+  assert.equal(requests.length >= 2, true);
+  assert.equal(requests[0].remoteAgentState, null);
+  assert.match(statusItem.text, /服务器连接中/);
 });
 
 test('readAuth → 只写登录：回执带登录正文和结果，配置不动，不重载', async () => {
@@ -367,7 +383,7 @@ test('readAuth → 只写登录：回执带登录正文和结果，配置不动�
 
 test('安装远端代理：写临时 VSIX 交给编辑器安装，装完删除临时文件', async () => {
   const vsix = Buffer.from('fake-vsix-bytes').toString('base64');
-  const { requests, installed } = await runCompanion({
+  const { requests, installed, executed } = await runCompanion({
     commandsFor: (reqs) =>
       reqs.length === 1 ? { id: 'cmd-install', type: 'installRemoteAgent', base64: vsix } : null,
     until: acked('cmd-install'),
@@ -378,6 +394,7 @@ test('安装远端代理：写临时 VSIX 交给编辑器安装，装完删除�
   const done = requests.find((r) => r.ack === 'cmd-install');
   assert.equal(done.ackStatus, 'completed');
   assert.deepEqual(done.ackResult, { installed: true });
+  assert.equal(executed.includes('workbench.action.restartExtensionHost'), true);
 });
 
 test('安装失败时回执 failed，临时文件同样删除', async () => {

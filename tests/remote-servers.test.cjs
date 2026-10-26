@@ -107,6 +107,14 @@ test('内存命令唤醒长轮询，配置正文、任意形状密钥和ackResul
   ack(home, input, command, { ok: true, sha256: 'fixture-sha', text: 'private-ack-body' });
   assert.equal((await pending).ok, true);
   assert.equal(remote.command(home, input.id), null);
+  remote.markReload(home, input.id, {
+    host: 'fixture-server',
+    authority: input.authority,
+    codexHome: input.remoteAgent.codexHome,
+    companionVersion: input.companionVersion,
+    agentVersion: input.remoteAgent.agentVersion,
+    requestedAt: Date.now(),
+  });
   assert.equal(fileText(home).includes('private-ack-body'), false);
   assert.equal(fileText(home).includes(secret), false);
   const row = clients.records(home)[0];
@@ -125,8 +133,8 @@ test('内存命令唤醒长轮询，配置正文、任意形状密钥和ackResul
   assert.equal(
     clients.heartbeat(home, { ...registration('remote-reloaded-window'), completedReload })
       .reloadConfirmed,
-    true,
-    '确认回复丢失后，重复确认应返回相同结果',
+    false,
+    '确认完成后应删除待确认记录',
   );
   assert.equal(
     JSON.parse(fs.readFileSync(path.join(home, 'clients', input.id + '.json'))).lastAck.status,
@@ -243,6 +251,45 @@ test('远程请求超时后释放内存命令，不重试也不写磁盘', async
   );
   assert.equal(remote.command(home, input.id), null);
   assert.equal(clients.records(home)[0].command, null);
+});
+
+test('重载确认超过120秒记录failed并删除待确认项', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const home = fixture(t),
+    input = registration('remote-expiring-window');
+  clients.heartbeat(home, input);
+  remote.markReload(home, input.id, {
+    host: input.remoteAgent.host,
+    authority: input.authority,
+    codexHome: input.remoteAgent.codexHome,
+    companionVersion: input.companionVersion,
+    agentVersion: input.remoteAgent.agentVersion,
+    requestedAt: Date.now(),
+  });
+  t.mock.timers.tick(120000);
+  const events = require('../src/diagnostics/event-log.cjs').readRecent(home, 10);
+  assert.equal(events.at(-1).event, 'remote.reload');
+  assert.equal(events.at(-1).status, 'failed');
+  assert.match(events.at(-1).reason, /agentVersion/);
+  assert.equal(remote.hasReload(home, input.id), false);
+  t.mock.timers.reset();
+});
+
+test('远端代理安装重启确认按版本记录active或notActive', (t) => {
+  const home = fixture(t);
+  remote.markReload(home, 'install-active', {
+    kind: 'install', host: 'fixture', from: '0.1.4', to: '0.1.5', requestedAt: Date.now(),
+  });
+  remote.recordReload(home, 'install-active', { status: 'confirmed' });
+  remote.markReload(home, 'install-old', {
+    kind: 'install', host: 'fixture', from: '0.1.4', to: '0.1.5', agentVersion: '0.1.4', requestedAt: Date.now(),
+  });
+  remote.recordReload(home, 'install-old', { status: 'failed' });
+  const events = require('../src/diagnostics/event-log.cjs').readRecent(home, 10);
+  assert.deepEqual(events.map((row) => [row.event, row.status, row.from, row.to]), [
+    ['remote.install', 'active', '0.1.4', '0.1.5'],
+    ['remote.install', 'notActive', '0.1.4', '0.1.5'],
+  ]);
 });
 
 test('HTTP心跳接受超过16KiB的远端read回执，其他动作请求上限不变', async (t) => {
