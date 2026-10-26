@@ -27,6 +27,7 @@ async function runCompanion({
   authText,
   agentVersion,
   statusNever = false,
+  restartChangesStatus = false,
   // routes：切换器普通接口的假回复；ui：快捷列表和确认框的选择；act：心跳就绪后执行的操作。
   routes = {},
   ui = {},
@@ -50,6 +51,7 @@ async function runCompanion({
   const requests = [],
     executed = [],
     installed = [];
+  let restartedAt = null;
   const state = new Map(pendingReload ? [['codexSwitcher.pendingReload', pendingReload]] : []);
   const fake = http.createServer((req, res) => {
     let text = '';
@@ -109,7 +111,12 @@ async function runCompanion({
         if (name.startsWith('codexSwitcherRemote.')) {
           if (!agentInstalled) throw Error(`command '${name}' not found`);
           if (name === 'codexSwitcherRemote.status' && statusNever) return new Promise(() => {});
-          if (name === 'codexSwitcherRemote.restart') return { restarting: true };
+          if (name === 'codexSwitcherRemote.restart') {
+            if (restartChangesStatus) restartedAt = new Date(Date.now() + 1).toISOString();
+            return { restarting: true };
+          }
+          if (name === 'codexSwitcherRemote.status' && restartedAt)
+            return { ...agent.status(), startedAt: restartedAt };
           return agent[name.split('.')[1]](input);
         }
         if (name === 'workbench.extensions.installExtension') {
@@ -438,6 +445,33 @@ test('五分钟内远端宿主退出两次后回退restartExtensionHost并带cra
     1,
   );
   assert.equal(state.get('codexSwitcher.pendingReload').commandId, 'limit-write-3');
+});
+
+test('远端重启后加快状态查询直到startedAt变化，再恢复长轮询', async () => {
+  const { requests, executed } = await runCompanion({
+    restartChangesStatus: true,
+    commandsFor: (reqs) =>
+      reqs.length === 1
+        ? {
+            id: 'fast-install',
+            type: 'installRemoteAgent',
+            base64: Buffer.from('test').toString('base64'),
+          }
+        : null,
+    until: (reqs) =>
+      reqs.some(
+        (r) =>
+          r.remoteAgent?.startedAt &&
+          r.remoteAgent.startedAt !==
+            reqs.find((item) => item.remoteAgent)?.remoteAgent.startedAt &&
+          r.wait === 10000,
+      ),
+  });
+  assert.ok(executed.filter((name) => name === 'codexSwitcherRemote.status').length >= 2);
+  assert.ok(requests.some((r) => r.wait === 2000));
+  const states = requests.filter((r) => r.remoteAgent);
+  assert.notEqual(states.at(-1).remoteAgent.startedAt, states[0].remoteAgent.startedAt);
+  assert.equal(requests.at(-1).wait, 10000);
 });
 
 test('安装失败时回执 failed，临时文件同样删除', async () => {

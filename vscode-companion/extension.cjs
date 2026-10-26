@@ -42,7 +42,8 @@ function activate(context) {
     completedReload = context.workspaceState.get('codexSwitcher.pendingReload'),
     remoteAgentState = null,
     remoteAgentFlight = null,
-    remoteAgentGeneration = 0;
+    remoteAgentGeneration = 0,
+    remoteRestart = null;
   const controller = new AbortController();
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 20);
   status.text = '$(plug) Codex Switcher';
@@ -63,7 +64,8 @@ function activate(context) {
     remoteCheckedAt = 0;
   function refreshRemoteAgent() {
     if (!sshRemote()) return;
-    const interval = remoteAgentState === 'unreachable' ? 5000 : 30000;
+    if (remoteRestart && Date.now() >= remoteRestart.until) remoteRestart = null;
+    const interval = remoteRestart ? 2000 : remoteAgentState === 'unreachable' ? 5000 : 30000;
     if (remoteAgentFlight || Date.now() - remoteCheckedAt < interval) return;
     remoteCheckedAt = Date.now();
     const generation = ++remoteAgentGeneration;
@@ -98,6 +100,7 @@ function activate(context) {
         };
         remoteAgentError = null;
         remoteAgentState = 'connected';
+        if (remoteRestart && s.startedAt !== remoteRestart.startedAt) remoteRestart = null;
         status.text = '$(plug) Codex Switcher · 服务器已接入';
       } catch (error) {
         if (generation !== remoteAgentGeneration) return;
@@ -216,8 +219,11 @@ function activate(context) {
   async function reloadWindow(c, data, commandId, reload) {
     if (reload?.method === 'remoteHostExit') {
       try {
+        remoteRestart = { startedAt: remoteAgent?.startedAt, until: Date.now() + 120000 };
+        remoteCheckedAt = Date.now();
         await vscode.commands.executeCommand('codexSwitcherRemote.restart');
       } catch (error) {
+        remoteRestart = null;
         await ack(c, data, commandId, 'reload_failed', { ackError: error.message }).catch(() => {});
       }
       return;
@@ -310,7 +316,7 @@ function activate(context) {
           {
             ...data,
             completedReload,
-            ...(longPoll ? { wait: 10000 } : {}),
+            ...(longPoll ? { wait: remoteRestart ? 2000 : 10000 } : {}),
           },
           controller.signal,
         );
@@ -460,7 +466,7 @@ function activate(context) {
             (t.kind === 'account'
               ? '这个账号的登录会保存到服务器上（只有当前用户可读）；本机和服务器同时用这个账号时，切换器会让两边登录保持一致。'
               : 'API 地址、模型和密钥会写入服务器的 config.toml（只有当前用户可读）。') +
-            '会重启服务器上的扩展（SSH 不断开，几秒后恢复）；服务器上正在运行的 Codex 任务会中断。本机不受影响。'
+            '会重启服务器上的扩展（SSH 不断开，约 20 秒后恢复）；服务器上正在运行的 Codex 任务会中断。本机不受影响。'
         : '把本机 Codex 切换到' +
             what +
             '？Codex 桌面端会重启，已接入、共用这份配置的编辑器窗口会重载，正在运行的 Codex 任务会中断。',
