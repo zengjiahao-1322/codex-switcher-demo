@@ -34,3 +34,10 @@ test('退出清理运行记录和共用发现记录；有切换任务时拒绝',
     }, 250),
   );
 });
+
+test('多版本交接保留新版本，旧版本才退出', () => {
+  const { otherInstallAction } = require('../src/platform/app-lifecycle.cjs');
+  assert.equal(otherInstallAction(114, 114), 'deferred');
+  assert.equal(otherInstallAction(115, 114), 'deferred');
+  assert.equal(otherInstallAction(113, 114), 'stopped');
+});

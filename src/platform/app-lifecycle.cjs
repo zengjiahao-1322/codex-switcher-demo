@@ -3,6 +3,9 @@ const fs = require('node:fs'),
   path = require('node:path'),
   cp = require('node:child_process');
 const { log } = require('../diagnostics/event-log.cjs');
+function otherInstallAction(oldSequence, currentSequence) {
+  return Number(oldSequence || 0) >= Number(currentSequence || 0) ? 'deferred' : 'stopped';
+}
 function integrateDesktop(
   projectDir,
   discoveryDir,
@@ -112,4 +115,4 @@ function createLifecycle({
   }
   return { quit, uninstall };
 }
-module.exports = { integrateDesktop, createLifecycle };
+module.exports = { integrateDesktop, createLifecycle, otherInstallAction };

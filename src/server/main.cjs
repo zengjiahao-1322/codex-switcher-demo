@@ -28,6 +28,7 @@ const discoveryDir =
   !process.env.BRIDGE_HOME || process.env.BRIDGE_DISCOVERY_DIR
     ? process.env.BRIDGE_DISCOVERY_DIR || path.join(os.homedir(), '.codex-api-switcher')
     : null;
+let otherInstall = null;
 const runtimeInfo = {
   ...require('../platform/build-info.cjs').buildInfo(),
   pid: process.pid,
@@ -176,8 +177,12 @@ async function existing() {
   if (oldRuntime?.id === runtimeInfo.id && oldRuntime.pid === r.pid) {
     const oldSequence = Number(r.build?.sequence || oldRuntime.sequence || 0),
       currentSequence = Number(runtimeInfo.sequence || 0);
-    if (fromDiscovery && oldSequence > currentSequence) return r;
+    if (fromDiscovery && oldSequence >= currentSequence) {
+      otherInstall = { pid: r.pid, sequence: oldSequence, action: 'deferred' };
+      return r;
+    }
     if (fromDiscovery && oldSequence < currentSequence) {
+      otherInstall = { pid: r.pid, sequence: oldSequence, action: 'stopped' };
       await require('../platform/process-stop.cjs').stopProcesses([r.pid]);
       return null;
     }
@@ -199,6 +204,16 @@ async function existing() {
     throw Error('无法确认旧切换器后台归属，请先关闭旧切换器再启动新版；配置尚未修改。');
   // 更新包接管旧后台时也使用统一的退出策略：先给服务清理机会，
   // 但不能因为旧进程卡住而让新版本永远打不开。
+  if (fromDiscovery) {
+    const oldSequence = Number(r.build?.sequence || oldRuntime?.sequence || 0),
+      currentSequence = Number(runtimeInfo.sequence || 0),
+      action = require('../platform/app-lifecycle.cjs').otherInstallAction(
+        oldSequence,
+        currentSequence,
+      );
+    otherInstall = { pid: r.pid, sequence: oldSequence, action };
+    if (action === 'deferred') return r;
+  }
   await require('../platform/process-stop.cjs').stopProcesses([r.pid]);
   return null;
 }
@@ -212,15 +227,15 @@ async function existing() {
       writeJson(path.join(discoveryDir, 'connection.json'), prior);
     }
     console.log('BRIDGE_ALREADY_RUNNING ' + new URL(prior.url).origin);
+    logEvent(bridgeHome, 'startup', { otherInstall });
     openUrl(prior.url);
     return;
   }
-  if (process.platform === 'win32' && Number.isSafeInteger(runtimeInfo.sequence))
-    require('../platform/app-lifecycle.cjs').integrateDesktop(
-      PROJECT_ROOT,
-      discoveryDir,
-      bridgeHome,
-    );
+  const desktopMarker = discoveryDir && readJson(path.join(discoveryDir, 'shortcut.json'));
+  const desktopIntegrationNeeded =
+    process.platform === 'win32' &&
+    Number.isSafeInteger(runtimeInfo.sequence) &&
+    !(desktopMarker?.created && Number(desktopMarker.sequence) >= runtimeInfo.sequence);
   const protectedDirs = [bridgeHome, discoveryDir].filter(Boolean),
     protectSkipped =
       protectedDirs.length > 0 &&
@@ -280,7 +295,20 @@ async function existing() {
       handover: hadRunning && !prior,
       protectSkipped,
       ...(handoverResult || {}),
+      ...(otherInstall ? { otherInstall } : {}),
     });
+    if (desktopIntegrationNeeded)
+      setImmediate(() => {
+        try {
+          require('../platform/app-lifecycle.cjs').integrateDesktop(
+            PROJECT_ROOT,
+            discoveryDir,
+            bridgeHome,
+          );
+        } catch (error) {
+          logEvent(bridgeHome, 'app.shortcuts', { status: 'error', error: error.message });
+        }
+      });
     console.log('BRIDGE_READY http://127.0.0.1:' + port);
     openUrl(url);
   };
