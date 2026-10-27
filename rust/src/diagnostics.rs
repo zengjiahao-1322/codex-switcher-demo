@@ -264,6 +264,9 @@ pub fn algorithm(args: &[String]) -> io::Result<()> {
             input["current"].as_u64().unwrap_or(0)
         )),
         Some("windowsProxyEnv") => json!(crate::platform::windows_proxy_env(&input["value"])),
+        Some("tomlPreserve") => {
+            crate::config::toml_fixture(&input["text"], &input["selection"], &input["bridge"])
+        }
         Some("redact") => redact(&input["value"]),
         Some("log") => {
             let bridge = PathBuf::from(input["bridge"].as_str().unwrap());

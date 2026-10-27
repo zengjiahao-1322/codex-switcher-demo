@@ -426,3 +426,36 @@ fn uuid_like() -> String {
         .map(|b| format!("{b:02x}"))
         .collect()
 }
+pub fn toml_fixture(text: &Value, selection: &Value, bridge: &Value) -> Value {
+    let original = text.as_str().unwrap_or("");
+    let newline = if original.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut output = String::new();
+    for line in original.lines() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("model=")
+            && !trimmed.starts_with("model_provider=")
+            && !trimmed.starts_with("model_catalog_json=")
+        {
+            output.push_str(line);
+            output.push_str(newline)
+        }
+    }
+    let mut prefix = String::new();
+    for key in ["model", "model_provider", "model_catalog_json"] {
+        if let Some(value) = selection.get(key)
+            && !value.is_null()
+        {
+            prefix.push_str(&format!("{key} = {value}{newline}"));
+        }
+    }
+    if let Some(name) = bridge.get("name").and_then(|v| v.as_str()) {
+        prefix.push_str(&format!(
+            "[model_providers.hermes_bridge]{newline}name = \"{name}\"{newline}"
+        ));
+    }
+    json!(prefix + &output)
+}

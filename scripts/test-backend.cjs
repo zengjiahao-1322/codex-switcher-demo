@@ -18,6 +18,7 @@ const httpPatterns = {
   'blackbox-diagnostics.test.cjs': '.*',
   'blackbox-platform.test.cjs': '.*',
   'blackbox-config.test.cjs': '.*',
+  'blackbox-config-algorithm.test.cjs': '.*',
   'server.test.cjs': '.*',
   'server-adapter.test.cjs': '.*',
   'main.test.cjs': '.*',
