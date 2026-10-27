@@ -1,6 +1,11 @@
 mod accounts;
 mod adapter;
 mod config;
+mod config_catalog;
+mod config_network;
+mod config_ops;
+mod config_store;
+mod config_text;
 mod diagnostics;
 mod editors;
 mod instance;

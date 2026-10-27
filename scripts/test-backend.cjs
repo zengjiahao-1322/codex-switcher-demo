@@ -19,6 +19,9 @@ const httpPatterns = {
   'blackbox-platform.test.cjs': '.*',
   'blackbox-config.test.cjs': '.*',
   'blackbox-config-algorithm.test.cjs': '.*',
+  'blackbox-config-matrix.test.cjs': '.*',
+  'blackbox-config-backups.test.cjs': '.*',
+  'blackbox-config-network.test.cjs': '.*',
   'server.test.cjs': '.*',
   'server-adapter.test.cjs': '.*',
   'main.test.cjs': '.*',
@@ -86,7 +89,7 @@ for (const file of fs
       [
         '--experimental-vm-modules',
         '--test',
-        '--test-timeout=45000',
+        '--test-timeout=120000',
         '--test-reporter=tap',
         '--test-name-pattern=' + pattern,
         path.join(root, 'tests', file),

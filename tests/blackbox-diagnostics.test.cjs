@@ -32,6 +32,7 @@ test('双后台样例对：日志脱敏及2MiB轮换保持Node格式', (t) => {
       'Bearer fixture-secret',
       'https://example.test/?code=fake&state=fake&access_token=fake',
       os.homedir() + '/test',
+      os.homedir().replace(/\\/g, '/') + '/other',
     ],
   };
   assert.deepEqual(run({ op: 'redact', value }), {
@@ -42,6 +43,7 @@ test('双后台样例对：日志脱敏及2MiB轮换保持Node格式', (t) => {
       'Bearer [已隐藏]',
       'https://example.test/?code=[已隐藏]&state=[已隐藏]&access_token=[已隐藏]',
       '~/test',
+      '~/other',
     ],
   });
   const logs = path.join(root, 'logs');
@@ -78,6 +80,19 @@ test('双后台样例对：日志脱敏及2MiB轮换保持Node格式', (t) => {
     'switcher.log.1',
     'switcher.log.2',
   ]);
+  fs.writeFileSync(
+    path.join(logs, 'switcher.log'),
+    Array.from({ length: 2005 }, (_, i) =>
+      JSON.stringify({
+        t: '2020-01-01T00:00:00.' + String(i).padStart(4, '0') + 'Z',
+        event: 'old-' + i,
+      }),
+    ).join('\n') + '\n',
+  );
+  const bounded = run({ op: 'log', bridge: root, event: 'last', fields: {} });
+  assert.equal(bounded.length, 2000);
+  assert.equal(bounded[0].event, 'old-6');
+  assert.equal(bounded.at(-1).event, 'last');
 });
 
 test('双后台黑盒：startup/firstRequest日志与诊断导出', async (t) => {

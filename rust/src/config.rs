@@ -1,5 +1,5 @@
-//! Configuration: read-only prototype state; editing/providers/backups pending batch 2.
-use crate::{accounts::claims, instance::write_json, server::App};
+//! Configuration state assembled from compatible provider storage and disk files.
+use crate::{accounts::claims, server::App};
 use serde_json::{Value, json};
 use std::{fs, io, path::PathBuf};
 fn json_file(path: PathBuf) -> io::Result<Value> {
@@ -18,6 +18,12 @@ impl App {
             .unwrap_or_else(|| self.home.clone())
     }
     pub(crate) fn state(&self) -> io::Result<Value> {
+        if let Some(home) = std::env::var_os("BRIDGE_HERMES_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.join("config.yaml").is_file())
+        {
+            crate::config_store::import(&self.bridge, &home, true)?;
+        }
         let home = self.codex_home();
         let text = match fs::read_to_string(home.join("config.toml")) {
             Ok(text) => text,
@@ -39,7 +45,7 @@ impl App {
         let index = json_file(self.bridge.join("accounts").join("index.json"))?;
         let count = index.as_array().map_or(0, Vec::len);
         let official = provider == "openai";
-        let store = json_file(self.bridge.join("providers.json"))?;
+        let store = crate::config_store::load(&self.bridge)?;
         let saved = store["providers"]
             .as_array()
             .or(store["custom"].as_array())
@@ -130,6 +136,14 @@ impl App {
             let object = public
                 .as_object_mut()
                 .ok_or_else(|| io::Error::other("providers.json 已损坏，请检查或删除后重试"))?;
+            object.insert(
+                "source".into(),
+                json!(if p["origin"] == "hermes" {
+                    "hermes"
+                } else {
+                    "custom"
+                }),
+            );
             for key in ["apiKey", "createdAt", "updatedAt", "origin"] {
                 object.remove(key);
             }
@@ -265,296 +279,4 @@ impl App {
             }
         }))
     }
-
-    fn provider_file(&self) -> PathBuf {
-        self.bridge.join("providers.json")
-    }
-    fn providers(&self) -> io::Result<Vec<Value>> {
-        Ok(json_file(self.provider_file())?["providers"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default())
-    }
-    pub(crate) fn provider_add(&self, input: &Value) -> io::Result<Value> {
-        let name = input["name"].as_str().unwrap_or("").trim();
-        let model = input["model"].as_str().unwrap_or("").trim();
-        let key = input["apiKey"].as_str().unwrap_or("").trim();
-        if name.is_empty() || name.len() > 60 {
-            return Err(io::Error::other("名称必填，最多 60 个字符"));
-        }
-        if !matches!(
-            input["apiMode"].as_str(),
-            Some("responses") | Some("chat_completions") | Some("anthropic_messages")
-        ) {
-            return Err(io::Error::other("协议类型无效"));
-        }
-        if model.is_empty() {
-            return Err(io::Error::other("默认模型必填"));
-        }
-        if key.is_empty() || key.chars().any(char::is_whitespace) {
-            return Err(io::Error::other("API 密钥必填，且不能含空白字符"));
-        }
-        let base = input["baseUrl"].as_str().unwrap_or("").trim();
-        let parsed = base
-            .parse::<hyper::Uri>()
-            .map_err(|_| io::Error::other("API 地址无效"))?;
-        if !matches!(parsed.scheme_str(), Some("http") | Some("https"))
-            || parsed.authority().is_none()
-        {
-            return Err(io::Error::other(
-                "API 地址须为 http(s)，且不含用户名、密码、查询参数",
-            ));
-        }
-        let id = format!("bridge:{}", uuid_like());
-        let mut providers = self.providers()?;
-        if providers.iter().any(|p| p["name"] == name) {
-            return Err(io::Error::other("已有同名配置"));
-        }
-        providers.push(json!({"id":id,"origin":"custom","name":name,"baseUrl":base.trim_end_matches('/'),"apiMode":input["apiMode"],"model":model,"models":input["models"],"apiKey":key,"createdAt":crate::diagnostics::now()}));
-        write_json(
-            &self.provider_file(),
-            &json!({"providers":providers,"hermesImported":false,"skippedHermes":[]}),
-        )?;
-        Ok(json!({"id":id,"message":"已新增配置。可检测后应用到 Codex。"}))
-    }
-    pub(crate) fn provider_update(&self, input: &Value) -> io::Result<Value> {
-        let id = input["id"].as_str().unwrap_or("");
-        let mut providers = self.providers()?;
-        let index = providers
-            .iter()
-            .position(|p| p["id"] == id)
-            .ok_or_else(|| io::Error::other("配置不存在，请刷新页面"))?;
-        let mut next = providers[index].clone();
-        for key in ["name", "baseUrl", "apiMode", "model", "models"] {
-            if !input[key].is_null() {
-                next[key] = input[key].clone();
-            }
-        }
-        if let Some(key) = input["apiKey"].as_str().filter(|s| !s.is_empty()) {
-            next["apiKey"] = json!(key)
-        }
-        next["updatedAt"] = json!(crate::diagnostics::now());
-        providers[index] = next;
-        write_json(
-            &self.provider_file(),
-            &json!({"providers":providers,"hermesImported":false,"skippedHermes":[]}),
-        )?;
-        Ok(json!({"message":"已保存。"}))
-    }
-    pub(crate) fn provider_remove(&self, input: &Value) -> io::Result<Value> {
-        let id = input["id"].as_str().unwrap_or("");
-        let mut providers = self.providers()?;
-        if !providers.iter().any(|p| p["id"] == id) {
-            return Err(io::Error::other("配置不存在，请刷新页面"));
-        }
-        providers.retain(|p| p["id"] != id);
-        write_json(
-            &self.provider_file(),
-            &json!({"providers":providers,"hermesImported":false,"skippedHermes":[]}),
-        )?;
-        Ok(json!({"message":"已删除配置。"}))
-    }
-    pub(crate) fn backups(&self) -> io::Result<Value> {
-        let dir = self.bridge.join("backups/codex-config");
-        let mut items = Vec::new();
-        if dir.is_dir() {
-            for entry in fs::read_dir(dir)? {
-                let file = entry?.path();
-                if file.extension().is_some_and(|s| s == "toml") {
-                    let id = file.file_name().unwrap().to_string_lossy().to_string();
-                    items.push(json!({"id":id}));
-                }
-            }
-        }
-        items.sort_by(|a, b| b["id"].as_str().cmp(&a["id"].as_str()));
-        Ok(json!({"items":items}))
-    }
-    pub(crate) fn restore_backup(&self, input: &Value) -> io::Result<Value> {
-        let id = input["id"].as_str().unwrap_or("");
-        if id.contains(['/', '\\']) {
-            return Err(io::Error::other("配置备份不存在，请刷新列表。"));
-        }
-        let file = self.bridge.join("backups/codex-config").join(id);
-        if !file.is_file() {
-            return Err(io::Error::other("配置备份不存在，请刷新列表。"));
-        }
-        let text = fs::read_to_string(file)?;
-        toml::from_str::<toml::Value>(&text).map_err(io::Error::other)?;
-        fs::write(self.codex_home().join("config.toml"), text)?;
-        Ok(json!({"message":"已恢复配置备份。"}))
-    }
-    pub(crate) fn models(&self, input: &Value) -> io::Result<Value> {
-        let id = input["id"].as_str().unwrap_or("");
-        let models = if id == "official" {
-            json_file(self.codex_home().join("models_cache.json"))?["models"]
-                .as_array()
-                .map(|rows| {
-                    rows.iter()
-                        .filter_map(|row| row["slug"].as_str().map(str::to_owned))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default()
-        } else {
-            self.providers()?
-                .into_iter()
-                .find(|p| p["id"] == id)
-                .ok_or_else(|| io::Error::other("配置不存在，请刷新"))?["models"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|v| v.as_str().map(str::to_owned))
-                .collect()
-        };
-        Ok(json!({"models":models,"message":format!("获取到 {} 个模型。",models.len())}))
-    }
-    pub(crate) fn probe(&self, input: &Value) -> io::Result<Value> {
-        let id = input["id"].as_str().unwrap_or("");
-        if id == "official" {
-            return Ok(
-                json!({"ok":true,"mode":"official","message":"官方登录使用 Codex 自己的 ChatGPT 登录，无需检测，可直接应用。"}),
-            );
-        }
-        let provider = self
-            .providers()?
-            .into_iter()
-            .find(|p| p["id"] == id)
-            .ok_or_else(|| io::Error::other("配置不存在，请刷新"))?;
-        if provider["baseUrl"].as_str().is_some_and(|s| {
-            s.starts_with("http://127.0.0.1:") || s.starts_with("http://localhost:")
-        }) {
-            Ok(json!({"ok":true,"mode":"direct","message":"可直连：Responses 和函数调用通过。"}))
-        } else {
-            Ok(json!({"ok":false,"mode":"failed","message":"连接失败或响应无法解析"}))
-        }
-    }
-    pub(crate) fn import_hermes(&self) -> io::Result<Value> {
-        let home = std::env::var_os("BRIDGE_HERMES_HOME")
-            .map(PathBuf::from)
-            .ok_or_else(|| io::Error::other("未找到 Hermes 配置"))?;
-        if !home.join("config.yaml").is_file() {
-            return Err(io::Error::other("未找到 Hermes 配置"));
-        }
-        Ok(json!({"message":"没有需要导入的新配置。"}))
-    }
-    pub(crate) fn apply_switch(&self, input: &Value) -> io::Result<Value> {
-        let id = input["id"].as_str().unwrap_or("");
-        let provider = self
-            .providers()?
-            .into_iter()
-            .find(|p| p["id"] == id)
-            .ok_or_else(|| io::Error::other("配置不存在，请刷新"))?;
-        let model = input["model"]
-            .as_str()
-            .or(provider["model"].as_str())
-            .unwrap_or("");
-        if model.is_empty() {
-            return Err(io::Error::other("默认模型必填"));
-        }
-        let file = self.codex_home().join("config.toml");
-        let original = fs::read_to_string(&file).unwrap_or_default();
-        let next = toml_preserve(
-            &original,
-            &json!({"model":format!("\"{model}\""),"model_provider":"\"hermes_bridge\""}),
-            &json!({"name":provider["name"],"base_url":provider["baseUrl"],"wire_api":provider["apiMode"],"experimental_bearer_token":provider["apiKey"]}),
-        );
-        write_json(&self.bridge.join("original-config.toml"), &json!(original))?;
-        fs::write(&file, next)?;
-        write_json(
-            &self.bridge.join("current.json"),
-            &json!({"providerId":id,"mode":"direct"}),
-        )?;
-        write_json(
-            &self.bridge.join("effect.json"),
-            &json!({"status":"restart_required","message":"配置已应用。请完整退出并重新打开客户端。","at":crate::diagnostics::now()}),
-        )?;
-        Ok(json!({"message":"已应用配置。请完整退出并重新打开客户端。"}))
-    }
-    pub(crate) fn restore_official(&self) -> io::Result<Value> {
-        let backup = self.bridge.join("original-config.toml");
-        if !backup.is_file() {
-            return Err(io::Error::other("没有找到切换前的配置快照，无法自动恢复"));
-        }
-        fs::write(
-            self.codex_home().join("config.toml"),
-            fs::read_to_string(backup)?,
-        )?;
-        let _ = fs::remove_file(self.bridge.join("current.json"));
-        Ok(json!({"message":"已切回 Codex 官方登录。"}))
-    }
-}
-fn uuid_like() -> String {
-    crate::platform::random_bytes()
-        .unwrap_or([0; 32])
-        .iter()
-        .take(16)
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-pub fn toml_fixture(text: &Value, selection: &Value, bridge: &Value) -> Value {
-    let original = text.as_str().unwrap_or("");
-    let newline = if original.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
-    let mut output = String::new();
-    for line in original.lines() {
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with("model=")
-            && !trimmed.starts_with("model_provider=")
-            && !trimmed.starts_with("model_catalog_json=")
-        {
-            output.push_str(line);
-            output.push_str(newline)
-        }
-    }
-    let mut prefix = String::new();
-    for key in ["model", "model_provider", "model_catalog_json"] {
-        if let Some(value) = selection.get(key)
-            && !value.is_null()
-        {
-            prefix.push_str(&format!("{key} = {value}{newline}"));
-        }
-    }
-    if let Some(name) = bridge.get("name").and_then(|v| v.as_str()) {
-        prefix.push_str(&format!(
-            "[model_providers.hermes_bridge]{newline}name = \"{name}\"{newline}"
-        ));
-    }
-    json!(prefix + &output)
-}
-fn toml_preserve(original: &str, selection: &Value, bridge: &Value) -> String {
-    let nl = if original.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
-    let mut body = String::new();
-    for line in original.lines() {
-        let trim = line.trim_start();
-        if trim.starts_with("model=")
-            || trim.starts_with("model =")
-            || trim.starts_with("model_provider=")
-            || trim.starts_with("model_provider =")
-            || trim.starts_with("model_catalog_json=")
-            || trim.starts_with("model_catalog_json =")
-        {
-            continue;
-        }
-        body.push_str(line);
-        body.push_str(nl)
-    }
-    let mut prefix = String::new();
-    for key in ["model", "model_provider", "model_catalog_json"] {
-        if let Some(value) = selection.get(key)
-            && !value.is_null()
-        {
-            prefix.push_str(&format!("{key} = {value}{nl}"));
-        }
-    }
-    if bridge["name"].is_string() {
-        prefix.push_str(&format!("[model_providers.hermes_bridge]{nl}name = \"{}\"{nl}base_url = \"{}\"{nl}wire_api = \"{}\"{nl}experimental_bearer_token = \"{}\"{nl}",bridge["name"].as_str().unwrap_or(""),bridge["base_url"].as_str().unwrap_or(""),bridge["wire_api"].as_str().unwrap_or("responses"),bridge["experimental_bearer_token"].as_str().unwrap_or("")))
-    }
-    prefix + &body
 }

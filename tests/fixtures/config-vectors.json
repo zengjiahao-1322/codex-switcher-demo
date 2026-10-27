@@ -1,0 +1,220 @@
+[
+  {
+    "name": "注释和空行",
+    "input": {
+      "op": "tomlPreserve",
+      "text": "# keep\n\nmodel=\"old\" # choice\n# tail\n",
+      "provider": {
+        "id": "fixture",
+        "name": "测试供应商",
+        "baseUrl": "http://localhost:9000/exact/v1",
+        "apiKey": "fixture-secret",
+        "apiMode": "responses"
+      },
+      "model": "new"
+    },
+    "expected": {
+      "text": "model = \"new\"\nmodel_provider = \"hermes_bridge\"\n# keep\n\n# tail\n[model_providers.hermes_bridge]\nname = \"测试供应商\"\nbase_url = \"http://localhost:9000/exact/v1\"\nwire_api = \"responses\"\nexperimental_bearer_token = \"fixture-secret\"\nrequires_openai_auth = false\n"
+    }
+  },
+  {
+    "name": "未知段和内联表",
+    "input": {
+      "op": "tomlPreserve",
+      "text": "model=\"old\"\nsettings={ one=1, two=\"二\" }\n[custom]\nkey = \"x\" # exact\n",
+      "provider": {
+        "id": "fixture",
+        "name": "测试供应商",
+        "baseUrl": "http://localhost:9000/exact/v1",
+        "apiKey": "fixture-secret",
+        "apiMode": "responses"
+      },
+      "model": "new"
+    },
+    "expected": {
+      "text": "model = \"new\"\nmodel_provider = \"hermes_bridge\"\nsettings={ one=1, two=\"二\" }\n[custom]\nkey = \"x\" # exact\n[model_providers.hermes_bridge]\nname = \"测试供应商\"\nbase_url = \"http://localhost:9000/exact/v1\"\nwire_api = \"responses\"\nexperimental_bearer_token = \"fixture-secret\"\nrequires_openai_auth = false\n"
+    }
+  },
+  {
+    "name": "多行数组",
+    "input": {
+      "op": "tomlPreserve",
+      "text": "model=\"old\"\nitems=[\n  \"first\", # exact\n  \"second\"\n]\n",
+      "provider": {
+        "id": "fixture",
+        "name": "测试供应商",
+        "baseUrl": "http://localhost:9000/exact/v1",
+        "apiKey": "fixture-secret",
+        "apiMode": "responses"
+      },
+      "model": "new"
+    },
+    "expected": {
+      "text": "model = \"new\"\nmodel_provider = \"hermes_bridge\"\nitems=[\n  \"first\", # exact\n  \"second\"\n]\n[model_providers.hermes_bridge]\nname = \"测试供应商\"\nbase_url = \"http://localhost:9000/exact/v1\"\nwire_api = \"responses\"\nexperimental_bearer_token = \"fixture-secret\"\nrequires_openai_auth = false\n"
+    }
+  },
+  {
+    "name": "CRLF和多行字符串",
+    "input": {
+      "op": "tomlPreserve",
+      "text": "# keep\r\nmodel = \"old\"\r\nnotes=\"\"\"\r\n[model_providers.hermes_bridge]\r\nmodel = \"not a setting\"\r\n\"\"\"\r\n[model_providers.hermes_bridge]\r\nname=\"old\"\r\n",
+      "provider": {
+        "id": "fixture",
+        "name": "测试供应商",
+        "baseUrl": "http://localhost:9000/exact/v1",
+        "apiKey": "fixture-secret",
+        "apiMode": "responses"
+      },
+      "model": "new"
+    },
+    "expected": {
+      "text": "model = \"new\"\r\nmodel_provider = \"hermes_bridge\"\r\n# keep\r\nnotes=\"\"\"\r\n[model_providers.hermes_bridge]\r\nmodel = \"not a setting\"\r\n\"\"\"\r\n[model_providers.hermes_bridge]\r\nname = \"测试供应商\"\r\nbase_url = \"http://localhost:9000/exact/v1\"\r\nwire_api = \"responses\"\r\nexperimental_bearer_token = \"fixture-secret\"\r\nrequires_openai_auth = false\r\n"
+    }
+  },
+  {
+    "name": "中文值",
+    "input": {
+      "op": "tomlPreserve",
+      "text": "model=\"旧模型\"\n\"说明\"=\"保留我\"\n[\"自定义\"]\n\"选项\"=[\"甲\",\"乙\"]\n",
+      "provider": {
+        "id": "fixture",
+        "name": "测试供应商",
+        "baseUrl": "http://localhost:9000/exact/v1",
+        "apiKey": "fixture-secret",
+        "apiMode": "responses"
+      },
+      "model": "new"
+    },
+    "expected": {
+      "text": "model = \"new\"\nmodel_provider = \"hermes_bridge\"\n\"说明\"=\"保留我\"\n[\"自定义\"]\n\"选项\"=[\"甲\",\"乙\"]\n[model_providers.hermes_bridge]\nname = \"测试供应商\"\nbase_url = \"http://localhost:9000/exact/v1\"\nwire_api = \"responses\"\nexperimental_bearer_token = \"fixture-secret\"\nrequires_openai_auth = false\n"
+    }
+  },
+  {
+    "name": "键顺序和引用键",
+    "input": {
+      "op": "tomlPreserve",
+      "text": "z = 3\n\"model\"=\"old\"\na=1\n[custom]\nmodel=\"leave\"\n",
+      "provider": {
+        "id": "fixture",
+        "name": "测试供应商",
+        "baseUrl": "http://localhost:9000/exact/v1",
+        "apiKey": "fixture-secret",
+        "apiMode": "responses"
+      },
+      "model": "new"
+    },
+    "expected": {
+      "text": "model = \"new\"\nmodel_provider = \"hermes_bridge\"\nz = 3\na=1\n[custom]\nmodel=\"leave\"\n[model_providers.hermes_bridge]\nname = \"测试供应商\"\nbase_url = \"http://localhost:9000/exact/v1\"\nwire_api = \"responses\"\nexperimental_bearer_token = \"fixture-secret\"\nrequires_openai_auth = false\n"
+    }
+  },
+  {
+    "name": "非法TOML脱敏",
+    "input": {
+      "op": "tomlPreserve",
+      "text": "broken=\"fixture-secret",
+      "provider": {
+        "id": "fixture",
+        "name": "测试供应商",
+        "baseUrl": "http://localhost:9000/exact/v1",
+        "apiKey": "fixture-secret",
+        "apiMode": "responses"
+      },
+      "model": "x"
+    },
+    "expected": {
+      "error": "Invalid TOML configuration (details redacted)"
+    }
+  },
+  {
+    "name": "非法URL脱敏",
+    "input": {
+      "op": "tomlPreserve",
+      "text": "",
+      "provider": {
+        "id": "fixture",
+        "name": "测试供应商",
+        "baseUrl": "file:///bad",
+        "apiKey": "fixture-secret",
+        "apiMode": "responses"
+      },
+      "model": "x"
+    },
+    "expected": {
+      "error": "Provider URL must be HTTP(S) without userinfo"
+    }
+  },
+  {
+    "name": "空密钥",
+    "input": {
+      "op": "tomlPreserve",
+      "text": "",
+      "provider": {
+        "id": "fixture",
+        "name": "测试供应商",
+        "baseUrl": "http://localhost:9000/exact/v1",
+        "apiKey": "",
+        "apiMode": "responses"
+      },
+      "model": "x"
+    },
+    "expected": {
+      "error": "Provider key and model are required"
+    }
+  },
+  {
+    "name": "空模型",
+    "input": {
+      "op": "tomlPreserve",
+      "text": "",
+      "provider": {
+        "id": "fixture",
+        "name": "测试供应商",
+        "baseUrl": "http://localhost:9000/exact/v1",
+        "apiKey": "fixture-secret",
+        "apiMode": "responses"
+      },
+      "model": ""
+    },
+    "expected": {
+      "error": "Provider key and model are required"
+    }
+  },
+  {
+    "name": "卸载清理保留其他内容",
+    "input": {
+      "op": "tomlPreserve",
+      "method": "cleanup",
+      "text": "model = \"o\"\nmodel_catalog_json = \"C:/gen.json\"\n[mcp_servers.keep]\ncommand = \"x\"\n[model_providers.hermes_bridge]\nname=\"b\"\nexperimental_bearer_token=\"fixture-secret\"\n",
+      "catalog": "C:/gen.json"
+    },
+    "expected": {
+      "changed": true,
+      "text": "model = \"o\"\n[mcp_servers.keep]\ncommand = \"x\"\n"
+    }
+  },
+  {
+    "name": "卸载拒绝使用中的桥接",
+    "input": {
+      "op": "tomlPreserve",
+      "method": "cleanup",
+      "text": "model_provider=\"hermes_bridge\"\n[model_providers.hermes_bridge]\nname=\"b\"\nexperimental_bearer_token=\"fixture-secret\"\n",
+      "catalog": "C:/gen.json"
+    },
+    "expected": {
+      "error": "Codex 仍在使用本工具的配置，请先切回官方登录"
+    }
+  },
+  {
+    "name": "清理幂等",
+    "input": {
+      "op": "tomlPreserve",
+      "method": "cleanup",
+      "text": "model = \"o\"\n[mcp_servers.keep]\ncommand = \"x\"\n",
+      "catalog": "C:/gen.json"
+    },
+    "expected": {
+      "changed": false,
+      "text": "model = \"o\"\n[mcp_servers.keep]\ncommand = \"x\"\n"
+    }
+  }
+]

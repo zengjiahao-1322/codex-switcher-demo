@@ -264,8 +264,20 @@ pub fn algorithm(args: &[String]) -> io::Result<()> {
             input["current"].as_u64().unwrap_or(0)
         )),
         Some("windowsProxyEnv") => json!(crate::platform::windows_proxy_env(&input["value"])),
-        Some("tomlPreserve") => {
-            crate::config::toml_fixture(&input["text"], &input["selection"], &input["bridge"])
+        Some("tomlPreserve") => crate::config_text::fixture(&input)?,
+        Some("discoverProviders") => {
+            let providers = crate::config_store::discover(std::path::Path::new(
+                input["home"].as_str().unwrap(),
+            ))?;
+            let public = providers
+                .iter()
+                .map(|p| {
+                    let mut p = p.clone();
+                    p.as_object_mut().unwrap().remove("apiKey");
+                    p
+                })
+                .collect::<Vec<_>>();
+            json!({"providers":providers,"public":public})
         }
         Some("redact") => redact(&input["value"]),
         Some("log") => {

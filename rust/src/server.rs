@@ -314,6 +314,17 @@ pub(crate) async fn serve(
                     );
                     return Ok(response(200,"application/json; charset=utf-8",serde_json::to_vec(&json!({"filename":"codex-switcher-companion.vsix","url":format!("/download/{key}")})).unwrap()));
                 }
+                if crate::config_ops::ACTIONS.contains(&action) {
+                    let result = crate::config_ops::action(&app, action, &input.unwrap()).await;
+                    return Ok(match result {
+                        Ok(value) => response(
+                            200,
+                            "application/json; charset=utf-8",
+                            serde_json::to_vec(&value).unwrap(),
+                        ),
+                        Err(error_value) => error(400, &error_value.to_string()),
+                    });
+                }
                 let result = match action {
                     "exportDiagnostics" => Some(crate::diagnostics::export(&app)),
                     "threads" => Some(Ok(crate::diagnostics::threads(
@@ -338,16 +349,6 @@ pub(crate) async fn serve(
                     "setEnvironment" => {
                         Some(crate::platform::set_environment(&app, &input.unwrap()))
                     }
-                    "providerAdd" => Some(app.provider_add(&input.unwrap())),
-                    "providerUpdate" => Some(app.provider_update(&input.unwrap())),
-                    "providerRemove" => Some(app.provider_remove(&input.unwrap())),
-                    "backups" => Some(app.backups()),
-                    "restoreBackup" => Some(app.restore_backup(&input.unwrap())),
-                    "models" => Some(app.models(&input.unwrap())),
-                    "probe" => Some(app.probe(&input.unwrap())),
-                    "importHermes" => Some(app.import_hermes()),
-                    "switch" => Some(app.apply_switch(&input.unwrap())),
-                    "restore" => Some(app.restore_official()),
                     "autostart" => Some(crate::integration::autostart(
                         input.unwrap()["enabled"].as_bool().unwrap_or(false),
                         &app.bridge,

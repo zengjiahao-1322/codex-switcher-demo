@@ -11,21 +11,35 @@ if (input.op === 'otherInstallAction')
   );
 else if (input.op === 'windowsProxyEnv')
   output = require('../../src/platform/platform.cjs').windowsProxyEnv(input.value);
-else if (input.op === 'tomlPreserve') {
-  const newline = input.text.includes('\r\n') ? '\r\n' : '\n';
-  const body =
-    input.text
-      .split(/\r?\n/)
-      .filter((line) => !/^\s*(?:model|model_provider|model_catalog_json)\s*=/.test(line))
-      .join(newline) + newline;
-  const prefix = Object.entries(input.selection)
-    .filter(([, value]) => value != null)
-    .map(([key, value]) => `${key} = ${value}${newline}`)
-    .join('');
-  output =
-    prefix +
-    `[model_providers.hermes_bridge]${newline}name = "${input.bridge.name}"${newline}` +
-    body;
+else if (input.op === 'discoverProviders') {
+  const core = require('../../src/config/core.cjs');
+  const providers = core.discoverProviders(input.home);
+  output = { providers, public: core.publicProviders(providers) };
+} else if (input.op === 'tomlPreserve') {
+  try {
+    const core = require('../../src/config/core.cjs');
+    if (input.method === 'cleanup') {
+      const path = require('node:path'),
+        os = require('node:os');
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-cleanup-vector-'));
+      try {
+        const file = path.join(home, 'config.toml');
+        fs.writeFileSync(file, input.text);
+        const result = core.cleanupBridge(home, input.catalog);
+        output = { ...result, text: fs.readFileSync(file, 'utf8') };
+      } finally {
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    } else {
+      const result =
+        input.method === 'official'
+          ? core.prepareOfficialConfig(input.text, input.model, input.catalog, input.credentials)
+          : core.prepareConfig(input.text, input.provider, input.model, input.catalog);
+      output = { text: result };
+    }
+  } catch (error) {
+    output = { error: error.message };
+  }
 } else if (input.op === 'redact') output = redact(input.value);
 else if (input.op === 'log') {
   log(input.bridge, input.event, input.fields);
