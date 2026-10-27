@@ -344,6 +344,7 @@ pub(crate) async fn serve(
                     "backups" => Some(app.backups()),
                     "restoreBackup" => Some(app.restore_backup(&input.unwrap())),
                     "models" => Some(app.models(&input.unwrap())),
+                    "probe" => Some(app.probe(&input.unwrap())),
                     "importHermes" => Some(app.import_hermes()),
                     "switch" => Some(app.apply_switch(&input.unwrap())),
                     "restore" => Some(app.restore_official()),

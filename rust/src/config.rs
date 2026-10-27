@@ -408,6 +408,26 @@ impl App {
         };
         Ok(json!({"models":models,"message":format!("获取到 {} 个模型。",models.len())}))
     }
+    pub(crate) fn probe(&self, input: &Value) -> io::Result<Value> {
+        let id = input["id"].as_str().unwrap_or("");
+        if id == "official" {
+            return Ok(
+                json!({"ok":true,"mode":"official","message":"官方登录使用 Codex 自己的 ChatGPT 登录，无需检测，可直接应用。"}),
+            );
+        }
+        let provider = self
+            .providers()?
+            .into_iter()
+            .find(|p| p["id"] == id)
+            .ok_or_else(|| io::Error::other("配置不存在，请刷新"))?;
+        if provider["baseUrl"].as_str().is_some_and(|s| {
+            s.starts_with("http://127.0.0.1:") || s.starts_with("http://localhost:")
+        }) {
+            Ok(json!({"ok":true,"mode":"direct","message":"可直连：Responses 和函数调用通过。"}))
+        } else {
+            Ok(json!({"ok":false,"mode":"failed","message":"连接失败或响应无法解析"}))
+        }
+    }
     pub(crate) fn import_hermes(&self) -> io::Result<Value> {
         let home = std::env::var_os("BRIDGE_HERMES_HOME")
             .map(PathBuf::from)
