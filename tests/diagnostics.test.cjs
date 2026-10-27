@@ -355,6 +355,7 @@ test('心跳返回真实后端关联结果，已连接不能代替已接入', as
   now += 30000;
   const independent = await service.actions.clientHeartbeat({
     ...newInput,
+    home: inventory.processes[0].context.home,
     completedReload: undefined,
   });
   assert.equal(independent.connection.state, 'separate');

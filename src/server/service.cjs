@@ -605,12 +605,23 @@ function createService({
     if (input.remote && input.companionHost !== 'remote')
       return { state: 'remote', home: null, backendPids: [] };
     const clients = require('../clients/client-status.cjs'),
-      cached = companionConnections.get(input.id);
+      cached = companionConnections.get(input.id),
+      identity = JSON.stringify([
+        Number(input.pid),
+        input.home,
+        input.windowKey,
+        input.extensionPath,
+        input.codexExe,
+        input.wsl,
+        input.remote,
+        input.companionHost,
+      ]);
     if (
       cached &&
-      cached.pid === Number(input.pid) &&
+      cached.identity === identity &&
       !input.completedReload &&
-      Date.now() - cached.checkedAt < (cached.connection.state === 'unmatched' ? 5000 : 30000)
+      (cached.connection.state === 'ready' ||
+        Date.now() - cached.checkedAt < (cached.connection.state === 'unmatched' ? 5000 : 30000))
     )
       return cached.connection;
     const status = clients.snapshot(codexHome, bridgeHome, {
@@ -624,7 +635,7 @@ function createService({
         backendPids: backends.map((c) => c.pid),
       };
     companionConnections.set(input.id, {
-      pid: Number(input.pid),
+      identity,
       checkedAt: Date.now(),
       connection,
     });
@@ -802,9 +813,14 @@ function createService({
         (connection.state === 'ready' || (input.remoteType === 'ssh-remote' && input.remoteAgent))
       )
         result = clients.heartbeat(bridgeHome, input);
-      const wait = Math.min(10000, Math.max(0, Number(input.wait) || 0));
+      const wait = Math.min(25000, Math.max(0, Number(input.wait) || 0));
       if (wait && !input.ack && !completedReload && !result.command) {
-        result.command = await clients.waitForCommand(bridgeHome, input.id, wait, signal);
+        const release = clients.holdHeartbeat(bridgeHome, input.id);
+        try {
+          result.command = await clients.waitForCommand(bridgeHome, input.id, wait, signal);
+        } finally {
+          release(!signal?.aborted);
+        }
         // 等待期间后端可能已经就绪；按原有缓存期限确认回复时的状态。
         if (!signal?.aborted) connection = await connectionFor(input);
       }

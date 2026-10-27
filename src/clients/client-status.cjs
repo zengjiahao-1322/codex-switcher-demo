@@ -143,7 +143,7 @@ function records(bridgeHome) {
     .readdirSync(dir)
     .filter((n) => n.endsWith('.json'))
     .map((n) => readJson(path.join(dir, n)))
-    .filter((x) => x && Date.now() - x.seenAt < 15000);
+    .filter((x) => x && (Date.now() - x.seenAt < 15000 || x.waitUntil > Date.now()));
 }
 function heartbeat(bridgeHome, input) {
   const id = String(input.id || '');
@@ -152,6 +152,7 @@ function heartbeat(bridgeHome, input) {
     prior = readJson(file, {});
   const { isTrustedCodex, extensionBinary } = require('../platform/runtime.cjs');
   const remoteServers = require('./remote-servers.cjs');
+  const remoteCommand = remoteServers.command(bridgeHome, id);
   const reported = input.extensionPath && extensionBinary(String(input.extensionPath));
   const row = {
     id,
@@ -178,6 +179,13 @@ function heartbeat(bridgeHome, input) {
     seenAt: Date.now(),
     command: prior.command || null,
     lastAck: prior.lastAck || null,
+    ...(!input.ack &&
+    !input.completedReload &&
+    !prior.command &&
+    !remoteCommand &&
+    Number(input.wait) > 0
+      ? { waitUntil: Date.now() + Math.min(25000, Number(input.wait)) }
+      : {}),
   };
   const remoteAck = remoteServers.acknowledge(bridgeHome, input);
   if (remoteAck) row.lastAck = remoteAck;
@@ -256,12 +264,49 @@ function heartbeat(bridgeHome, input) {
     ...(completed || reloadConfirmed ? { reloadConfirmed } : {}),
   };
 }
+function holdHeartbeat(bridgeHome, id) {
+  const file = path.join(bridgeHome, 'clients', id + '.json'),
+    row = readJson(file),
+    until = row.waitUntil;
+  return (completed) => {
+    const latest = readJson(file);
+    if (latest.waitUntil !== until) return;
+    delete latest.waitUntil;
+    if (completed) latest.seenAt = Date.now();
+    writeJson(file, latest);
+  };
+}
+const commandWatchers = new Map();
+function watchCommands(directory, id, check, failed) {
+  let shared = commandWatchers.get(directory);
+  if (!shared) {
+    const listeners = new Set();
+    const watcher = fs.watch(directory, (_event, name) => {
+      for (const listener of listeners)
+        if (name === null || name === listener.id + '.json') listener.check();
+    });
+    watcher.on('error', (error) => {
+      for (const listener of [...listeners]) listener.failed(error);
+    });
+    shared = { listeners, watcher };
+    commandWatchers.set(directory, shared);
+  }
+  const listener = { id, check, failed };
+  shared.listeners.add(listener);
+  return () => {
+    shared.listeners.delete(listener);
+    if (!shared.listeners.size) {
+      shared.watcher.close();
+      commandWatchers.delete(directory);
+    }
+  };
+}
 function waitForCommand(bridgeHome, id, wait, signal) {
   const file = path.join(bridgeHome, 'clients', id + '.json');
   return new Promise((resolve, reject) => {
     const remote = require('./remote-servers.cjs');
     const finish = (error, command = null) => {
-      watcher.close();
+      unwatch();
       unsubscribe();
       clearTimeout(timeout);
       signal?.removeEventListener('abort', aborted);
@@ -279,12 +324,9 @@ function waitForCommand(bridgeHome, id, wait, signal) {
       }
     };
     const aborted = () => finish(null),
-      watcher = fs.watch(path.dirname(file), (event, name) => {
-        if (name === null || name === id + '.json') check();
-      }),
+      unwatch = watchCommands(path.dirname(file), id, check, (error) => finish(error)),
       unsubscribe = remote.onCommand(bridgeHome, id, check),
       timeout = setTimeout(() => finish(null), wait);
-    watcher.on('error', (error) => finish(error));
     signal?.addEventListener('abort', aborted, { once: true });
     // 扫描进程期间也可能刚写入命令，开始等待时先读一次，避免漏掉这次变化。
     if (signal?.aborted) aborted();
@@ -558,6 +600,7 @@ module.exports = {
   heartbeat,
   records,
   waitForCommand,
+  holdHeartbeat,
   requestReload,
   sameHome,
   configLayers,

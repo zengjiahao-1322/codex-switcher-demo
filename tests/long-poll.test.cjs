@@ -52,29 +52,29 @@ test('不带 wait 的心跳立即返回（兼容旧版伴随扩展）', async ()
   }
 });
 
-test(
-  '带 wait 且没有命令时挂起约 10 秒，回复声明 longPoll；挂起期间记录仍有效',
-  server,
-  async () => {
-    const s = await start();
-    try {
-      await s.beat({ id: 'window-hold-0001' });
-      const pending = s.beat({ id: 'window-hold-0001', wait: 10000 });
-      await new Promise((r) => setTimeout(r, 9000));
-      const { records } = require('../src/clients/client-status.cjs');
-      assert.ok(
-        records(s.bridgeHome).some((c) => c.id === 'window-hold-0001'),
-        '挂起期间切换进程应能读到这个窗口',
-      );
-      const r = await pending;
-      assert.ok(r.ms >= 9500 && r.ms <= 11000, '挂起 ' + Math.round(r.ms) + ' ms');
-      assert.equal(r.body.longPoll, true);
-      assert.equal(r.body.command, null);
-    } finally {
-      await s.close();
-    }
-  },
-);
+test('带 wait=25000 时挂起约25秒，超过旧15秒期限仍有效，结束清除租期', server, async () => {
+  const s = await start();
+  try {
+    await s.beat({ id: 'window-hold-0001' });
+    const pending = s.beat({ id: 'window-hold-0001', wait: 25000 });
+    await new Promise((r) => setTimeout(r, 16000));
+    const { records } = require('../src/clients/client-status.cjs');
+    assert.ok(
+      records(s.bridgeHome).some((c) => c.id === 'window-hold-0001'),
+      '挂起期间切换进程应能读到这个窗口',
+    );
+    const r = await pending;
+    assert.ok(r.ms >= 24500 && r.ms <= 26000, '挂起 ' + Math.round(r.ms) + ' ms');
+    assert.equal(r.body.longPoll, true);
+    assert.equal(r.body.command, null);
+    const record = JSON.parse(
+      fs.readFileSync(path.join(s.bridgeHome, 'clients', 'window-hold-0001.json')),
+    );
+    assert.equal(record.waitUntil, undefined);
+  } finally {
+    await s.close();
+  }
+});
 
 test('挂起期间另一进程写入重载命令，500 ms 内返回命令', server, async () => {
   const s = await start();
@@ -135,23 +135,49 @@ test('挂起结束时按缓存期限重新确认连接，回复反映结束时�
   assert.deepEqual(r.connection.backendPids, [777]);
 });
 
-test('客户端中途断开后，服务器不残留定时检查', server, async () => {
-  const s = await start();
-  try {
-    await s.beat({ id: 'window-abort-0001' });
-    const timers = () => process.getActiveResourcesInfo().filter((x) => x === 'Timeout').length;
-    const baseline = timers();
-    const controller = new AbortController();
-    const pending = s.beat({ id: 'window-abort-0001', wait: 10000 }, controller.signal);
-    await new Promise((r) => setTimeout(r, 600));
-    controller.abort();
-    await pending.catch(() => {});
-    await new Promise((r) => setTimeout(r, 800));
-    assert.ok(timers() <= baseline, '断开后仍有定时器：' + timers() + ' > ' + baseline);
-  } finally {
-    await s.close();
-  }
-});
+test(
+  '多个挂起窗口共用监听，断开一窗不影响另一窗命令，全部结束后清理租期和定时器',
+  server,
+  async (t) => {
+    const s = await start();
+    try {
+      await s.beat({ id: 'window-abort-0001' });
+      const timers = () => process.getActiveResourcesInfo().filter((x) => x === 'Timeout').length;
+      const baseline = timers();
+      const watch = fs.watch;
+      let watchers = 0;
+      t.mock.method(fs, 'watch', (...args) => {
+        watchers++;
+        return watch(...args);
+      });
+      const controller = new AbortController();
+      const pending = s.beat({ id: 'window-abort-0001', wait: 25000 }, controller.signal);
+      await new Promise((r) => setTimeout(r, 600));
+      const other = s.beat({ id: 'window-survive-0001', wait: 25000 });
+      await new Promise((r) => setTimeout(r, 100));
+      assert.equal(watchers, 1);
+      controller.abort();
+      await pending.catch(() => {});
+      const otherFile = path.join(s.bridgeHome, 'clients', 'window-survive-0001.json');
+      const otherRow = JSON.parse(fs.readFileSync(otherFile));
+      require('../src/accounts/accounts.cjs').writeJson(otherFile, {
+        ...otherRow,
+        command: { id: 'surviving-command', type: 'reload' },
+      });
+      assert.equal((await other).body.command.id, 'surviving-command');
+      await new Promise((r) => setTimeout(r, 800));
+      assert.ok(timers() <= baseline, '断开后仍有定时器：' + timers() + ' > ' + baseline);
+      assert.equal(
+        JSON.parse(fs.readFileSync(path.join(s.bridgeHome, 'clients', 'window-abort-0001.json')))
+          .waitUntil,
+        undefined,
+      );
+      assert.equal(JSON.parse(fs.readFileSync(otherFile)).waitUntil, undefined);
+    } finally {
+      await s.close();
+    }
+  },
+);
 
 // 用假的 vscode 模块加载真实的伴随扩展，对着一个可控的假切换器观察请求节奏。
 async function runCompanion({
@@ -242,7 +268,7 @@ const gaps = (requests) => requests.slice(1).map((r, i) => r.at - requests[i].at
 
 test('服务器支持长轮询时，伴随扩展连续发出带 wait 的请求，不再等 2 秒', companion, async () => {
   const requests = await runCompanion({ longPoll: true, durationMs: 3000 });
-  const waiting = requests.filter((r) => r.body.wait === 10000);
+  const waiting = requests.filter((r) => r.body.wait === 25000);
   assert.ok(waiting.length >= 5, '3 秒内带 wait 的请求只有 ' + waiting.length + ' 个');
   assert.ok(Math.max(...gaps(waiting)) < 800, '长轮询请求之间出现了长间隔');
   assert.equal(requests[0].body.reloadProtocol, 3);
@@ -261,7 +287,7 @@ test('重载完成待确认期间保持约 2 秒一次，确认接入后才进�
   assert.ok(Math.min(...gaps(confirming)) > 1500, '待确认期间请求过密，会造成连续强制扫描');
   const after = requests.slice(requests.indexOf(confirming.at(-1)) + 1);
   assert.ok(after.length >= 3, '确认接入后长轮询请求只有 ' + after.length + ' 个');
-  assert.ok(after.every((r) => r.body.wait === 10000 && !r.body.completedReload));
+  assert.ok(after.every((r) => r.body.wait === 25000 && !r.body.completedReload));
 });
 
 test('旧版切换器（回复没有 longPoll）时，伴随扩展仍按约 2 秒一次', companion, async () => {

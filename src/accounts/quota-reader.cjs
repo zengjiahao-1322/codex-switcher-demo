@@ -69,7 +69,9 @@ async function readSubscription(authFile, { bridgeHome = null, account = null } 
           resolve({ error, code: Number.isFinite(code) && code > 0 ? code : null, text });
         },
       );
-      child.stdin.on('error', () => resolve({ error: Error('curl stdin failed'), code: null, text: '' }));
+      child.stdin.on('error', () =>
+        resolve({ error: Error('curl stdin failed'), code: null, text: '' }),
+      );
       child.stdin.end(config);
     });
     httpCode = result.code;
@@ -232,12 +234,16 @@ function createQuotaReader({
         throw Object.assign(Error('未读到此账号的官方登录，请重新登录此账号。'), {
           code: 'AUTH_REQUIRED',
         });
-      const result = await check.rpc('account/rateLimits/read', {}),
-        buckets = quotaBuckets(result);
+      const results = await Promise.allSettled([
+        check.rpc('account/rateLimits/read', {}),
+        readSubscription
+          ? readSubscription(authFile(id), { bridgeHome, account: selected.email })
+          : null,
+      ]);
+      for (const result of results) if (result.status === 'rejected') throw result.reason;
+      const buckets = quotaBuckets(results[0].value),
+        subscription = results[1].value;
       if (!buckets.length) throw Error('官方服务未返回额度');
-      const subscription = readSubscription
-        ? await readSubscription(authFile(id), { bridgeHome, account: selected.email })
-        : null;
       const value = {
         status: 'ok',
         checkedAt: new Date().toISOString(),

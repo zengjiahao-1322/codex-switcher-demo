@@ -469,14 +469,14 @@ test('远端重启后加快状态查询直到startedAt变化，再恢复长轮�
           r.remoteAgent?.startedAt &&
           r.remoteAgent.startedAt !==
             reqs.find((item) => item.remoteAgent)?.remoteAgent.startedAt &&
-          r.wait === 10000,
+          r.wait === 25000,
       ),
   });
   assert.ok(executed.filter((name) => name === 'codexSwitcherRemote.status').length >= 2);
   assert.ok(requests.some((r) => r.wait === 2000));
   const states = requests.filter((r) => r.remoteAgent);
   assert.notEqual(states.at(-1).remoteAgent.startedAt, states[0].remoteAgent.startedAt);
-  assert.equal(requests.at(-1).wait, 10000);
+  assert.equal(requests.at(-1).wait, 25000);
 });
 
 test('安装失败时回执 failed，临时文件同样删除', async () => {

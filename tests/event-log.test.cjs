@@ -100,6 +100,7 @@ test('同一窗口十次相同心跳只记一次，关联状态改变后才追�
   assert.equal(events[1].to, 'ready');
   assert.deepEqual(events[1].backendPids, [711]);
   inventory.processes[0].context.home = path.join(root, 'independent');
+  input.home = inventory.processes[0].context.home;
   now += 30000;
   await service.actions.clientHeartbeat(input);
   assert.equal(readRecent(bridgeHome, 1)[0].to, 'separate');

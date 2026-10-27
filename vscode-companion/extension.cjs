@@ -4,7 +4,7 @@ const fs = require('node:fs'),
   path = require('node:path'),
   crypto = require('node:crypto'),
   http = require('node:http');
-function post(connection, route, data, signal, method = 'POST', timeout = 15000) {
+function post(connection, route, data, signal, method = 'POST', timeout = 30000) {
   return new Promise((resolve, reject) => {
     const u = new URL(connection.url);
     const q = http.request(
@@ -318,7 +318,7 @@ function activate(context) {
           {
             ...data,
             completedReload,
-            ...(longPoll ? { wait: remoteRestart ? 2000 : 10000 } : {}),
+            ...(longPoll ? { wait: remoteRestart ? 2000 : 25000 } : {}),
           },
           controller.signal,
         );

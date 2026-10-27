@@ -1244,10 +1244,15 @@ test('额度成功后按同一账号的固定订阅响应保存到期日，不�
     cp = require('node:child_process'),
     saved = path.join(f.bridgeHome, 'auth-fixture.json');
   writeJson(saved, login);
-  let commandArgs, requestConfig, subscriptionResponse = 'success';
+  let commandArgs,
+    requestConfig,
+    subscriptionResponse = 'success',
+    releaseLimits;
   t.mock.method(require('../src/platform/platform.cjs'), 'codexEnv', () => ({}));
   t.mock.method(cp, 'execFile', (_exe, args, _options, callback) => {
     commandArgs = args;
+    assert.ok(releaseLimits, '额度请求应先发出，再并行发出订阅请求');
+    releaseLimits();
     process.nextTick(() =>
       subscriptionResponse === 'success'
         ? callback(
@@ -1284,15 +1289,18 @@ test('额度成功后按同一账号的固定订阅响应保存到期日，不�
     captureCurrent() {},
     openSession: () => ({
       ready: async () => {},
-      rpc: async (method) =>
-        method === 'account/read'
-          ? { account: { type: 'chatgpt' } }
-          : {
-              rateLimits: {
-                planType: 'plus',
-                primary: { usedPercent: 10, windowDurationMins: 300 },
-              },
-            },
+      rpc: async (method) => {
+        if (method === 'account/read') return { account: { type: 'chatgpt' } };
+        await new Promise((resolve) => {
+          releaseLimits = resolve;
+        });
+        return {
+          rateLimits: {
+            planType: 'plus',
+            primary: { usedPercent: 10, windowDurationMins: 300 },
+          },
+        };
+      },
       close: async () => {},
     }),
     readJson: (file, fallback) =>
@@ -1314,17 +1322,50 @@ test('额度成功后按同一账号的固定订阅响应保存到期日，不�
   assert.equal(commandArgs.join(' ').includes(login.tokens.access_token), false);
   assert.equal(JSON.stringify(result).includes(login.tokens.access_token), false);
   const events = readRecent(f.bridgeHome, 10);
-  assert.deepEqual(events.map(({ event, status, httpCode, curlCode, hasDate }) => ({ event, status, httpCode, curlCode, hasDate })), [
-    { event: 'official.subscription', status: 'ok', httpCode: 200, curlCode: undefined, hasDate: true },
-  ]);
+  assert.deepEqual(
+    events.map(({ event, status, httpCode, curlCode, hasDate }) => ({
+      event,
+      status,
+      httpCode,
+      curlCode,
+      hasDate,
+    })),
+    [
+      {
+        event: 'official.subscription',
+        status: 'ok',
+        httpCode: 200,
+        curlCode: undefined,
+        hasDate: true,
+      },
+    ],
+  );
   subscriptionResponse = 'failure';
   const failed = await q.quota('fixture');
   assert.equal(failed.status, 'ok');
   assert.deepEqual(
-    readRecent(f.bridgeHome, 10).map(({ event, status, httpCode, curlCode, hasDate }) => ({ event, status, httpCode, curlCode, hasDate })),
+    readRecent(f.bridgeHome, 10).map(({ event, status, httpCode, curlCode, hasDate }) => ({
+      event,
+      status,
+      httpCode,
+      curlCode,
+      hasDate,
+    })),
     [
-      { event: 'official.subscription', status: 'ok', httpCode: 200, curlCode: undefined, hasDate: true },
-      { event: 'official.subscription', status: 'failed', httpCode: undefined, curlCode: 28, hasDate: false },
+      {
+        event: 'official.subscription',
+        status: 'ok',
+        httpCode: 200,
+        curlCode: undefined,
+        hasDate: true,
+      },
+      {
+        event: 'official.subscription',
+        status: 'failed',
+        httpCode: undefined,
+        curlCode: 28,
+        hasDate: false,
+      },
     ],
   );
 });
