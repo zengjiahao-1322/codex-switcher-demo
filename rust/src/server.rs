@@ -338,6 +338,13 @@ pub(crate) async fn serve(
                     "setEnvironment" => {
                         Some(crate::platform::set_environment(&app, &input.unwrap()))
                     }
+                    "providerAdd" => Some(app.provider_add(&input.unwrap())),
+                    "providerUpdate" => Some(app.provider_update(&input.unwrap())),
+                    "providerRemove" => Some(app.provider_remove(&input.unwrap())),
+                    "backups" => Some(app.backups()),
+                    "restoreBackup" => Some(app.restore_backup(&input.unwrap())),
+                    "models" => Some(app.models(&input.unwrap())),
+                    "importHermes" => Some(app.import_hermes()),
                     "autostart" => Some(crate::integration::autostart(
                         input.unwrap()["enabled"].as_bool().unwrap_or(false),
                         &app.bridge,
