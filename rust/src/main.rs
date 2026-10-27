@@ -1,7 +1,9 @@
 mod server;
 mod instance;
 mod platform;
+mod integration;
 mod diagnostics;
+mod sqlite;
 mod config;
 mod accounts;
 mod switching;

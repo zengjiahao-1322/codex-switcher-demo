@@ -57,7 +57,7 @@ function createServer(options, fixture = {}) {
       child.kill();
       ready(Error('Rust backend startup timed out: ' + stderr));
     }, 10000);
-    child = spawn(rustBinary(), [], {
+    child = spawn(rustBinary(), ['--no-open'], {
       cwd: root,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],

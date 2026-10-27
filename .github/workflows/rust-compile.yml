@@ -1,10 +1,10 @@
-name: Compile Rust skeleton
+name: Rust compile and backend parity
 on:
   push:
     branches: [main]
-    paths: ['rust/**', '.github/workflows/rust-compile.yml']
+    paths: ['rust/**', 'tests/**', '.github/workflows/rust-compile.yml']
   pull_request:
-    paths: ['rust/**', '.github/workflows/rust-compile.yml']
+    paths: ['rust/**', 'tests/**', '.github/workflows/rust-compile.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,6 +23,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+      - run: npm install --ignore-scripts
       - name: Install Rust toolchain
         shell: bash
         run: |
@@ -30,3 +34,13 @@ jobs:
           rustup override set stable
       - name: Compile only
         run: cargo build --locked --release --manifest-path rust/Cargo.toml --target ${{ matrix.target }}
+      - name: Node black-box baseline
+        run: node --test tests/blackbox-framework.test.cjs tests/blackbox-diagnostics.test.cjs tests/blackbox-platform.test.cjs
+      - name: Same black boxes against Rust
+        shell: bash
+        env:
+          SWITCHER_BACKEND: rust
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then suffix=.exe; else suffix=; fi
+          export SWITCHER_RUST_EXE="$PWD/rust/target/${{ matrix.target }}/release/switcher-prototype$suffix"
+          node --test tests/blackbox-framework.test.cjs tests/blackbox-diagnostics.test.cjs tests/blackbox-platform.test.cjs

@@ -341,7 +341,7 @@ test(
       const rust = require('./backend.cjs').isRust && entry === path.join(PROJECT_ROOT, 'main.cjs');
       const child = spawn(
         rust ? require('./backend.cjs').rustBinary() : process.execPath,
-        rust ? [] : [entry, '--no-open'],
+        rust ? ['--no-open'] : [entry, '--no-open'],
         {
           env: {
             ...process.env,
@@ -448,17 +448,23 @@ test('再次启动已运行实例时修复发现文件且保留原实例pid/url/
     path.join(discovery, 'connection.json'),
     JSON.stringify({ url: 'http://127.0.0.1:9/#stale', pid: 1 }),
   );
-  const child = spawn(process.execPath, [path.join(PROJECT_ROOT, 'main.cjs'), '--no-open'], {
-    env: {
-      ...process.env,
-      BRIDGE_HOME: dirs.bridge,
-      BRIDGE_CODEX_HOME: dirs.codex,
-      BRIDGE_HERMES_HOME: dirs.hermes,
-      BRIDGE_DISCOVERY_DIR: discovery,
+  const rust = require('./backend.cjs').isRust;
+  const child = spawn(
+    rust ? require('./backend.cjs').rustBinary() : process.execPath,
+    rust ? ['--no-open'] : [path.join(PROJECT_ROOT, 'main.cjs'), '--no-open'],
+    {
+      env: {
+        ...process.env,
+        BRIDGE_HOME: dirs.bridge,
+        BRIDGE_CODEX_HOME: dirs.codex,
+        BRIDGE_HERMES_HOME: dirs.hermes,
+        BRIDGE_DISCOVERY_DIR: discovery,
+        SWITCHER_WEB_ROOT: path.join(PROJECT_ROOT, 'web'),
+      },
+      windowsHide: true,
+      stdio: 'ignore',
     },
-    windowsHide: true,
-    stdio: 'ignore',
-  });
+  );
   const code = await new Promise((resolve, reject) => {
     child.once('exit', resolve);
     child.once('error', reject);

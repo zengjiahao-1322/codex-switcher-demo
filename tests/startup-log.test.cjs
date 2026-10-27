@@ -21,7 +21,7 @@ test(
     const rust = require('./backend.cjs').isRust;
     const child = spawn(
       rust ? require('./backend.cjs').rustBinary() : process.execPath,
-      rust ? [] : [path.join(project, 'main.cjs'), '--no-open'],
+      rust ? ['--no-open'] : [path.join(project, 'main.cjs'), '--no-open'],
       {
         cwd: project,
         env: {
