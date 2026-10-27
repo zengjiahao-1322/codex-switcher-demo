@@ -103,7 +103,7 @@ async function startBackend(t, options = {}) {
     BRIDGE_STARTUP_DIR: path.join(root, 'startup'),
     ...options.environment,
   };
-  if (options.setup) options.setup({ root, home, bridge, environment, fake });
+  if (options.setup) await options.setup({ root, home, bridge, environment, fake });
   const child = launchBackend(environment);
   const closed = once(child, 'close');
   const dependents = [];

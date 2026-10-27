@@ -6,6 +6,48 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { startBackend } = require('./backend-process.cjs');
 
+test('双后台黑盒：没有runtime接口的旧后台通过accounts鉴权与PID归属核实后交接', async (t) => {
+  let legacy, closed;
+  const f = await startBackend(t, {
+    async setup({ root, bridge, environment }) {
+      const entry = path.join(root, '旧版本 后台', 'main.cjs');
+      fs.mkdirSync(path.dirname(entry));
+      fs.writeFileSync(
+        entry,
+        `const http=require('node:http');http.createServer((req,res)=>{
+      if(req.url==='/'){res.end('legacy fixture');return;}
+      if(req.headers.authorization!=='Bearer legacy-fixture-token'){res.writeHead(401);res.end('{}');return;}
+      if(req.url==='/api/accounts'&&req.method==='POST'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({items:[],switchJob:null}));return;}
+      res.writeHead(404);res.end('{}');
+    }).listen(Number(process.env.BRIDGE_PORT),'127.0.0.1',()=>console.log('legacy-ready'));`,
+      );
+      legacy = require('node:child_process').spawn(process.execPath, [entry], {
+        env: environment,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      closed = require('node:events').once(legacy, 'close');
+      t.after(async () => {
+        if (legacy.exitCode === null && legacy.signalCode === null) legacy.kill();
+        await closed;
+      });
+      legacy.stderr.resume();
+      await require('node:events').once(legacy.stdout, 'data');
+      fs.writeFileSync(
+        path.join(bridge, 'running.json'),
+        JSON.stringify({
+          pid: legacy.pid,
+          url: 'http://127.0.0.1:' + environment.BRIDGE_PORT + '/#legacy-fixture-token',
+        }),
+      );
+    },
+  });
+  await closed;
+  assert.ok(legacy.exitCode !== null || legacy.signalCode !== null);
+  assert.equal((await (await f.api('runtime')).json()).pid, f.child.pid);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.bridge, 'running.json'))).pid, f.child.pid);
+});
+
 test('双后台黑盒：临时开机自启文件启用禁用和首次空配置启动', async (t) => {
   const f = await startBackend(t, { missingConfig: true });
   assert.equal((await f.api('state')).status, 200);
