@@ -22,9 +22,12 @@ async function start() {
   fs.mkdirSync(bridgeHome);
   fs.writeFileSync(path.join(codexHome, 'config.toml'), 'model="gpt-5"\n');
   const { createService } = require('../src/server/service.cjs');
-  const { createServer } = require('../src/server/server.cjs');
+  const { createServer } = require('./backend.cjs');
   const service = createService({ codexHome, bridgeHome });
-  const s = createServer({ token: 'lp-token', getState: service.state, actions: service.actions });
+  const s = createServer(
+    { token: 'lp-token', getState: service.state, actions: service.actions },
+    { codexHome, bridgeHome },
+  );
   await new Promise((resolve) => s.listen(0, '127.0.0.1', resolve));
   const base = 'http://127.0.0.1:' + s.address().port;
   const beat = async (body, signal) => {

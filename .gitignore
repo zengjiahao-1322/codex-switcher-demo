@@ -34,5 +34,12 @@
 !/vscode-companion/**
 !/vscode-remote-agent/
 !/vscode-remote-agent/**
+!/rust/
+/rust/*
+!/rust/Cargo.toml
+!/rust/Cargo.lock
+!/rust/src/
+!/rust/src/**
+/rust/target/
 **/.DS_Store
 **/__pycache__/

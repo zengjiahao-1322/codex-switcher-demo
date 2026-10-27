@@ -9,7 +9,7 @@ try {
 } catch {
   ({ chromium } = require('../.build-cache/browser-check/node_modules/playwright'));
 }
-const { createServer } = require('../src/server/server.cjs');
+const { createServer } = require('../tests/backend.cjs');
 const { createService } = require('../src/server/service.cjs');
 
 // 验证真实页面；仅使用独立本机配置，不触碰用户账号和正在执行的任务。
@@ -45,50 +45,53 @@ function checked(...checks) {
   console.log('PASS ' + checks.join(', '));
 }
 async function start(token) {
-  server = createServer({
-    token,
-    getState: service.state,
-    actions: {
-      ...service.actions,
-      accounts: async () => ({ items: [], switchJob: fixtureJob }),
-      // 不访问 GitHub：固定返回有新构建，验证顶部更新提示。
-      checkUpdate: async () => ({
-        current: { version: '0.1.3', build: 'fixture-old', sequence: 7 },
-        latest: { version: '0.1.3', build: 'fixture-new', sequence: 9, notes: 'fixture notes' },
-        checkedAt: new Date().toISOString(),
-        status: 'available',
-      }),
-      // 这里只替代重启客户端这一步，页面传参和配置读写仍使用实际代码。
-      desktopSwitch: async (input) => {
-        switchRequests.push(input);
-        fixtureJob = {
-          status: 'done',
-          startedAt: new Date().toISOString(),
-          elapsedMs: 1250,
-          configurationApplied: true,
-          threadFollow: 'all',
-          threads: { updated: 3, skipped: 0, failed: 0 },
-          steps: [{ id: 'apply', label: '保存并应用目标配置', status: 'done', durationMs: 250 }],
-          editorReload: {
-            results: [
-              { name: 'VS Code A', status: 'reloaded' },
-              { name: 'VS Code B', status: 'received' },
-            ],
-          },
-          message: 'fixture switch applied',
-        };
-        return { message: 'fixture switch applied' };
-      },
-      probe: async (input) => {
-        probeRequests.push(input);
-        return {
-          ok: true,
-          mode: 'direct',
-          message: 'API 连接检测通过。',
-        };
+  server = createServer(
+    {
+      token,
+      getState: service.state,
+      actions: {
+        ...service.actions,
+        accounts: async () => ({ items: [], switchJob: fixtureJob }),
+        // 不访问 GitHub：固定返回有新构建，验证顶部更新提示。
+        checkUpdate: async () => ({
+          current: { version: '0.1.3', build: 'fixture-old', sequence: 7 },
+          latest: { version: '0.1.3', build: 'fixture-new', sequence: 9, notes: 'fixture notes' },
+          checkedAt: new Date().toISOString(),
+          status: 'available',
+        }),
+        // 这里只替代重启客户端这一步，页面传参和配置读写仍使用实际代码。
+        desktopSwitch: async (input) => {
+          switchRequests.push(input);
+          fixtureJob = {
+            status: 'done',
+            startedAt: new Date().toISOString(),
+            elapsedMs: 1250,
+            configurationApplied: true,
+            threadFollow: 'all',
+            threads: { updated: 3, skipped: 0, failed: 0 },
+            steps: [{ id: 'apply', label: '保存并应用目标配置', status: 'done', durationMs: 250 }],
+            editorReload: {
+              results: [
+                { name: 'VS Code A', status: 'reloaded' },
+                { name: 'VS Code B', status: 'received' },
+              ],
+            },
+            message: 'fixture switch applied',
+          };
+          return { message: 'fixture switch applied' };
+        },
+        probe: async (input) => {
+          probeRequests.push(input);
+          return {
+            ok: true,
+            mode: 'direct',
+            message: 'API 连接检测通过。',
+          };
+        },
       },
     },
-  });
+    { codexHome: home, bridgeHome: bridge },
+  );
   await new Promise((resolve) => server.listen(port || 0, '127.0.0.1', resolve));
   port = server.address().port;
 }

@@ -366,10 +366,13 @@ test('HTTP心跳接受超过16KiB的远端read回执，其他动作请求上限�
       codexHome,
       bridgeHome: home,
     }),
-    server = require('../src/server/server.cjs').createServer({
-      token: 'remote-http-fixture',
-      actions: { ...service.actions, echo: (input) => input },
-    });
+    server = require('./backend.cjs').createServer(
+      {
+        token: 'remote-http-fixture',
+        actions: { ...service.actions, echo: (input) => input },
+      },
+      { codexHome, bridgeHome: home },
+    );
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const input = registration('remote-http-window'),
@@ -432,10 +435,13 @@ test('独立remoteSwitch经真实HTTP应用所选API，拒绝官方和转换，�
       codexHome,
       bridgeHome: home,
     }),
-    server = require('../src/server/server.cjs').createServer({
-      token: 'remote-switch-fixture',
-      actions: service.actions,
-    });
+    server = require('./backend.cjs').createServer(
+      {
+        token: 'remote-switch-fixture',
+        actions: service.actions,
+      },
+      { codexHome, bridgeHome: home },
+    );
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const post = (name, body) =>

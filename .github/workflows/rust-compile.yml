@@ -1,0 +1,32 @@
+name: Compile Rust skeleton
+on:
+  push:
+    branches: [main]
+    paths: ['rust/**', '.github/workflows/rust-compile.yml']
+  pull_request:
+    paths: ['rust/**', '.github/workflows/rust-compile.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+          rustup override set stable
+      - name: Compile only
+        run: cargo build --locked --release --manifest-path rust/Cargo.toml --target ${{ matrix.target }}

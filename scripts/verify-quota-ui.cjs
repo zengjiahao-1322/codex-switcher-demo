@@ -10,7 +10,7 @@ try {
 } catch {
   ({ chromium } = require('../.build-cache/browser-check/node_modules/playwright'));
 }
-const { createServer } = require('../src/server/server.cjs');
+const { createServer } = require('../tests/backend.cjs');
 const { createService } = require('../src/server/service.cjs');
 
 // 运行发行包使用的同一份 HTML / CSS / ES 模块，验证刷新时的真实 DOM 状态。
@@ -54,45 +54,48 @@ let officialMode = false,
       { id: 'fixture-fast', label: 'Fast account', email: 'fast@example.test', plan: 'plus' },
     ];
     let calls = 0;
-    server = createServer({
-      token: 'fixture-ui-token',
-      getState: async () => {
-        const state = await service.state();
-        if (officialMode) state.current.official = true;
-        return state;
-      },
-      actions: {
-        ...service.actions,
-        accounts: async () => ({ items: accounts }),
-        // 不访问 GitHub。
-        checkUpdate: async () => ({
-          current: { version: '0.1.3', build: 'fixture' },
-          latest: null,
-          checkedAt: null,
-          status: 'idle',
-        }),
-        accountSwitch: async () => {
-          switches++;
-          return {};
+    server = createServer(
+      {
+        token: 'fixture-ui-token',
+        getState: async () => {
+          const state = await service.state();
+          if (officialMode) state.current.official = true;
+          return state;
         },
-        accountQuota: async ({ id }) => {
-          calls++;
-          if (id === 'fixture-slow') await slowGate;
-          const row = accounts.find((account) => account.id === id);
-          row.quota = {
-            status: 'ok',
-            checkedAt: new Date().toISOString(),
-            buckets: [
-              {
-                id: 'codex',
-                windows: [{ minutes: 300, remainingPercent: id === 'fixture-slow' ? 80 : 65 }],
-              },
-            ],
-          };
-          return { items: [{ id, ...row.quota }] };
+        actions: {
+          ...service.actions,
+          accounts: async () => ({ items: accounts }),
+          // 不访问 GitHub。
+          checkUpdate: async () => ({
+            current: { version: '0.1.3', build: 'fixture' },
+            latest: null,
+            checkedAt: null,
+            status: 'idle',
+          }),
+          accountSwitch: async () => {
+            switches++;
+            return {};
+          },
+          accountQuota: async ({ id }) => {
+            calls++;
+            if (id === 'fixture-slow') await slowGate;
+            const row = accounts.find((account) => account.id === id);
+            row.quota = {
+              status: 'ok',
+              checkedAt: new Date().toISOString(),
+              buckets: [
+                {
+                  id: 'codex',
+                  windows: [{ minutes: 300, remainingPercent: id === 'fixture-slow' ? 80 : 65 }],
+                },
+              ],
+            };
+            return { items: [{ id, ...row.quota }] };
+          },
         },
       },
-    });
+      { codexHome, bridgeHome },
+    );
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     browser = await chromium.launch({
       headless: true,

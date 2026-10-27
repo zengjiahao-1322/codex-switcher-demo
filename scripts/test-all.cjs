@@ -4,6 +4,10 @@ const fs = require('node:fs'),
   path = require('node:path'),
   { spawn } = require('node:child_process');
 const { PROJECT_ROOT } = require('../src/paths.cjs');
+if (process.env.SWITCHER_BACKEND === 'rust') {
+  require('./test-backend.cjs');
+  return;
+}
 const tests = path.join(PROJECT_ROOT, 'tests');
 // 本地和 CI 使用同一个正式测试目录，不混入历史研究脚本。
 const files = fs.readdirSync(tests).filter((name) => name.endsWith('.test.cjs'));
@@ -23,9 +27,19 @@ const child = spawn(
     '--experimental-vm-modules',
     '--test',
     '--test-timeout=120000',
+    '--test-reporter=./scripts/test-inventory-reporter.cjs',
     ...files.map((name) => path.join(tests, name)),
   ],
-  { cwd: PROJECT_ROOT, stdio: ['ignore', 'pipe', 'pipe'] },
+  {
+    cwd: PROJECT_ROOT,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      SWITCHER_TEST_INVENTORY:
+        process.env.SWITCHER_TEST_INVENTORY ||
+        path.join(PROJECT_ROOT, '.build-cache', 'node-test-inventory.json'),
+    },
+  },
 );
 let output = '';
 for (const stream of [child.stdout, child.stderr]) {

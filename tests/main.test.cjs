@@ -75,6 +75,16 @@ async function mockUpstream() {
   return { url: 'http://127.0.0.1:' + s.address().port + '/v1', close: () => s.close() };
 }
 async function startMain(t, dirs, port, extraEnv = {}) {
+  if (require('./backend.cjs').isRust) {
+    const server = require('./backend.cjs').createServer(
+      { token: 'main-fixture' },
+      { codexHome: dirs.codex, bridgeHome: dirs.bridge, env: extraEnv },
+    );
+    t.after(() => new Promise((resolve) => server.close(resolve)));
+    await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
+    server.address();
+    return apiFor(new URL(server.url));
+  }
   const child = spawn(process.execPath, [path.join(PROJECT_ROOT, 'main.cjs'), '--no-open'], {
     env: {
       ...process.env,
@@ -99,6 +109,9 @@ async function startMain(t, dirs, port, extraEnv = {}) {
   const u = new URL(
     JSON.parse(fs.readFileSync(path.join(dirs.bridge, 'running.json'), 'utf8')).url,
   );
+  return apiFor(u);
+}
+function apiFor(u) {
   return async (route, data) => {
     const r = await fetch(u.origin + '/api/' + route, {
       method: data ? 'POST' : 'GET',
@@ -325,17 +338,25 @@ test(
       newDirs = makeDirs('switcher-port-new-'),
       port = await freePort();
     const launch = (dirs, entry = path.join(PROJECT_ROOT, 'main.cjs'), selectedPort = port) => {
-      const child = spawn(process.execPath, [entry, '--no-open'], {
-        env: {
-          ...process.env,
-          BRIDGE_HERMES_HOME: dirs.hermes,
-          BRIDGE_CODEX_HOME: dirs.codex,
-          BRIDGE_HOME: dirs.bridge,
-          BRIDGE_PORT: String(selectedPort),
+      const rust = require('./backend.cjs').isRust && entry === path.join(PROJECT_ROOT, 'main.cjs');
+      const child = spawn(
+        rust ? require('./backend.cjs').rustBinary() : process.execPath,
+        rust ? [] : [entry, '--no-open'],
+        {
+          env: {
+            ...process.env,
+            BRIDGE_HERMES_HOME: dirs.hermes,
+            BRIDGE_CODEX_HOME: dirs.codex,
+            BRIDGE_HOME: dirs.bridge,
+            BRIDGE_PORT: String(selectedPort),
+            ...(rust
+              ? { CODEX_HOME: dirs.codex, SWITCHER_WEB_ROOT: path.join(PROJECT_ROOT, 'web') }
+              : {}),
+          },
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
         },
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      );
       const output = [];
       child.stdout.on('data', (chunk) => output.push(String(chunk)));
       child.stderr.on('data', (chunk) => output.push(String(chunk)));
@@ -354,7 +375,10 @@ test(
           15000,
         );
         const check = () => {
-          if (item.output.join('').includes('BRIDGE_READY')) {
+          if (
+            item.output.join('').includes('BRIDGE_READY') ||
+            (require('./backend.cjs').isRust && item.output.join('').includes('"event":"ready"'))
+          ) {
             clearTimeout(timer);
             resolve();
           }

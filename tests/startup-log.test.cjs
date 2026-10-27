@@ -18,19 +18,27 @@ test(
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-startup-log-'));
     for (const d of ['bridge', 'codex']) fs.mkdirSync(path.join(root, d));
     fs.writeFileSync(path.join(root, 'codex', 'config.toml'), 'model="gpt-5"\n');
-    const child = spawn(process.execPath, [path.join(project, 'main.cjs'), '--no-open'], {
-      cwd: project,
-      env: {
-        ...process.env,
-        BRIDGE_HOME: path.join(root, 'bridge'),
-        BRIDGE_CODEX_HOME: path.join(root, 'codex'),
-        BRIDGE_HERMES_HOME: path.join(root, 'none'),
-        // CI 为其他测试提供 CODEX_EXE；启动耗时只测服务本身，不应读取该外部路径。
-        CODEX_EXE: '',
-        // 避开正在使用的 47831，不影响用户本机运行中的切换器。
-        BRIDGE_PORT: String(49000 + Math.floor(Math.random() * 9000)),
+    const rust = require('./backend.cjs').isRust;
+    const child = spawn(
+      rust ? require('./backend.cjs').rustBinary() : process.execPath,
+      rust ? [] : [path.join(project, 'main.cjs'), '--no-open'],
+      {
+        cwd: project,
+        env: {
+          ...process.env,
+          BRIDGE_HOME: path.join(root, 'bridge'),
+          BRIDGE_CODEX_HOME: path.join(root, 'codex'),
+          ...(rust
+            ? { CODEX_HOME: path.join(root, 'codex'), SWITCHER_WEB_ROOT: path.join(project, 'web') }
+            : {}),
+          BRIDGE_HERMES_HOME: path.join(root, 'none'),
+          // CI 为其他测试提供 CODEX_EXE；启动耗时只测服务本身，不应读取该外部路径。
+          CODEX_EXE: '',
+          // 避开正在使用的 47831，不影响用户本机运行中的切换器。
+          BRIDGE_PORT: String(49000 + Math.floor(Math.random() * 9000)),
+        },
       },
-    });
+    );
     const closed = new Promise((resolve) => child.once('close', resolve));
     t.after(async () => {
       if (child.exitCode === null && child.signalCode === null) child.kill();
@@ -40,7 +48,12 @@ test(
     let errors = '';
     child.stderr.on('data', (d) => (errors += d));
     await new Promise((resolve, reject) => {
-      child.stdout.on('data', (d) => String(d).includes('BRIDGE_READY') && resolve());
+      child.stdout.on(
+        'data',
+        (d) =>
+          (String(d).includes('BRIDGE_READY') || (rust && String(d).includes('"event":"ready"'))) &&
+          resolve(),
+      );
       // 提前退出时带上子进程的报错和 main-error.log，CI 上才能看出原因。
       child.once('exit', (code) => {
         let fatal = '';

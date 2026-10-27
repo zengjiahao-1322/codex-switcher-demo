@@ -1,7 +1,7 @@
 const test = require('node:test'),
   assert = require('node:assert/strict');
 test('server exposes authenticated adapter route without leaking through UI auth', async () => {
-  const { createServer } = require('../src/server/server.cjs');
+  const { createServer } = require('./backend.cjs');
   let called = false;
   const s = createServer({
     token: 'ui',

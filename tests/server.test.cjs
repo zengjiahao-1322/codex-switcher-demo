@@ -1,7 +1,7 @@
 const test = require('node:test'),
   assert = require('node:assert/strict');
 test('server rejects unauthenticated API calls and cross-origin mutations', async () => {
-  const { createServer } = require('../src/server/server.cjs');
+  const { createServer } = require('./backend.cjs');
   const s = createServer({ token: 'test-capability', getState: () => ({ providers: [] }) });
   await new Promise((r) => s.listen(0, '127.0.0.1', r));
   const base = 'http://127.0.0.1:' + s.address().port;
@@ -41,7 +41,7 @@ test('server rejects unauthenticated API calls and cross-origin mutations', asyn
 });
 
 test('启动器 Bearer 建立 Cookie 会话，公开主页和过期网址不能取得会话', async () => {
-  const { createServer } = require('../src/server/server.cjs');
+  const { createServer } = require('./backend.cjs');
   const s = createServer({ token: 'current-token', getState: () => ({ providers: [] }) });
   await new Promise((resolve) => s.listen(0, '127.0.0.1', resolve));
   const base = 'http://127.0.0.1:' + s.address().port;
