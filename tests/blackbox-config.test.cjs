@@ -5,7 +5,14 @@ const assert = require('node:assert/strict'),
   path = require('node:path'),
   crypto = require('node:crypto');
 const { startBackend } = require('./backend-process.cjs');
-const { api, serve, responseTool, provider, read } = require('./config-blackbox-helpers.cjs');
+const {
+  api,
+  serve,
+  responseTool,
+  provider,
+  read,
+  interfere,
+} = require('./config-blackbox-helpers.cjs');
 const original = 'model="official"\n# original\n';
 function expected(p, model, body = '# original\n', catalog) {
   return (
@@ -43,20 +50,9 @@ test('HTTP core：concurrent external edit during snapshot aborts without overwr
   const f = await fixture(t);
   const large = '#' + 'x'.repeat(2 * 1024 * 1024) + '\n';
   fs.appendFileSync(path.join(f.home, 'config.toml'), large);
-  let changed = false;
-  const watcher = fs.watch(f.bridge, (_, name) => {
-    if (
-      !changed &&
-      String(name).startsWith('original-config.toml.') &&
-      String(name).endsWith('.tmp')
-    ) {
-      changed = true;
-      fs.writeFileSync(path.join(f.home, 'config.toml'), 'model="external"\n');
-    }
-  });
-  t.after(() => watcher.close());
+  const changed = await interfere(t, f, f.bridge, 'original-config.toml.');
   const result = await api(f, 'switch', { id: f.id, model: 'm', threadFollow: 'off' }, 400);
-  assert.equal(changed, true);
+  assert.equal(changed(), true);
   assert.match(result.error, /concurrent/i);
   assert.equal(read(f), 'model="external"\n');
 });
@@ -77,16 +73,9 @@ test('HTTP core：restore detects an external edit while writing temporary confi
     path.join(f.home, 'config.toml'),
     '\n[extra]\n#' + 'x'.repeat(2 * 1024 * 1024) + '\n',
   );
-  let changed = false;
-  const watcher = fs.watch(f.home, (_, name) => {
-    if (!changed && String(name).startsWith('config.toml.') && String(name).endsWith('.tmp')) {
-      changed = true;
-      fs.writeFileSync(path.join(f.home, 'config.toml'), 'model="external"\n');
-    }
-  });
-  t.after(() => watcher.close());
+  const changed = await interfere(t, f, f.home, 'config.toml.');
   const result = await api(f, 'restore', { threadFollow: 'off' }, 400);
-  assert.equal(changed, true);
+  assert.equal(changed(), true);
   assert.match(result.error, /concurrent/i);
   assert.equal(read(f), 'model="external"\n');
 });

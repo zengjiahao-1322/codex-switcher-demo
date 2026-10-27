@@ -115,4 +115,49 @@ function algorithm(t, input) {
   );
   return JSON.parse(fs.readFileSync(target, 'utf8'));
 }
-module.exports = { api, serve, responseTool, provider, read, isolatedEditor, finishJob, algorithm };
+async function interfere(t, f, directory, prefix) {
+  const target = path.join(f.home, 'config.toml');
+  if (process.platform === 'darwin') {
+    const { execFileSync, spawn } = require('node:child_process');
+    const executable = path.join(f.root, 'config-interference');
+    execFileSync('clang', [
+      '-O2',
+      path.join(__dirname, 'fixtures/config-interference.c'),
+      '-o',
+      executable,
+    ]);
+    const marker = path.join(f.root, 'external-edit-completed');
+    const child = spawn(executable, [directory, prefix, target, marker], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    f.track(child);
+    const ready = await require('node:events').once(child.stdout, 'data');
+    assert.equal(String(ready[0]).trim(), 'ready');
+    return () => fs.existsSync(marker);
+  }
+  let changed = false;
+  const watcher = fs.watch(directory, (_, name) => {
+    if (
+      !changed &&
+      String(name).startsWith(prefix) &&
+      String(name).endsWith('.tmp') &&
+      fs.existsSync(path.join(directory, String(name)))
+    ) {
+      changed = true;
+      fs.writeFileSync(target, 'model="external"\n');
+    }
+  });
+  t.after(() => watcher.close());
+  return () => changed;
+}
+module.exports = {
+  api,
+  serve,
+  responseTool,
+  provider,
+  read,
+  isolatedEditor,
+  finishJob,
+  algorithm,
+  interfere,
+};
