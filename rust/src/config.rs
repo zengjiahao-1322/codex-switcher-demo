@@ -417,6 +417,51 @@ impl App {
         }
         Ok(json!({"message":"没有需要导入的新配置。"}))
     }
+    pub(crate) fn apply_switch(&self, input: &Value) -> io::Result<Value> {
+        let id = input["id"].as_str().unwrap_or("");
+        let provider = self
+            .providers()?
+            .into_iter()
+            .find(|p| p["id"] == id)
+            .ok_or_else(|| io::Error::other("配置不存在，请刷新"))?;
+        let model = input["model"]
+            .as_str()
+            .or(provider["model"].as_str())
+            .unwrap_or("");
+        if model.is_empty() {
+            return Err(io::Error::other("默认模型必填"));
+        }
+        let file = self.codex_home().join("config.toml");
+        let original = fs::read_to_string(&file).unwrap_or_default();
+        let next = toml_preserve(
+            &original,
+            &json!({"model":format!("\"{model}\""),"model_provider":"\"hermes_bridge\""}),
+            &json!({"name":provider["name"],"base_url":provider["baseUrl"],"wire_api":provider["apiMode"],"experimental_bearer_token":provider["apiKey"]}),
+        );
+        write_json(&self.bridge.join("original-config.toml"), &json!(original))?;
+        fs::write(&file, next)?;
+        write_json(
+            &self.bridge.join("current.json"),
+            &json!({"providerId":id,"mode":"direct"}),
+        )?;
+        write_json(
+            &self.bridge.join("effect.json"),
+            &json!({"status":"restart_required","message":"配置已应用。请完整退出并重新打开客户端。","at":crate::diagnostics::now()}),
+        )?;
+        Ok(json!({"message":"已应用配置。请完整退出并重新打开客户端。"}))
+    }
+    pub(crate) fn restore_official(&self) -> io::Result<Value> {
+        let backup = self.bridge.join("original-config.toml");
+        if !backup.is_file() {
+            return Err(io::Error::other("没有找到切换前的配置快照，无法自动恢复"));
+        }
+        fs::write(
+            self.codex_home().join("config.toml"),
+            fs::read_to_string(backup)?,
+        )?;
+        let _ = fs::remove_file(self.bridge.join("current.json"));
+        Ok(json!({"message":"已切回 Codex 官方登录。"}))
+    }
 }
 fn uuid_like() -> String {
     crate::platform::random_bytes()
@@ -458,4 +503,38 @@ pub fn toml_fixture(text: &Value, selection: &Value, bridge: &Value) -> Value {
         ));
     }
     json!(prefix + &output)
+}
+fn toml_preserve(original: &str, selection: &Value, bridge: &Value) -> String {
+    let nl = if original.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut body = String::new();
+    for line in original.lines() {
+        let trim = line.trim_start();
+        if trim.starts_with("model=")
+            || trim.starts_with("model =")
+            || trim.starts_with("model_provider=")
+            || trim.starts_with("model_provider =")
+            || trim.starts_with("model_catalog_json=")
+            || trim.starts_with("model_catalog_json =")
+        {
+            continue;
+        }
+        body.push_str(line);
+        body.push_str(nl)
+    }
+    let mut prefix = String::new();
+    for key in ["model", "model_provider", "model_catalog_json"] {
+        if let Some(value) = selection.get(key)
+            && !value.is_null()
+        {
+            prefix.push_str(&format!("{key} = {value}{nl}"));
+        }
+    }
+    if bridge["name"].is_string() {
+        prefix.push_str(&format!("[model_providers.hermes_bridge]{nl}name = \"{}\"{nl}base_url = \"{}\"{nl}wire_api = \"{}\"{nl}experimental_bearer_token = \"{}\"{nl}",bridge["name"].as_str().unwrap_or(""),bridge["base_url"].as_str().unwrap_or(""),bridge["wire_api"].as_str().unwrap_or("responses"),bridge["experimental_bearer_token"].as_str().unwrap_or("")))
+    }
+    prefix + &body
 }

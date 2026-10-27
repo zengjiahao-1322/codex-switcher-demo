@@ -345,6 +345,8 @@ pub(crate) async fn serve(
                     "restoreBackup" => Some(app.restore_backup(&input.unwrap())),
                     "models" => Some(app.models(&input.unwrap())),
                     "importHermes" => Some(app.import_hermes()),
+                    "switch" => Some(app.apply_switch(&input.unwrap())),
+                    "restore" => Some(app.restore_official()),
                     "autostart" => Some(crate::integration::autostart(
                         input.unwrap()["enabled"].as_bool().unwrap_or(false),
                         &app.bridge,
