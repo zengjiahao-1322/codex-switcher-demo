@@ -25,14 +25,15 @@ function launchBackend(environment) {
 }
 
 async function startBackend(t, options = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-blackbox-'));
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-blackbox-')));
   const home = path.join(root, 'codex'),
     bridge = path.join(root, 'bridge');
   fs.mkdirSync(home);
   fs.mkdirSync(bridge);
   fs.writeFileSync(path.join(home, 'config.toml'), 'model="blackbox-fixture"\n');
   if (options.missingConfig) fs.unlinkSync(path.join(home, 'config.toml'));
-  const fake = path.join(root, process.platform === 'win32' ? 'codex.exe' : 'codex');
+  const fake = path.join(root, 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex');
+  fs.mkdirSync(path.dirname(fake));
   if (process.platform === 'win32') {
     const compiler = path.join(
       process.env.WINDIR || 'C:\\Windows',
@@ -121,7 +122,8 @@ async function startBackend(t, options = {}) {
     }
     if (child.exitCode === null && child.signalCode === null) child.kill();
     await closed;
-    if (path.dirname(root) !== path.resolve(os.tmpdir())) throw Error('Fixture path escaped TEMP');
+    if (path.dirname(root) !== fs.realpathSync.native(os.tmpdir()))
+      throw Error('Fixture path escaped TEMP');
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
   const ready = await new Promise((resolve, reject) => {

@@ -199,7 +199,7 @@ test('双后台黑盒：clients动作通过HTTP返回隔离进程清单和运行
   child.stdin.write(JSON.stringify({ id: 1, method: 'initialize', params: {} }) + '\n');
   await initialized;
   const response = await f.api('clients', {});
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, await response.clone().text());
   const value = await response.json();
   assert.ok(Array.isArray(value.clients));
   assert.ok(Array.isArray(value.remotes));

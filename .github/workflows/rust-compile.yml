@@ -34,6 +34,9 @@ jobs:
           rustup override set stable
       - name: Compile only
         run: cargo build --locked --release --manifest-path rust/Cargo.toml --target ${{ matrix.target }}
+      - name: Prepare Windows Node process helper
+        if: runner.os == 'Windows'
+        run: node scripts/build-windows-helper.cjs
       - name: Node black-box baseline
         run: node --test tests/blackbox-framework.test.cjs tests/blackbox-diagnostics.test.cjs tests/blackbox-platform.test.cjs
       - name: Same black boxes against Rust

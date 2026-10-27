@@ -123,7 +123,7 @@ test('双后台黑盒：startup/firstRequest日志与诊断导出', async (t) =>
     }),
   );
   const response = await f.api('exportDiagnostics', {});
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, await response.clone().text());
   const result = await response.json();
   assert.match(result.filename, /^codex-switcher-diagnostics-\d{8}-\d{6}\.txt$/);
   const [head, body] = result.text.split('\n---\n');
@@ -209,7 +209,7 @@ test('双后台黑盒：只读会话索引、错误证据诊断及可见上下�
   assert.equal(list.items.length, 1);
   assert.equal(list.items[0].id, 'fixture-thread');
   const diagnose = await f.api('diagnose', { id: 'fixture-thread' });
-  assert.equal(diagnose.status, 200);
+  assert.equal(diagnose.status, 200, await diagnose.clone().text());
   const diagnosis = await diagnose.json();
   assert.equal(diagnosis.thread.id, 'fixture-thread');
   assert.ok(diagnosis.findings.some((row) => row.title === '此旧会话的供应商没有定义'));
