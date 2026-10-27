@@ -130,7 +130,7 @@ test('双后台黑盒：不同安装序号让位与升级交接，真实隔离PI
     port: Number(old.url.port),
   });
   await old.closed;
-  assert.notEqual(old.child.exitCode, null);
+  assert.ok(old.child.exitCode !== null || old.child.signalCode !== null);
   const current = await (await newer.api('runtime')).json();
   assert.equal(current.sequence, 11);
   const rows = fs

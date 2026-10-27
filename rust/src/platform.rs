@@ -507,7 +507,7 @@ pub fn os_version()->String {
 }
 #[cfg(not(windows))]
 pub fn port_pid(port:u16)->io::Result<Option<u32>>{
-    let output=std::process::Command::new("/usr/sbin/lsof").args(["-nP","-iTCP",&format!(":{port}"),"-sTCP:LISTEN","-t"]).output()?;
+    let output=std::process::Command::new("/usr/sbin/lsof").args(["-nP",&format!("-iTCP:{port}"),"-sTCP:LISTEN","-t"]).output()?;
     if output.status.code()==Some(1){return Ok(None)}
     if !output.status.success(){return Err(io::Error::other("Port lookup failed"))}
     Ok(String::from_utf8_lossy(&output.stdout).lines().next().and_then(|line|line.parse().ok()))

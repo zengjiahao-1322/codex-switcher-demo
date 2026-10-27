@@ -225,7 +225,7 @@ test('双后台黑盒：固定端口交接只停止同安装隔离后台，外�
   const next = await startBackend(t, { port: Number(prior.url.port) });
   assert.equal(next.url.port, prior.url.port);
   await closed;
-  assert.notEqual(prior.child.exitCode, null);
+  assert.ok(prior.child.exitCode !== null || prior.child.signalCode !== null);
   const rows = fs
     .readFileSync(path.join(next.bridge, 'logs', 'switcher.log'), 'utf8')
     .trim()
