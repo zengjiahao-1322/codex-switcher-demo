@@ -7,7 +7,8 @@ const { test } = require('node:test'),
   { spawn } = require('node:child_process'),
   toml = require('smol-toml');
 const { createAccounts, identity, writeJson } = require('../src/accounts/accounts.cjs'),
-  { runSwitch: performSwitch } = require('../src/clients/desktop-account.cjs');
+  { runSwitch: performSwitch } = require('../src/clients/desktop-account.cjs'),
+  { readRecent } = require('../src/diagnostics/event-log.cjs');
 // 业务单元检查不读取开发机上的其他编辑器；实际发现与重载由三窗口检查覆盖。
 const runSwitch = (job, dependencies = {}) =>
   performSwitch(
@@ -1243,26 +1244,28 @@ test('额度成功后按同一账号的固定订阅响应保存到期日，不�
     cp = require('node:child_process'),
     saved = path.join(f.bridgeHome, 'auth-fixture.json');
   writeJson(saved, login);
-  let commandArgs, requestConfig;
+  let commandArgs, requestConfig, subscriptionResponse = 'success';
   t.mock.method(require('../src/platform/platform.cjs'), 'codexEnv', () => ({}));
   t.mock.method(cp, 'execFile', (_exe, args, _options, callback) => {
     commandArgs = args;
     process.nextTick(() =>
-      callback(
-        null,
-        JSON.stringify({
-          accounts: {
-            [accountId]: {
-              entitlement: {
-                expires_at: '2026-11-26T12:00:00+00:00',
-                renews_at: '2026-11-25T12:00:00+00:00',
+      subscriptionResponse === 'success'
+        ? callback(
+            null,
+            JSON.stringify({
+              accounts: {
+                [accountId]: {
+                  entitlement: {
+                    expires_at: '2026-11-26T12:00:00+00:00',
+                    renews_at: '2026-11-25T12:00:00+00:00',
+                  },
+                  last_active_subscription: { will_renew: false },
+                },
+                default: { entitlement: { expires_at: '2030-01-01T00:00:00Z' } },
               },
-              last_active_subscription: { will_renew: false },
-            },
-            default: { entitlement: { expires_at: '2030-01-01T00:00:00Z' } },
-          },
-        }),
-      ),
+            }) + '\n__SWITCHER_HTTP_STATUS__:200',
+          )
+        : callback(Object.assign(Error('curl failed'), { code: 28 }), ''),
     );
     return {
       stdin: {
@@ -1310,4 +1313,18 @@ test('额度成功后按同一账号的固定订阅响应保存到期日，不�
   assert.equal(commandArgs.includes('--location'), false);
   assert.equal(commandArgs.join(' ').includes(login.tokens.access_token), false);
   assert.equal(JSON.stringify(result).includes(login.tokens.access_token), false);
+  const events = readRecent(f.bridgeHome, 10);
+  assert.deepEqual(events.map(({ event, status, httpCode, curlCode, hasDate }) => ({ event, status, httpCode, curlCode, hasDate })), [
+    { event: 'official.subscription', status: 'ok', httpCode: 200, curlCode: undefined, hasDate: true },
+  ]);
+  subscriptionResponse = 'failure';
+  const failed = await q.quota('fixture');
+  assert.equal(failed.status, 'ok');
+  assert.deepEqual(
+    readRecent(f.bridgeHome, 10).map(({ event, status, httpCode, curlCode, hasDate }) => ({ event, status, httpCode, curlCode, hasDate })),
+    [
+      { event: 'official.subscription', status: 'ok', httpCode: 200, curlCode: undefined, hasDate: true },
+      { event: 'official.subscription', status: 'failed', httpCode: undefined, curlCode: 28, hasDate: false },
+    ],
+  );
 });

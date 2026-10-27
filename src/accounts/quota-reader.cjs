@@ -15,59 +15,85 @@ function subscriptionFrom(body, accountId) {
       }
     : null;
 }
-async function readSubscription(authFile) {
-  const auth = JSON.parse(require('node:fs').readFileSync(authFile, 'utf8')),
-    home = path.dirname(authFile),
-    env = require('../platform/platform.cjs').codexEnv(home),
-    quote = (s) => '"' + String(s).replaceAll('\\', '\\\\').replaceAll('"', '\\"') + '"';
-  const config =
-    [
-      'url = "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27"',
-      'header = ' + quote('Authorization: Bearer ' + auth.tokens.access_token),
-      'header = ' + quote('ChatGPT-Account-Id: ' + auth.tokens.account_id),
-      'header = "originator: codex_cli_rs"',
-      'header = ' +
-        quote(
-          'User-Agent: codex_cli_rs/0.163.0 (' +
-            require('node:os').type() +
-            ' ' +
-            require('node:os').release() +
-            '; ' +
-            process.arch +
-            ')',
-        ),
-      'header = "Accept: application/json"',
-    ].join('\n') + '\n';
-  const body = await new Promise((resolve) => {
-    const args = [
-      '--config',
-      '-',
-      '--fail',
-      '--silent',
-      '--show-error',
-      '--connect-timeout',
-      '10',
-      '--max-time',
-      '20',
-    ];
-    if (process.platform === 'win32') args.push('--ssl-revoke-best-effort');
-    const child = require('node:child_process').execFile(
-      process.platform === 'win32' ? 'curl.exe' : '/usr/bin/curl',
-      args,
-      { env, encoding: 'utf8', windowsHide: true, timeout: 25000, maxBuffer: 2 * 1024 * 1024 },
-      (error, stdout) => {
-        if (error) return resolve(null);
-        try {
-          resolve(JSON.parse(stdout));
-        } catch {
-          resolve(null);
-        }
-      },
-    );
-    child.stdin.on('error', () => resolve(null));
-    child.stdin.end(config);
-  });
-  return body ? subscriptionFrom(body, auth.tokens.account_id) : null;
+async function readSubscription(authFile, { bridgeHome = null, account = null } = {}) {
+  let status = 'failed',
+    httpCode = null,
+    curlCode = null,
+    hasDate = false;
+  try {
+    const auth = JSON.parse(require('node:fs').readFileSync(authFile, 'utf8')),
+      home = path.dirname(authFile),
+      env = require('../platform/platform.cjs').codexEnv(home),
+      quote = (s) => '"' + String(s).replaceAll('\\', '\\\\').replaceAll('"', '\\"') + '"';
+    const config =
+      [
+        'url = "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27"',
+        'header = ' + quote('Authorization: Bearer ' + auth.tokens.access_token),
+        'header = ' + quote('ChatGPT-Account-Id: ' + auth.tokens.account_id),
+        'header = "originator: codex_cli_rs"',
+        'header = ' +
+          quote(
+            'User-Agent: codex_cli_rs/0.163.0 (' +
+              require('node:os').type() +
+              ' ' +
+              require('node:os').release() +
+              '; ' +
+              process.arch +
+              ')',
+          ),
+        'header = "Accept: application/json"',
+      ].join('\n') + '\n';
+    const result = await new Promise((resolve) => {
+      const args = [
+        '--config',
+        '-',
+        '--silent',
+        '--show-error',
+        '--connect-timeout',
+        '10',
+        '--max-time',
+        '20',
+        '--write-out',
+        '\n__SWITCHER_HTTP_STATUS__:%{http_code}',
+      ];
+      if (process.platform === 'win32') args.push('--ssl-revoke-best-effort');
+      const child = require('node:child_process').execFile(
+        process.platform === 'win32' ? 'curl.exe' : '/usr/bin/curl',
+        args,
+        { env, encoding: 'utf8', windowsHide: true, timeout: 25000, maxBuffer: 2 * 1024 * 1024 },
+        (error, stdout) => {
+          const marker = '\n__SWITCHER_HTTP_STATUS__:',
+            at = stdout.lastIndexOf(marker),
+            code = at >= 0 ? Number(stdout.slice(at + marker.length).trim()) : null,
+            text = at >= 0 ? stdout.slice(0, at) : stdout;
+          resolve({ error, code: Number.isFinite(code) && code > 0 ? code : null, text });
+        },
+      );
+      child.stdin.on('error', () => resolve({ error: Error('curl stdin failed'), code: null, text: '' }));
+      child.stdin.end(config);
+    });
+    httpCode = result.code;
+    if (result.error && httpCode === null) curlCode = result.error.code ?? null;
+    if (result.error || httpCode === null || httpCode < 200 || httpCode >= 300) return null;
+    let body;
+    try {
+      body = JSON.parse(result.text);
+    } catch {
+      return null;
+    }
+    const subscription = subscriptionFrom(body, auth.tokens.account_id);
+    status = 'ok';
+    hasDate = !!subscription?.until;
+    return subscription;
+  } finally {
+    if (bridgeHome)
+      log(bridgeHome, 'official.subscription', {
+        account,
+        status,
+        ...(httpCode !== null ? { httpCode } : { curlCode }),
+        hasDate,
+      });
+  }
 }
 
 function quotaBuckets(result) {
@@ -209,7 +235,9 @@ function createQuotaReader({
       const result = await check.rpc('account/rateLimits/read', {}),
         buckets = quotaBuckets(result);
       if (!buckets.length) throw Error('官方服务未返回额度');
-      const subscription = readSubscription ? await readSubscription(authFile(id)) : null;
+      const subscription = readSubscription
+        ? await readSubscription(authFile(id), { bridgeHome, account: selected.email })
+        : null;
       const value = {
         status: 'ok',
         checkedAt: new Date().toISOString(),
