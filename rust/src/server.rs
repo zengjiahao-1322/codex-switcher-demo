@@ -382,6 +382,22 @@ pub(crate) async fn serve(
                     )),
                     "clients" => Some(crate::platform::client_status(&app.codex_home()).map(
                         |mut value| {
+                            if let Ok(entries) = fs::read_dir(app.bridge.join("clients")) {
+                                let mut remotes = Vec::new();
+                                for entry in entries.flatten().filter(|e| {
+                                    e.path().extension().and_then(|s| s.to_str()) == Some("json")
+                                }) {
+                                    if let Ok(bytes) = fs::read(entry.path()) {
+                                        if let Ok(row) = serde_json::from_slice::<Value>(&bytes) {
+                                            if row["remoteType"] == "ssh-remote" {
+                                                remotes.push(row);
+                                            }
+                                        }
+                                    }
+                                }
+                                value["connectedEditors"] = json!(remotes.len());
+                                value["remotes"] = json!(remotes);
+                            }
                             value["runtime"] = json!(
                                 crate::platform::codex_path(&app.bridge)
                                     .ok()
