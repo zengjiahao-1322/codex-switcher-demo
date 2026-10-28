@@ -11,7 +11,26 @@ if (input.op === 'otherInstallAction')
   );
 else if (input.op === 'windowsProxyEnv')
   output = require('../../src/platform/platform.cjs').windowsProxyEnv(input.value);
-else if (input.op === 'discoverProviders') {
+else if (input.op === 'proxySource') {
+  const platform = require('../../src/platform/platform.cjs');
+  const env = platform.codexEnv(input.home);
+  output = {
+    source: platform.proxySource(input.home),
+    env: Object.fromEntries(
+      Object.entries(env).filter(([k]) =>
+        [
+          'HTTPS_PROXY',
+          'https_proxy',
+          'HTTP_PROXY',
+          'http_proxy',
+          'ALL_PROXY',
+          'all_proxy',
+          'CODEX_HOME',
+        ].includes(k),
+      ),
+    ),
+  };
+} else if (input.op === 'discoverProviders') {
   const core = require('../../src/config/core.cjs');
   const providers = core.discoverProviders(input.home);
   output = { providers, public: core.publicProviders(providers) };

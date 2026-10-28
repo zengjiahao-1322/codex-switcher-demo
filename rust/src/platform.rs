@@ -263,6 +263,22 @@ mod windows {
         unsafe {
             CloseHandle(snapshot);
         }
+        // Electron renderer children share the desktop shell's executable.
+        // Keep the shell, while separately installed codex backends remain rows.
+        let desktop_path = regex::Regex::new(
+            r"(?i)OpenAI[.\\/]Codex[^\\/\n]*[\\/]app[\\/](?:ChatGPT|Codex)\.exe$",
+        )
+        .unwrap();
+        processes.retain(|process| {
+            let exe = process["exe"].as_str().unwrap_or("");
+            !(desktop_path.is_match(exe)
+                && ancestry.iter().any(|parent| {
+                    parent["pid"] == process["parentPid"]
+                        && parent["exe"]
+                            .as_str()
+                            .is_some_and(|s| s.eq_ignore_ascii_case(exe))
+                }))
+        });
         Ok(json!({"ancestry":ancestry,"processes":processes}))
     }
     #[link(name = "ntdll")]
@@ -854,8 +870,31 @@ pub fn protect_data(bridge: &std::path::Path) -> std::io::Result<()> {
         }
     }
     protect_directory(bridge)?;
+    #[cfg(unix)]
+    protect_existing(bridge)?;
     crate::instance::write_json(&marker, &serde_json::json!({"path":path}))
 }
+
+#[cfg(unix)]
+fn protect_existing(directory: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            continue;
+        }
+        std::fs::set_permissions(
+            entry.path(),
+            std::fs::Permissions::from_mode(if kind.is_dir() { 0o700 } else { 0o600 }),
+        )?;
+        if kind.is_dir() {
+            protect_existing(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(serde::Serialize)]
 pub struct DataProtection {
     pub ok: bool,
@@ -1196,6 +1235,7 @@ pub fn windows_proxy_env(
     }
     env
 }
+
 fn system_proxy_env() -> std::collections::BTreeMap<String, String> {
     use std::{
         collections::BTreeMap,

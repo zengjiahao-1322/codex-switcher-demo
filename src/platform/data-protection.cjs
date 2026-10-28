@@ -29,6 +29,17 @@ function protectDataDirs(paths) {
           },
         );
       }
+      if (process.platform !== 'win32') {
+        const protectExisting = (directory) => {
+          for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+            if (entry.isSymbolicLink()) continue;
+            const file = path.join(directory, entry.name);
+            fs.chmodSync(file, entry.isDirectory() ? 0o700 : 0o600);
+            if (entry.isDirectory()) protectExisting(file);
+          }
+        };
+        protectExisting(dir);
+      }
       // 完整收紧成功后才记下目录；搬到新位置时重新收紧。
       fs.writeFileSync(marker, JSON.stringify({ path: protectedPath }), { mode: 0o600 });
     } catch (error) {
