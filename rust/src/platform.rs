@@ -671,7 +671,12 @@ pub fn heartbeat(
     row["authority"] = input["authority"].clone();
     row["remoteAgent"] = input["remoteAgent"].clone();
     row["companionVersion"] = input["companionVersion"].clone();
-    row["seenAt"] = serde_json::json!(crate::diagnostics::now());
+    row["seenAt"] = serde_json::json!(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+    );
     crate::instance::write_json(&file, &row)?;
     Ok(
         serde_json::json!({"command":row["command"],"connection":{"state":"unmatched","home":input["home"],"backendPids":[]},"longPoll":true}),
