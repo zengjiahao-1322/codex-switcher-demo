@@ -11,6 +11,8 @@ const { startBackend } = require('./backend-process.cjs');
 const { api, serve, responseTool } = require('./config-blackbox-helpers.cjs');
 const { packageFixture, snapshot, until, write } = require('./fixtures/batch6-package.cjs');
 const project = path.resolve(__dirname, '..');
+const privateSentinel = (f) =>
+  path.join(process.platform === 'win32' ? f.target : f.bridge, 'private/sentinel');
 function metadata(f, extra = {}) {
   return {
     version: '0.1.6',
@@ -110,10 +112,7 @@ test('更新黑盒：下载中断和SHA不符保留完整安装与私有数据',
   await api(f, 'installUpdate', {});
   await failed(f, /校验和不匹配/);
   assert.deepEqual(snapshot(f.target), before);
-  assert.equal(
-    fs.readFileSync(path.join(f.target, 'private/sentinel'), 'utf8'),
-    'preserve private',
-  );
+  assert.equal(fs.readFileSync(privateSentinel(f), 'utf8'), 'preserve private');
   assert.equal(
     fs.readFileSync(path.join(f.bridge, 'accounts/keep.txt'), 'utf8'),
     'preserve credentials',
@@ -138,7 +137,7 @@ test('更新黑盒：真实下载校验换包换进程，健康检查和发现�
   const oldFiles = JSON.parse(fs.readFileSync(path.join(f.target, 'release-files.json')));
   oldFiles.push('obsolete.txt');
   write(path.join(f.target, 'release-files.json'), JSON.stringify(oldFiles));
-  const privateFile = path.join(f.target, 'private/sentinel'),
+  const privateFile = privateSentinel(f),
     mode = fs.statSync(privateFile).mode & 0o777;
   const acl =
     process.platform === 'win32'
@@ -430,7 +429,7 @@ test(
       }
     });
     const before = snapshot(f.target),
-      privateFile = path.join(f.target, 'private/sentinel'),
+      privateFile = privateSentinel(f),
       mode = fs.statSync(privateFile).mode & 0o777;
     await api(f, 'checkUpdate', {});
     await api(f, 'installUpdate', {});
@@ -593,8 +592,7 @@ test(
           );
         }
       else await until(() => !fs.existsSync(f.target), 15000);
-      if (process.platform === 'win32')
-        assert.equal(fs.existsSync(path.join(f.target, 'private/sentinel')), keep);
+      if (process.platform === 'win32') assert.equal(fs.existsSync(privateSentinel(f)), keep);
       assert.equal(
         fs.existsSync(path.join(f.bridge, 'accounts/keep.txt')),
         process.platform === 'win32' || keep,

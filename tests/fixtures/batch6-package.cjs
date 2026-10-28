@@ -203,7 +203,11 @@ async function packageFixture(t, options = {}) {
         path.join(discovery, 'shortcut.json'),
         JSON.stringify({ created: true, sequence: Number.MAX_SAFE_INTEGER }),
       );
-      write(path.join(target, 'private', 'sentinel'), 'preserve private', 0o600);
+      write(
+        path.join(process.platform === 'win32' ? target : context.bridge, 'private', 'sentinel'),
+        'preserve private',
+        0o600,
+      );
       write(path.join(context.bridge, 'accounts', 'keep.txt'), 'preserve credentials', 0o600);
       context.environment.SWITCHER_BLACKBOX_PROJECT = target;
       context.environment.SWITCHER_BLACKBOX_NODE = path.join(
