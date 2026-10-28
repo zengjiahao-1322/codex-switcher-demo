@@ -225,6 +225,8 @@ test('buffered SSE has ordered lifecycle, text and complete arguments', async (t
   const r = await f.request({ input: 'hi', stream: true });
   assert.match(r.headers.get('content-type'), /text\/event-stream/);
   assert.equal(r.headers.get('x-bridge-streaming'), 'buffered');
+  assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(r.headers.get('referrer-policy'), 'no-referrer');
   const text = await r.text();
   assert.equal(text.includes('hidden'), false);
   const events = text

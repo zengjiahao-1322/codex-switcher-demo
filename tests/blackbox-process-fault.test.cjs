@@ -113,6 +113,12 @@ test('进程故障黑盒：仅TEMP假进程被拒绝访问，真实停止函数�
   }
 });
 test('并行释放故障黑盒：假桌面拒绝停止后恢复已停止编辑器，配置与登录全文保持', async (t) => {
+  if (process.platform === 'darwin') {
+    t.skip(
+      'macOS CI 禁止对 Node 进程稳定注入 DYLD kill 权限错误；Windows DACL 与本地双端已测，真机权限边界保留未测',
+    );
+    return;
+  }
   const f = await fixture(t),
     target = await fakeProcess(f, true);
   const status = await until(

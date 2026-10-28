@@ -194,6 +194,8 @@ fn sse(body: Body, dropped: &[String]) -> Response<Body> {
         .header("content-type", "text/event-stream; charset=utf-8")
         .header("cache-control", "no-cache")
         .header("x-bridge-streaming", "buffered")
+        .header("x-content-type-options", "nosniff")
+        .header("referrer-policy", "no-referrer")
         .body(body)
         .unwrap();
     if !dropped.is_empty() {
