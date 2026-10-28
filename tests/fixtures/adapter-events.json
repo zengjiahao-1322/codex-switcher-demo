@@ -1,0 +1,1039 @@
+[
+  {
+    "name": "chat text, function and actual tier",
+    "mode": "chat_completions",
+    "input": {
+      "input": "hi",
+      "stream": true,
+      "service_tier": "fast"
+    },
+    "upstream": {
+      "choices": [
+        {
+          "message": {
+            "content": "你好",
+            "reasoning_content": "hidden",
+            "tool_calls": [
+              {
+                "id": "call1",
+                "type": "function",
+                "function": {
+                  "name": "lookup",
+                  "arguments": "{\"city\":\"台北\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "service_tier": "priority",
+      "usage": {
+        "prompt_tokens": 2,
+        "completion_tokens": 3,
+        "total_tokens": 5
+      }
+    },
+    "expected": [
+      {
+        "type": "response.created",
+        "sequence_number": 0,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "in_progress",
+          "error": null,
+          "model": "mock-model",
+          "output": [],
+          "usage": null
+        }
+      },
+      {
+        "type": "response.in_progress",
+        "sequence_number": 1,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "in_progress",
+          "error": null,
+          "model": "mock-model",
+          "output": [],
+          "usage": null
+        }
+      },
+      {
+        "type": "response.output_item.added",
+        "sequence_number": 2,
+        "output_index": 0,
+        "item": {
+          "id": "msg_FIXTURE_1",
+          "type": "message",
+          "role": "assistant",
+          "status": "in_progress",
+          "content": []
+        }
+      },
+      {
+        "type": "response.content_part.added",
+        "sequence_number": 3,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "part": {
+          "type": "output_text",
+          "text": "",
+          "annotations": []
+        }
+      },
+      {
+        "type": "response.output_text.delta",
+        "sequence_number": 4,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "delta": "你好"
+      },
+      {
+        "type": "response.output_text.done",
+        "sequence_number": 5,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "text": "你好"
+      },
+      {
+        "type": "response.content_part.done",
+        "sequence_number": 6,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "part": {
+          "type": "output_text",
+          "text": "你好",
+          "annotations": []
+        }
+      },
+      {
+        "type": "response.output_item.done",
+        "sequence_number": 7,
+        "output_index": 0,
+        "item": {
+          "id": "msg_FIXTURE_1",
+          "type": "message",
+          "role": "assistant",
+          "status": "completed",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "你好",
+              "annotations": []
+            }
+          ]
+        }
+      },
+      {
+        "type": "response.output_item.added",
+        "sequence_number": 8,
+        "output_index": 1,
+        "item": {
+          "id": "fc_FIXTURE_1",
+          "type": "function_call",
+          "status": "in_progress",
+          "call_id": "call1",
+          "name": "lookup",
+          "arguments": ""
+        }
+      },
+      {
+        "type": "response.function_call_arguments.delta",
+        "sequence_number": 9,
+        "item_id": "fc_FIXTURE_1",
+        "output_index": 1,
+        "delta": "{\"city\":\"台北\"}"
+      },
+      {
+        "type": "response.function_call_arguments.done",
+        "sequence_number": 10,
+        "item_id": "fc_FIXTURE_1",
+        "output_index": 1,
+        "arguments": "{\"city\":\"台北\"}"
+      },
+      {
+        "type": "response.output_item.done",
+        "sequence_number": 11,
+        "output_index": 1,
+        "item": {
+          "id": "fc_FIXTURE_1",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call1",
+          "name": "lookup",
+          "arguments": "{\"city\":\"台北\"}"
+        }
+      },
+      {
+        "type": "response.completed",
+        "sequence_number": 12,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "completed",
+          "error": null,
+          "model": "mock-model",
+          "output": [
+            {
+              "id": "msg_FIXTURE_1",
+              "type": "message",
+              "role": "assistant",
+              "status": "completed",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "你好",
+                  "annotations": []
+                }
+              ]
+            },
+            {
+              "id": "fc_FIXTURE_1",
+              "type": "function_call",
+              "status": "completed",
+              "call_id": "call1",
+              "name": "lookup",
+              "arguments": "{\"city\":\"台北\"}"
+            }
+          ],
+          "usage": {
+            "input_tokens": 2,
+            "output_tokens": 3,
+            "total_tokens": 5
+          },
+          "service_tier": "priority",
+          "incomplete_details": null
+        }
+      }
+    ],
+    "payload": {
+      "model": "mock-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hi"
+        }
+      ],
+      "stream": false,
+      "service_tier": "priority"
+    }
+  },
+  {
+    "name": "namespace and freeform custom",
+    "mode": "chat_completions",
+    "input": {
+      "input": "hi",
+      "stream": true,
+      "tools": [
+        {
+          "type": "namespace",
+          "name": "agents",
+          "tools": [
+            {
+              "type": "function",
+              "name": "spawn",
+              "parameters": {
+                "type": "object"
+              }
+            }
+          ]
+        },
+        {
+          "type": "custom",
+          "name": "apply_patch",
+          "format": {
+            "type": "grammar",
+            "syntax": "lark",
+            "definition": "start: patch"
+          }
+        }
+      ]
+    },
+    "upstream": {
+      "choices": [
+        {
+          "message": {
+            "tool_calls": [
+              {
+                "id": "n1",
+                "type": "function",
+                "function": {
+                  "name": "agents__spawn",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "p1",
+                "type": "function",
+                "function": {
+                  "name": "apply_patch",
+                  "arguments": "{\"input\":\"*** Begin Patch\\n*** End Patch\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "expected": [
+      {
+        "type": "response.created",
+        "sequence_number": 0,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "in_progress",
+          "error": null,
+          "model": "mock-model",
+          "output": [],
+          "usage": null
+        }
+      },
+      {
+        "type": "response.in_progress",
+        "sequence_number": 1,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "in_progress",
+          "error": null,
+          "model": "mock-model",
+          "output": [],
+          "usage": null
+        }
+      },
+      {
+        "type": "response.output_item.added",
+        "sequence_number": 2,
+        "output_index": 0,
+        "item": {
+          "id": "fc_FIXTURE_1",
+          "type": "function_call",
+          "status": "in_progress",
+          "call_id": "n1",
+          "name": "spawn",
+          "namespace": "agents",
+          "arguments": ""
+        }
+      },
+      {
+        "type": "response.function_call_arguments.delta",
+        "sequence_number": 3,
+        "item_id": "fc_FIXTURE_1",
+        "output_index": 0,
+        "delta": "{}"
+      },
+      {
+        "type": "response.function_call_arguments.done",
+        "sequence_number": 4,
+        "item_id": "fc_FIXTURE_1",
+        "output_index": 0,
+        "arguments": "{}"
+      },
+      {
+        "type": "response.output_item.done",
+        "sequence_number": 5,
+        "output_index": 0,
+        "item": {
+          "id": "fc_FIXTURE_1",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "n1",
+          "name": "spawn",
+          "namespace": "agents",
+          "arguments": "{}"
+        }
+      },
+      {
+        "type": "response.output_item.added",
+        "sequence_number": 6,
+        "output_index": 1,
+        "item": {
+          "id": "ctc_FIXTURE_1",
+          "type": "custom_tool_call",
+          "status": "in_progress",
+          "call_id": "p1",
+          "name": "apply_patch",
+          "input": ""
+        }
+      },
+      {
+        "type": "response.custom_tool_call_input.delta",
+        "sequence_number": 7,
+        "item_id": "ctc_FIXTURE_1",
+        "output_index": 1,
+        "delta": "*** Begin Patch\n*** End Patch"
+      },
+      {
+        "type": "response.custom_tool_call_input.done",
+        "sequence_number": 8,
+        "item_id": "ctc_FIXTURE_1",
+        "output_index": 1,
+        "input": "*** Begin Patch\n*** End Patch"
+      },
+      {
+        "type": "response.output_item.done",
+        "sequence_number": 9,
+        "output_index": 1,
+        "item": {
+          "id": "ctc_FIXTURE_1",
+          "type": "custom_tool_call",
+          "status": "completed",
+          "call_id": "p1",
+          "name": "apply_patch",
+          "input": "*** Begin Patch\n*** End Patch"
+        }
+      },
+      {
+        "type": "response.completed",
+        "sequence_number": 10,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "completed",
+          "error": null,
+          "model": "mock-model",
+          "output": [
+            {
+              "id": "fc_FIXTURE_1",
+              "type": "function_call",
+              "status": "completed",
+              "call_id": "n1",
+              "name": "spawn",
+              "namespace": "agents",
+              "arguments": "{}"
+            },
+            {
+              "id": "ctc_FIXTURE_1",
+              "type": "custom_tool_call",
+              "status": "completed",
+              "call_id": "p1",
+              "name": "apply_patch",
+              "input": "*** Begin Patch\n*** End Patch"
+            }
+          ],
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "incomplete_details": null
+        }
+      }
+    ],
+    "payload": {
+      "model": "mock-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hi"
+        }
+      ],
+      "stream": false,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "agents__spawn",
+            "description": "",
+            "parameters": {
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "apply_patch",
+            "description": "\n\nThe `input` argument is raw text that must follow this lark grammar exactly:\nstart: patch",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "input": {
+                  "type": "string",
+                  "description": "Raw tool input text"
+                }
+              },
+              "required": ["input"],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "token truncation",
+    "mode": "chat_completions",
+    "input": {
+      "input": "hi",
+      "stream": true
+    },
+    "upstream": {
+      "choices": [
+        {
+          "message": {
+            "content": "partial"
+          },
+          "finish_reason": "length"
+        }
+      ]
+    },
+    "expected": [
+      {
+        "type": "response.created",
+        "sequence_number": 0,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "in_progress",
+          "error": null,
+          "model": "mock-model",
+          "output": [],
+          "usage": null
+        }
+      },
+      {
+        "type": "response.in_progress",
+        "sequence_number": 1,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "in_progress",
+          "error": null,
+          "model": "mock-model",
+          "output": [],
+          "usage": null
+        }
+      },
+      {
+        "type": "response.output_item.added",
+        "sequence_number": 2,
+        "output_index": 0,
+        "item": {
+          "id": "msg_FIXTURE_1",
+          "type": "message",
+          "role": "assistant",
+          "status": "in_progress",
+          "content": []
+        }
+      },
+      {
+        "type": "response.content_part.added",
+        "sequence_number": 3,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "part": {
+          "type": "output_text",
+          "text": "",
+          "annotations": []
+        }
+      },
+      {
+        "type": "response.output_text.delta",
+        "sequence_number": 4,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "delta": "partial"
+      },
+      {
+        "type": "response.output_text.done",
+        "sequence_number": 5,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "text": "partial"
+      },
+      {
+        "type": "response.content_part.done",
+        "sequence_number": 6,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "part": {
+          "type": "output_text",
+          "text": "partial",
+          "annotations": []
+        }
+      },
+      {
+        "type": "response.output_item.done",
+        "sequence_number": 7,
+        "output_index": 0,
+        "item": {
+          "id": "msg_FIXTURE_1",
+          "type": "message",
+          "role": "assistant",
+          "status": "completed",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "partial",
+              "annotations": []
+            }
+          ]
+        }
+      },
+      {
+        "type": "response.incomplete",
+        "sequence_number": 8,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "incomplete",
+          "error": null,
+          "model": "mock-model",
+          "output": [
+            {
+              "id": "msg_FIXTURE_1",
+              "type": "message",
+              "role": "assistant",
+              "status": "completed",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "partial",
+                  "annotations": []
+                }
+              ]
+            }
+          ],
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "incomplete_details": {
+            "reason": "max_output_tokens"
+          }
+        }
+      }
+    ],
+    "payload": {
+      "model": "mock-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hi"
+        }
+      ],
+      "stream": false
+    }
+  },
+  {
+    "name": "content filtering",
+    "mode": "chat_completions",
+    "input": {
+      "input": "hi",
+      "stream": true
+    },
+    "upstream": {
+      "choices": [
+        {
+          "message": {
+            "content": "partial"
+          },
+          "finish_reason": "content_filter"
+        }
+      ]
+    },
+    "expected": [
+      {
+        "type": "response.created",
+        "sequence_number": 0,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "in_progress",
+          "error": null,
+          "model": "mock-model",
+          "output": [],
+          "usage": null
+        }
+      },
+      {
+        "type": "response.in_progress",
+        "sequence_number": 1,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "in_progress",
+          "error": null,
+          "model": "mock-model",
+          "output": [],
+          "usage": null
+        }
+      },
+      {
+        "type": "response.output_item.added",
+        "sequence_number": 2,
+        "output_index": 0,
+        "item": {
+          "id": "msg_FIXTURE_1",
+          "type": "message",
+          "role": "assistant",
+          "status": "in_progress",
+          "content": []
+        }
+      },
+      {
+        "type": "response.content_part.added",
+        "sequence_number": 3,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "part": {
+          "type": "output_text",
+          "text": "",
+          "annotations": []
+        }
+      },
+      {
+        "type": "response.output_text.delta",
+        "sequence_number": 4,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "delta": "partial"
+      },
+      {
+        "type": "response.output_text.done",
+        "sequence_number": 5,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "text": "partial"
+      },
+      {
+        "type": "response.content_part.done",
+        "sequence_number": 6,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "part": {
+          "type": "output_text",
+          "text": "partial",
+          "annotations": []
+        }
+      },
+      {
+        "type": "response.output_item.done",
+        "sequence_number": 7,
+        "output_index": 0,
+        "item": {
+          "id": "msg_FIXTURE_1",
+          "type": "message",
+          "role": "assistant",
+          "status": "completed",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "partial",
+              "annotations": []
+            }
+          ]
+        }
+      },
+      {
+        "type": "response.incomplete",
+        "sequence_number": 8,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "incomplete",
+          "error": null,
+          "model": "mock-model",
+          "output": [
+            {
+              "id": "msg_FIXTURE_1",
+              "type": "message",
+              "role": "assistant",
+              "status": "completed",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "partial",
+                  "annotations": []
+                }
+              ]
+            }
+          ],
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "incomplete_details": {
+            "reason": "content_filter"
+          }
+        }
+      }
+    ],
+    "payload": {
+      "model": "mock-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hi"
+        }
+      ],
+      "stream": false
+    }
+  },
+  {
+    "name": "Anthropic thinking omitted and tools",
+    "mode": "anthropic_messages",
+    "input": {
+      "input": "hi",
+      "stream": true
+    },
+    "upstream": {
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "PRIVATE"
+        },
+        {
+          "type": "redacted_thinking",
+          "data": "SECRET"
+        },
+        {
+          "type": "text",
+          "text": "answer"
+        },
+        {
+          "type": "tool_use",
+          "id": "a1",
+          "name": "lookup",
+          "input": {
+            "x": 2
+          }
+        }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+        "input_tokens": 7,
+        "output_tokens": 9
+      }
+    },
+    "expected": [
+      {
+        "type": "response.created",
+        "sequence_number": 0,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "in_progress",
+          "error": null,
+          "model": "mock-model",
+          "output": [],
+          "usage": null
+        }
+      },
+      {
+        "type": "response.in_progress",
+        "sequence_number": 1,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "in_progress",
+          "error": null,
+          "model": "mock-model",
+          "output": [],
+          "usage": null
+        }
+      },
+      {
+        "type": "response.output_item.added",
+        "sequence_number": 2,
+        "output_index": 0,
+        "item": {
+          "id": "msg_FIXTURE_1",
+          "type": "message",
+          "role": "assistant",
+          "status": "in_progress",
+          "content": []
+        }
+      },
+      {
+        "type": "response.content_part.added",
+        "sequence_number": 3,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "part": {
+          "type": "output_text",
+          "text": "",
+          "annotations": []
+        }
+      },
+      {
+        "type": "response.output_text.delta",
+        "sequence_number": 4,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "delta": "answer"
+      },
+      {
+        "type": "response.output_text.done",
+        "sequence_number": 5,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "text": "answer"
+      },
+      {
+        "type": "response.content_part.done",
+        "sequence_number": 6,
+        "item_id": "msg_FIXTURE_1",
+        "output_index": 0,
+        "content_index": 0,
+        "part": {
+          "type": "output_text",
+          "text": "answer",
+          "annotations": []
+        }
+      },
+      {
+        "type": "response.output_item.done",
+        "sequence_number": 7,
+        "output_index": 0,
+        "item": {
+          "id": "msg_FIXTURE_1",
+          "type": "message",
+          "role": "assistant",
+          "status": "completed",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "answer",
+              "annotations": []
+            }
+          ]
+        }
+      },
+      {
+        "type": "response.output_item.added",
+        "sequence_number": 8,
+        "output_index": 1,
+        "item": {
+          "id": "fc_FIXTURE_1",
+          "type": "function_call",
+          "status": "in_progress",
+          "call_id": "a1",
+          "name": "lookup",
+          "arguments": ""
+        }
+      },
+      {
+        "type": "response.function_call_arguments.delta",
+        "sequence_number": 9,
+        "item_id": "fc_FIXTURE_1",
+        "output_index": 1,
+        "delta": "{\"x\":2}"
+      },
+      {
+        "type": "response.function_call_arguments.done",
+        "sequence_number": 10,
+        "item_id": "fc_FIXTURE_1",
+        "output_index": 1,
+        "arguments": "{\"x\":2}"
+      },
+      {
+        "type": "response.output_item.done",
+        "sequence_number": 11,
+        "output_index": 1,
+        "item": {
+          "id": "fc_FIXTURE_1",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "a1",
+          "name": "lookup",
+          "arguments": "{\"x\":2}"
+        }
+      },
+      {
+        "type": "response.completed",
+        "sequence_number": 12,
+        "response": {
+          "id": "resp_FIXTURE_1",
+          "object": "response",
+          "created_at": 0,
+          "status": "completed",
+          "error": null,
+          "model": "mock-model",
+          "output": [
+            {
+              "id": "msg_FIXTURE_1",
+              "type": "message",
+              "role": "assistant",
+              "status": "completed",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "answer",
+                  "annotations": []
+                }
+              ]
+            },
+            {
+              "id": "fc_FIXTURE_1",
+              "type": "function_call",
+              "status": "completed",
+              "call_id": "a1",
+              "name": "lookup",
+              "arguments": "{\"x\":2}"
+            }
+          ],
+          "usage": {
+            "input_tokens": 7,
+            "output_tokens": 9,
+            "total_tokens": 16
+          },
+          "incomplete_details": null
+        }
+      }
+    ],
+    "payload": {
+      "model": "mock-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "hi"
+            }
+          ]
+        }
+      ],
+      "max_tokens": 32000,
+      "stream": false
+    }
+  }
+]

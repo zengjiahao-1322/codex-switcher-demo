@@ -352,6 +352,8 @@ pub struct Prepared {
     pub label: String,
     reason: &'static str,
     snapshot: bool,
+    adapter_target: Option<Value>,
+    autostart: bool,
 }
 impl Prepared {
     pub fn apply(self, app: &App) -> io::Result<Value> {
@@ -386,8 +388,21 @@ impl Prepared {
         } else {
             write_json(&app.bridge.join("current.json"), &self.current)?;
         }
+        if let Some(target) = self.adapter_target {
+            let mut settings = crate::adapter::settings(app)?;
+            settings["target"] = target;
+            write_json(&app.bridge.join("adapter.json"), &settings)?;
+            if self.autostart
+                && settings["autostartDecided"] != true
+                && !crate::integration::startup_file().exists()
+            {
+                crate::integration::autostart(true, &app.bridge)?;
+            }
+        }
         effect(&home, &app.bridge)?;
-        Ok(json!({"label":self.label,"mode":"direct","catalogCount":count}))
+        Ok(
+            json!({"label":self.label,"mode":self.current["mode"].as_str().unwrap_or("direct"),"catalogCount":count}),
+        )
     }
 }
 pub async fn prepare_api(app: &App, input: &Value) -> io::Result<Prepared> {
@@ -408,14 +423,17 @@ pub async fn prepare_api(app: &App, input: &Value) -> io::Result<Prepared> {
             )));
         }
     }
-    if mode == "adapter" || access(&app.bridge, &p)? == "adapter" {
-        return Err(io::Error::other("本机转换服务尚未迁移，未修改配置。"));
-    }
+    let adapter = mode == "adapter" || access(&app.bridge, &p)? == "adapter";
+    let target = if adapter {
+        crate::adapter::local_provider(app, &p).await?
+    } else {
+        p.clone()
+    };
     let original = read(&app.codex_home().join("config.toml"))?;
     let mut staged = catalog(app, &p, model).await?;
     let candidate = text::prepare(
         original.as_deref().unwrap_or(""),
-        &p,
+        &target,
         model,
         staged.as_ref().and_then(|s| s.path.to_str()),
     )?;
@@ -426,13 +444,13 @@ pub async fn prepare_api(app: &App, input: &Value) -> io::Result<Prepared> {
         staged = None;
         validate(
             app,
-            &text::prepare(original.as_deref().unwrap_or(""), &p, model, None)?,
+            &text::prepare(original.as_deref().unwrap_or(""), &target, model, None)?,
         )
         .await?;
     }
     let next = text::prepare(
         original.as_deref().unwrap_or(""),
-        &p,
+        &target,
         model,
         staged
             .as_ref()
@@ -446,32 +464,42 @@ pub async fn prepare_api(app: &App, input: &Value) -> io::Result<Prepared> {
         original,
         next,
         staged,
-        current: json!({"providerId":id,"model":model,"mode":"direct","at":crate::diagnostics::now()}),
+        current: json!({"providerId":id,"model":model,"mode":if adapter{"adapter"}else{"direct"},"at":crate::diagnostics::now()}),
         label: p["name"].as_str().unwrap_or("").into(),
         reason: "switch",
         snapshot,
+        adapter_target: adapter.then(|| crate::adapter::target(&p, model)),
+        autostart: adapter && input["autostart"] != false,
     })
 }
 pub async fn prepare_backup(app: &App, id: &str) -> io::Result<Prepared> {
     let value = backup(&app.bridge, id)?;
     let config = parsed(&value)?;
     let target = &config["model_providers"]["hermes_bridge"];
-    let adapter = store::read_json(&app.bridge.join("adapter.json"))?;
-    if config["model_provider"] == "hermes_bridge"
-        && adapter["port"]
+    let settings = crate::adapter::settings(app)?;
+    let adapter = config["model_provider"] == "hermes_bridge"
+        && settings["port"]
             .as_u64()
-            .is_some_and(|port| target["base_url"] == format!("http://127.0.0.1:{port}/v1"))
-    {
-        return Err(io::Error::other("本机转换服务尚未迁移，未修改配置。"));
-    }
+            .is_some_and(|port| target["base_url"] == format!("http://127.0.0.1:{port}/v1"));
     let saved = store::load(&app.bridge)?["providers"]
         .as_array()
         .unwrap()
         .iter()
         .find(|p| {
-            p["baseUrl"] == target["base_url"] && p["apiKey"] == target["experimental_bearer_token"]
+            if adapter {
+                target["name"] == format!("{}（经本机转换）", p["name"].as_str().unwrap_or(""))
+            } else {
+                p["baseUrl"] == target["base_url"]
+                    && p["apiKey"] == target["experimental_bearer_token"]
+            }
         })
         .cloned();
+    if adapter {
+        let provider = saved.as_ref().ok_or_else(|| {
+            io::Error::other("这份备份使用的 API 配置已删除或改名，无法恢复本机转换目标。")
+        })?;
+        crate::adapter::local_provider(app, provider).await?;
+    }
     let catalog_path = app.bridge.join("model-catalog.json");
     let managed = config["model_provider"] == "hermes_bridge"
         && config["model_catalog_json"].as_str() == catalog_path.to_str();
@@ -507,7 +535,11 @@ pub async fn prepare_backup(app: &App, id: &str) -> io::Result<Prepared> {
         value
     };
     let original = read(&app.codex_home().join("config.toml"))?;
-    let current=saved.map(|p|json!({"providerId":p["id"],"model":config["model"],"mode":"direct","at":crate::diagnostics::now()})).unwrap_or(Value::Null);
+    let adapter_target = saved
+        .as_ref()
+        .filter(|_| adapter)
+        .map(|p| crate::adapter::target(p, config["model"].as_str().unwrap_or("")));
+    let current=saved.map(|p|json!({"providerId":p["id"],"model":config["model"],"mode":if adapter{"adapter"}else{"direct"},"at":crate::diagnostics::now()})).unwrap_or(Value::Null);
     Ok(Prepared {
         original,
         next,
@@ -516,6 +548,8 @@ pub async fn prepare_backup(app: &App, id: &str) -> io::Result<Prepared> {
         label: summary(&config),
         reason: "restore",
         snapshot: false,
+        adapter_target,
+        autostart: false,
     })
 }
 fn follow(input: &Value) -> io::Result<()> {
@@ -706,66 +740,8 @@ pub async fn action(app: &std::sync::Arc<App>, action: &str, input: &Value) -> i
             if id == "official" {
                 return official(app, input, false).await;
             }
-            let p = provider(&app.bridge, id)?;
-            let model = input["model"]
-                .as_str()
-                .filter(|s| !s.trim().is_empty())
-                .ok_or_else(|| io::Error::other("请选择或填写模型"))?;
-            let checked = crate::config_network::probe(&p, model).await?;
-            probe_record(&app.bridge, &p, model, &checked)?;
-            if checked["ok"] != true {
-                return Err(io::Error::other(format!(
-                    "检测未通过，未切换：{}",
-                    checked["message"].as_str().unwrap_or("")
-                )));
-            }
-            if checked["mode"] != "direct" {
-                return Err(io::Error::other("本机转换服务尚未迁移，未修改配置。"));
-            }
-            let file = home.join("config.toml");
-            let original = read(&file)?;
-            let mut staged = catalog(app, &p, model).await?;
-            let candidate = text::prepare(
-                original.as_deref().unwrap_or(""),
-                &p,
-                model,
-                staged.as_ref().map(|s| s.path.to_str().unwrap()),
-            )?;
-            if let Err(error) = validate(app, &candidate).await {
-                if staged.is_none() {
-                    return Err(error);
-                }
-                staged = None;
-                validate(
-                    app,
-                    &text::prepare(original.as_deref().unwrap_or(""), &p, model, None)?,
-                )
-                .await?;
-            }
-            let catalog_path = app.bridge.join("model-catalog.json");
-            let next = text::prepare(
-                original.as_deref().unwrap_or(""),
-                &p,
-                model,
-                staged.as_ref().map(|_| catalog_path.to_str().unwrap()),
-            )?;
-            let _lock = lock(home.join(".hermes-bridge.lock"), false)?;
-            let before = parsed(original.as_deref().unwrap_or(""))?;
-            let snapshot = app.bridge.join("original-config.toml");
-            if !snapshot.exists() || before["model_provider"] != "hermes_bridge" {
-                atomic(&snapshot, original.as_deref().unwrap_or(""), None)?;
-            }
-            save_backup(&home, &app.bridge, "switch")?;
-            if let Some(staged) = &staged {
-                fs::rename(&staged.path, &catalog_path)?;
-            }
-            atomic(&file, &next, Some(original.as_deref()))?;
-            write_json(
-                &app.bridge.join("current.json"),
-                &json!({"providerId":id,"model":model,"mode":"direct","at":crate::diagnostics::now()}),
-            )?;
-            effect(&home, &app.bridge)?;
-            drop(_lock);
+            let prepared = prepare_api(app, input).await?;
+            let mut result = prepared.apply(app)?;
             let threads = crate::thread_routing::synchronize(
                 app,
                 crate::switching::mode(input)?,
@@ -773,9 +749,18 @@ pub async fn action(app: &std::sync::Arc<App>, action: &str, input: &Value) -> i
             )
             .await
             .map_err(|(e, _)| e)?;
-            Ok(
-                json!({"mode":"direct","catalogCount":staged.as_ref().map_or(0, |_| store::read_json(&catalog_path).ok().and_then(|v|v["models"].as_array().map(Vec::len)).unwrap_or(0)),"threads":threads,"message":format!("已切换到「{}」（直连，模型 {model}）。{EFFECT}",p["name"].as_str().unwrap())}),
-            )
+            result["threads"] = threads;
+            result["message"] = json!(format!(
+                "已切换到「{}」（{}，模型 {}）。{EFFECT}",
+                result["label"].as_str().unwrap_or(""),
+                if result["mode"] == "adapter" {
+                    "经本机转换"
+                } else {
+                    "直连"
+                },
+                input["model"].as_str().unwrap_or("")
+            ));
+            Ok(result)
         }
         "restore" => {
             follow(input)?;

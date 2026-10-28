@@ -1,5 +1,6 @@
 mod accounts;
 mod adapter;
+mod adapter_convert;
 mod config;
 mod config_catalog;
 mod config_network;

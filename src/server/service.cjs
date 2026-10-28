@@ -585,7 +585,12 @@ function createService({
           managedCatalog ? (catalog ? catalogPath : null) : undefined,
         );
         if (adapter) {
-          a.target = { providerId: saved.id, model: config.model, apiMode: saved.apiMode };
+          a.target = {
+            providerId: saved.id,
+            model: config.model,
+            apiMode:
+              saved.apiMode === 'anthropic_messages' ? 'anthropic_messages' : 'chat_completions',
+          };
           saveAdapter(a);
         }
         if (saved)

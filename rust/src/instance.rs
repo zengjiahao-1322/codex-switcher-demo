@@ -365,6 +365,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         accounts: crate::accounts::Runtime::default(),
         editors: crate::editors::Runtime::default(),
     };
+    crate::adapter::settings(&app)?;
     let service_ms = service_started.elapsed().as_millis();
     let mut handover = json!({});
     let listen_started = Instant::now();

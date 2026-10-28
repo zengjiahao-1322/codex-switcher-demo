@@ -14,6 +14,8 @@ if (!fs.existsSync(rustBinary()))
 // The others call JS modules or use JS mocks directly. Running them unchanged
 // cannot establish Rust parity. Keep their names/counts in the migration table.
 const httpPatterns = {
+  'blackbox-adapter.test.cjs': '.*',
+  'blackbox-process-fault.test.cjs': '.*',
   'blackbox-accounts.test.cjs': '.*',
   'blackbox-accounts-network.test.cjs': '.*',
   'blackbox-accounts-native.test.cjs': '.*',
@@ -34,10 +36,9 @@ const httpPatterns = {
   'blackbox-config-backups.test.cjs': '.*',
   'blackbox-config-network.test.cjs': '.*',
   'server.test.cjs': '.*',
-  'server-adapter.test.cjs': '.*',
   'main.test.cjs': '.*',
   'startup-log.test.cjs': '.*',
-  'long-poll.test.cjs': '^(不带 wait|带 wait=|挂起期间另一进程|多个挂起窗口)',
+  'long-poll.test.cjs': '^(不带 wait|带 wait=|挂起期间另一进程)',
   'remote-servers.test.cjs': '^(HTTP心跳|独立remoteSwitch)',
 };
 const report = {

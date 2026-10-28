@@ -17,6 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 type Download = (Instant, String, Vec<u8>);
+pub type Body = http_body_util::combinators::UnsyncBoxBody<Bytes, Infallible>;
 pub(crate) struct App {
     pub home: PathBuf,
     pub bridge: PathBuf,
@@ -160,17 +161,17 @@ fn same_secret(left: &str, right: &str) -> bool {
             .fold(0u8, |difference, (a, b)| difference | (a ^ b))
             == 0
 }
-fn response(status: u16, content_type: &str, bytes: Vec<u8>) -> Response<Full<Bytes>> {
+pub(crate) fn response(status: u16, content_type: &str, bytes: Vec<u8>) -> Response<Body> {
     Response::builder()
         .status(status)
         .header("Content-Type", content_type)
         .header("Cache-Control", "no-store")
         .header("X-Content-Type-Options", "nosniff")
         .header("Referrer-Policy", "no-referrer")
-        .body(Full::new(Bytes::from(bytes)))
+        .body(Full::new(Bytes::from(bytes)).boxed_unsync())
         .unwrap()
 }
-fn error(status: u16, message: &str) -> Response<Full<Bytes>> {
+fn error(status: u16, message: &str) -> Response<Body> {
     response(
         status,
         "application/json; charset=utf-8",
@@ -180,7 +181,7 @@ fn error(status: u16, message: &str) -> Response<Full<Bytes>> {
 pub(crate) async fn serve(
     req: Request<Incoming>,
     app: Arc<App>,
-) -> Result<Response<Full<Bytes>>, Infallible> {
+) -> Result<Response<Body>, Infallible> {
     let host = req
         .headers()
         .get("host")
@@ -195,6 +196,27 @@ pub(crate) async fn serve(
         return Ok(error(403, "Origin rejected"));
     }
     let route = req.uri().path().to_owned();
+    if route == "/v1/responses" {
+        let settings = match crate::adapter::settings(&app) {
+            Ok(value) => value,
+            Err(_) => return Ok(error(500, "Adapter settings unavailable")),
+        };
+        if !settings["token"].as_str().is_some_and(|token| {
+            same_secret(
+                req.headers()
+                    .get("authorization")
+                    .and_then(|s| s.to_str().ok())
+                    .unwrap_or(""),
+                &format!("Bearer {token}"),
+            )
+        }) {
+            return Ok(error(401, "Proxy authentication required"));
+        }
+        if req.method() != "POST" {
+            return Ok(error(405, "POST required"));
+        }
+        return Ok(crate::adapter::handle(req, app, settings).await);
+    }
     if req.method() == "GET" && route.starts_with("/download/") {
         let item = app.downloads.lock().unwrap().remove(&route[10..]);
         if let Some((at, name, bytes)) = item

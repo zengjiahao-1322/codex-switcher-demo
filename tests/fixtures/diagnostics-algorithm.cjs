@@ -5,7 +5,17 @@ const [inputFile, outputFile] = process.argv.slice(2);
 const input = JSON.parse(fs.readFileSync(inputFile, 'utf8'));
 async function run() {
   let output;
-  if (input.op === 'clientSnapshot')
+  if (input.op === 'stopProcess') {
+    try {
+      await require('../../src/platform/process-stop.cjs').stopProcesses([input.pid]);
+      output = { failed: false };
+    } catch (error) {
+      output = {
+        failed: true,
+        permissionDenied: error.code === 'EPERM' || error.code === 'EACCES',
+      };
+    }
+  } else if (input.op === 'clientSnapshot')
     output = require('../../src/clients/client-status.cjs').snapshot(input.home, input.bridge, {
       inventory: input.inventory,
     });

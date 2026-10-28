@@ -259,6 +259,14 @@ fn remote_snapshot(bridge: &Path) -> io::Result<Vec<Value>> {
 pub async fn algorithm(args: &[String]) -> io::Result<()> {
     let input: Value = serde_json::from_slice(&fs::read(&args[0])?).map_err(io::Error::other)?;
     let output = match input["op"].as_str() {
+        Some("stopProcess") => {
+            match crate::platform::stop(input["pid"].as_u64().unwrap() as u32).await {
+                Ok(()) => json!({"failed":false}),
+                Err(error) => {
+                    json!({"failed":true,"permissionDenied":error.kind()==io::ErrorKind::PermissionDenied})
+                }
+            }
+        }
         Some("clientSnapshot") => crate::editors::snapshot(
             Path::new(input["home"].as_str().unwrap()),
             Path::new(input["bridge"].as_str().unwrap()),
