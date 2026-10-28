@@ -315,6 +315,37 @@ pub(crate) async fn serve(
                     );
                     return Ok(response(200,"application/json; charset=utf-8",serde_json::to_vec(&json!({"filename":"codex-switcher-companion.vsix","url":format!("/download/{key}")})).unwrap()));
                 }
+                if action == "clientHeartbeat" {
+                    let input_value = input.unwrap();
+                    let mut result = match crate::platform::heartbeat(&app.bridge, &input_value) {
+                        Ok(value) => response(
+                            200,
+                            "application/json; charset=utf-8",
+                            serde_json::to_vec(&value).unwrap(),
+                        ),
+                        Err(value) => error(400, &value.to_string()),
+                    };
+                    let wait = input_value["wait"].as_u64().unwrap_or(0).min(25000);
+                    if wait > 0 {
+                        let id = input_value["id"].as_str().unwrap_or("").to_owned();
+                        let file = app.bridge.join("clients").join(format!("{id}.json"));
+                        let until = tokio::time::Instant::now() + Duration::from_millis(wait);
+                        loop {
+                            if let Ok(bytes) = fs::read(&file)
+                                && let Ok(row) = serde_json::from_slice::<Value>(&bytes)
+                                && row["command"].is_object()
+                            {
+                                result=response(200,"application/json; charset=utf-8",serde_json::to_vec(&json!({"command":row["command"],"connection":{"state":"unmatched","home":input_value["home"],"backendPids":[]},"longPoll":true})).unwrap());
+                                break;
+                            }
+                            if tokio::time::Instant::now() >= until {
+                                break;
+                            }
+                            tokio::time::sleep(Duration::from_millis(25)).await;
+                        }
+                    }
+                    return Ok(result);
+                }
                 if crate::accounts::ACTIONS.contains(&action) {
                     return Ok(
                         match crate::accounts::action(app.clone(), action, &input.unwrap()).await {
