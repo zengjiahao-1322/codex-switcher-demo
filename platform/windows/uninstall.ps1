@@ -5,27 +5,43 @@
 # Keep this file ASCII-only (Windows PowerShell 5.1 reads scripts with the ANSI code page).
 param([switch]$KeepData, [switch]$KeepCodexConfig)
 $ErrorActionPreference = 'Stop'
+[Environment]::CurrentDirectory = [IO.Path]::GetTempPath()
 $InstallDir = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'main.cjs')) -or -not (Test-Path -LiteralPath (Join-Path $InstallDir 'package.json'))) { throw 'Run uninstall.ps1 from the complete installed app folder.' }
 $packageInfo = Get-Content -LiteralPath (Join-Path $InstallDir 'package.json') -Raw | ConvertFrom-Json
 if ($packageInfo.name -ne 'codex-api-switcher') { throw 'Unexpected uninstall folder.' }
 $node = Join-Path $InstallDir 'runtime\node.exe'
 $cli = Join-Path $InstallDir 'scripts/cli.cjs'
+$native = Join-Path $InstallDir 'switcher-prototype.exe'
+$cliExe = if (Test-Path -LiteralPath $native) { $native } else { $node }
+[string[]]$cliPrefix = if (Test-Path -LiteralPath $native) { @('--cli') } else { @($cli) }
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
+if ($env:BRIDGE_UNINSTALL_READY) { [IO.File]::WriteAllText($env:BRIDGE_UNINSTALL_READY, 'ready') }
 if ($env:BRIDGE_UNINSTALL_PID) {
   while (Get-Process -Id ([int]$env:BRIDGE_UNINSTALL_PID) -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 200 }
 }
 
 $running = Join-Path $InstallDir 'private\running.json'
-if (Test-Path $running) { try { $r = Get-Content $running -Raw | ConvertFrom-Json; $serviceProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($r.pid)"; if ($serviceProcess.ExecutablePath -ne $node -or -not $serviceProcess.CommandLine.Contains((Join-Path $InstallDir 'main.cjs'))) { throw 'Unexpected process' }; Stop-Process -Id $r.pid -Force -ErrorAction Stop; Step 'Stopped the running service' } catch {} }
+if (Test-Path -LiteralPath $running) {
+  $record = Get-Content -LiteralPath $running -Raw | ConvertFrom-Json
+  $servicePid = [int]$record.pid
+  $serviceProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $servicePid"
+  if ($serviceProcess) {
+    $ownsNode = $serviceProcess.ExecutablePath -eq $node -and $serviceProcess.CommandLine.Contains((Join-Path $InstallDir 'main.cjs'))
+    $ownsNative = $serviceProcess.ExecutablePath -eq $native
+    if (-not ($ownsNode -or $ownsNative)) { throw 'Unexpected process in the running record; nothing was removed.' }
+    Stop-Process -Id $servicePid -Force -ErrorAction Stop
+    Step 'Stopped the running service'
+  }
+}
 
-if ((Test-Path $node) -and (Test-Path $cli)) {
-  if (-not $KeepCodexConfig -and (& $node $cli status) -eq 'BRIDGED') {
+if ((Test-Path $cliExe) -and ((Test-Path $native) -or (Test-Path $cli))) {
+  if (-not $KeepCodexConfig -and (& $cliExe @cliPrefix status --no-open) -eq 'BRIDGED') {
     Step 'Switching Codex back to its official login'
-    & $node $cli restore; if ($LASTEXITCODE -ne 0) { throw 'Could not restore the official Codex config; nothing was removed.' }
+    & $cliExe @cliPrefix restore --no-open; if ($LASTEXITCODE -ne 0) { throw 'Could not restore the official Codex config; nothing was removed.' }
     Step 'Cleaning the switcher entries from Codex config'
-    & $node $cli cleanup; if ($LASTEXITCODE -ne 0) { throw 'Could not clean Codex config; nothing was removed.' }
-  } elseif ((& $node $cli status) -eq 'BRIDGED') {
+    & $cliExe @cliPrefix cleanup --no-open; if ($LASTEXITCODE -ne 0) { throw 'Could not clean Codex config; nothing was removed.' }
+  } elseif ((& $cliExe @cliPrefix status --no-open) -eq 'BRIDGED') {
     Write-Warning 'Codex still uses a config from this tool and will stop working once the tool is removed.'
   }
 }

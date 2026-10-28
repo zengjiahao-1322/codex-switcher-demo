@@ -750,6 +750,7 @@ pub async fn fixture(input: &Value) -> io::Result<Value> {
         downloads: std::sync::Mutex::new(std::collections::HashMap::new()),
         accounts: Runtime::default(),
         editors: crate::editors::Runtime::default(),
+        updates: crate::update::Runtime::default(),
     };
     capture(&app)?;
     match text(&input["method"]) {

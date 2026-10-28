@@ -5,7 +5,25 @@ const [inputFile, outputFile] = process.argv.slice(2);
 const input = JSON.parse(fs.readFileSync(inputFile, 'utf8'));
 async function run() {
   let output;
-  if (input.op === 'stopProcess') {
+  if (input.op === 'updateTransport') {
+    let call;
+    const transport = require('../../src/server/update.cjs').transportFor(input.home, {
+      platform: input.platform,
+      execute: async (exe, args) => {
+        call = { exe, args };
+        throw Object.assign(Error('Command failed PRIVATE-PATH'), {
+          code: input.code,
+          stderr: Buffer.from(input.stderr, 'base64'),
+        });
+      },
+    });
+    try {
+      if (input.quick) await transport.readJson('https://github.com/fixture/package.zip');
+      else await transport.download('https://github.com/fixture/package.zip', 'fixture-output.zip');
+    } catch (error) {
+      output = { ...call, message: error.message, curl: error.curl };
+    }
+  } else if (input.op === 'stopProcess') {
     try {
       await require('../../src/platform/process-stop.cjs').stopProcesses([input.pid]);
       output = { failed: false };

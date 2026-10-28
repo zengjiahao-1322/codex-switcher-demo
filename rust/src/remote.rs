@@ -304,7 +304,7 @@ pub async fn apply(app: Arc<App>, input: &Value) -> io::Result<Value> {
         }
         let catalog = crate::config_catalog::build(&app.codex_home(), &p, model)
             .await?
-            .map(|v| serde_json::to_string_pretty(&v).unwrap());
+            .map(|v| serde_json::to_string_pretty(&v.value).unwrap());
         (Value::Null, p, catalog)
     };
     let groups = groups(&app.bridge)?

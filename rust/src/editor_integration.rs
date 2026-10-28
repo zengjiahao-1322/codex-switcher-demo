@@ -141,3 +141,23 @@ pub async fn install(app: &App, input: &Value) -> io::Result<Value> {
         json!({"message":format!("已为 {} 安装伴随扩展。已有窗口可能需要先执行一次“重载窗口”才能启用新版本；打开 Codex 后，状态栏显示“Codex Switcher · 已接入”才表示后端已关联，可自动重载。",text(&editor["name"]))}),
     )
 }
+
+pub async fn update_all(app: &std::sync::Arc<App>) -> io::Result<Value> {
+    let mut results = vec![];
+    for editor in editors()? {
+        let result = match install(app, &json!({"id":editor["id"]})).await {
+            Ok(mut result) => {
+                result["name"] = editor["name"].clone();
+                result
+            }
+            Err(error) => json!({"name":editor["name"],"error":error.to_string()}),
+        };
+        results.push(result);
+    }
+    let stopped = crate::editors::records(&app.bridge)?
+        .into_iter()
+        .map(|row| json!({"editorId":row["id"],"name":row["name"],"workspace":row["workspace"]}))
+        .collect::<Vec<_>>();
+    let reload = crate::editors::reload(app, &json!({}), &stopped, false)?;
+    Ok(json!({"results":results,"reload":reload}))
+}

@@ -52,7 +52,15 @@ function createLifecycle({
       throw Error('切换任务正在进行，请等它完成后再退出或卸载。');
   };
   const finish = (after) =>
-    setTimeout(() => {
+    setTimeout(async () => {
+      if (after) {
+        try {
+          await after();
+        } catch (error) {
+          log(bridgeHome, 'app.uninstall', { error: error.message });
+          return;
+        }
+      }
       for (const file of [
         path.join(bridgeHome, 'running.json'),
         discoveryDir && path.join(discoveryDir, 'connection.json'),
@@ -60,7 +68,6 @@ function createLifecycle({
         if (fs.existsSync(file) && JSON.parse(fs.readFileSync(file)).pid === process.pid)
           fs.rmSync(file);
       }
-      after?.();
       shutdown();
     }, 200);
   function quit() {
@@ -90,10 +97,8 @@ function createLifecycle({
             '-NonInteractive',
             '-ExecutionPolicy',
             'Bypass',
-            '-File',
-            path.join(projectDir, 'uninstall.ps1'),
-            '-KeepCodexConfig',
-            ...(keepData ? ['-KeepData'] : []),
+            '-Command',
+            `$a=@("-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",('"' + $env:BRIDGE_UNINSTALL_SCRIPT + '"'),"-KeepCodexConfig"); if($env:BRIDGE_UNINSTALL_KEEP_DATA -eq "true"){$a+="-KeepData"}; Start-Process -FilePath (Join-Path $PSHOME "powershell.exe") -WindowStyle Hidden -ArgumentList $a`,
           ]
         : [
             path.join(projectDir, 'platform/macos/uninstall-mac.sh'),
@@ -102,20 +107,53 @@ function createLifecycle({
             String(keepData),
             String(process.pid),
           ];
-    finish(() => {
-      const child = spawn(platform === 'win32' ? 'powershell.exe' : '/bin/bash', args, {
-        detached: true,
-        windowsHide: true,
-        stdio: 'ignore',
-        env: {
-          ...process.env,
-          BRIDGE_HOME: bridgeHome,
-          BRIDGE_CODEX_HOME: codexHome,
-          BRIDGE_UNINSTALL_PID: String(process.pid),
-        },
-      });
-      child.unref();
-    });
+    finish(
+      () =>
+        new Promise((resolve, reject) => {
+          const ready = path.join(bridgeHome, 'uninstall-ready-' + process.pid);
+          fs.rmSync(ready, { force: true });
+          const watcher = fs.watch(bridgeHome, (_event, name) => {
+            if (String(name) === path.basename(ready) && fs.existsSync(ready)) finishLaunch();
+          });
+          const timer = setTimeout(() => finishLaunch(Error('卸载进程未能启动。')), 10000);
+          function finishLaunch(error) {
+            watcher.close();
+            clearTimeout(timer);
+            child.off('error', finishLaunch);
+            child.off('exit', earlyExit);
+            fs.rmSync(ready, { force: true });
+            if (error) {
+              child.kill();
+              reject(error);
+            } else {
+              child.unref();
+              resolve();
+            }
+          }
+          const earlyExit = (code) => {
+            if (platform !== 'win32' || code !== 0)
+              finishLaunch(Error('卸载进程提前退出：' + code));
+          };
+          const child = spawn(platform === 'win32' ? 'powershell.exe' : '/bin/bash', args, {
+            // PowerShell needs its own hidden console to outlive the Node console.
+            // DETACHED_PROCESS silently exits before executing the script.
+            detached: platform !== 'win32',
+            windowsHide: true,
+            stdio: 'ignore',
+            env: {
+              ...process.env,
+              BRIDGE_HOME: bridgeHome,
+              BRIDGE_CODEX_HOME: codexHome,
+              BRIDGE_UNINSTALL_PID: String(process.pid),
+              BRIDGE_UNINSTALL_READY: ready,
+              BRIDGE_UNINSTALL_SCRIPT: path.join(projectDir, 'uninstall.ps1'),
+              BRIDGE_UNINSTALL_KEEP_DATA: String(keepData),
+            },
+          });
+          child.once('error', finishLaunch);
+          child.once('exit', earlyExit);
+        }),
+    );
     return { message: '正在卸载，完成后可关闭本页。' };
   }
   return { quit, uninstall };

@@ -11,7 +11,9 @@ const project = path.resolve(__dirname, '..');
 const { isRust, rustBinary } = require('./backend.cjs');
 function launchBackend(environment) {
   return spawn(
-    isRust ? environment.SWITCHER_BLACKBOX_EXE || rustBinary() : process.execPath,
+    isRust
+      ? environment.SWITCHER_BLACKBOX_EXE || rustBinary()
+      : environment.SWITCHER_BLACKBOX_NODE || process.execPath,
     isRust
       ? ['--no-open']
       : [path.join(environment.SWITCHER_BLACKBOX_PROJECT || project, 'main.cjs'), '--no-open'],

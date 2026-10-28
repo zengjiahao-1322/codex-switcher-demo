@@ -62,4 +62,26 @@ test('扩展安装黑盒：仅调用TEMP编辑器官方CLI，带force并保留JS
   assert.equal(path.dirname(recorded.args[1]), f.bridge);
   assert.ok(fs.readFileSync(recorded.args[1]).includes(Buffer.from('extension/package.json')));
   await api(f, 'companionInstall', { id: 99999 }, 400);
+  fs.mkdirSync(path.join(f.bridge, 'clients'), { recursive: true });
+  fs.writeFileSync(
+    path.join(f.bridge, 'clients', 'separate-window.json'),
+    JSON.stringify({
+      id: 'separate-window',
+      name: 'VS Code',
+      workspace: 'independent',
+      seenAt: Date.now(),
+      codexHome: path.join(f.root, 'separate'),
+    }),
+  );
+  const updated = await api(f, 'updateCompanions', {});
+  assert.equal(updated.results.length, 1);
+  assert.equal(updated.results[0].name, 'VS Code');
+  assert.equal(updated.results[0].error, undefined);
+  assert.equal(updated.reload.count, 1);
+  assert.equal(updated.reload.targets[0].id, 'separate-window');
+  assert.equal(
+    JSON.parse(fs.readFileSync(path.join(f.bridge, 'clients', 'separate-window.json'))).command
+      .type,
+    'reload',
+  );
 });

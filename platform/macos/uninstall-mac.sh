@@ -6,6 +6,7 @@ keep="$3"
 pid="$4"
 app="$(cd "$resources/../.." && pwd)"
 case "$app" in *.app) ;; *) echo 'Unexpected application path' >&2; exit 1 ;; esac
+if [ -n "${BRIDGE_UNINSTALL_READY:-}" ]; then printf ready > "$BRIDGE_UNINSTALL_READY"; fi
 while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done
 rm -f "$HOME/Library/LaunchAgents/com.codex-switcher.demo.plist"
 if [ "$keep" != 'true' ] && [ -e "$data" ]; then

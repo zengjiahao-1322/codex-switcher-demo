@@ -324,6 +324,8 @@ async fn validate(app: &App, next: &str) -> io::Result<()> {
 
 struct StagedCatalog {
     path: PathBuf,
+    source: &'static str,
+    truncated: bool,
 }
 impl Drop for StagedCatalog {
     fn drop(&mut self) {
@@ -341,8 +343,16 @@ async fn catalog(app: &App, p: &Value, model: &str) -> io::Result<Option<StagedC
         crate::diagnostics::now().replace([':', '.', '+'], "")
     );
     let path = app.bridge.join(name);
-    atomic(&path, &serde_json::to_string_pretty(&value).unwrap(), None)?;
-    Ok(Some(StagedCatalog { path }))
+    atomic(
+        &path,
+        &serde_json::to_string_pretty(&value.value).unwrap(),
+        None,
+    )?;
+    Ok(Some(StagedCatalog {
+        path,
+        source: value.source,
+        truncated: value.truncated,
+    }))
 }
 pub struct Prepared {
     original: Option<String>,
@@ -373,11 +383,25 @@ impl Prepared {
             )?;
         }
         save_backup(&home, &app.bridge, self.reason)?;
+        let mut catalog_note = "未能生成 Codex 模型列表（未找到 Codex 官方模型缓存或 Codex 不接受），Codex 模型下拉仍显示官方列表，但实际使用你选择的模型。".to_owned();
         let count = if let Some(staged) = &self.staged {
             let count = store::read_json(&staged.path)?["models"]
                 .as_array()
                 .map_or(0, Vec::len);
             fs::rename(&staged.path, app.bridge.join("model-catalog.json"))?;
+            catalog_note = format!(
+                "Codex 的模型下拉列表已改为该配置的 {count} 个模型（{}{}）。",
+                if staged.source == "configured" {
+                    "按你在配置中选的模型"
+                } else {
+                    "供应商提供的全部对话模型；想精简可在配置的“其他可选模型”中指定"
+                },
+                if staged.truncated {
+                    "；供应商模型过多，只列出配置中的模型"
+                } else {
+                    ""
+                }
+            );
             count
         } else {
             0
@@ -388,6 +412,7 @@ impl Prepared {
         } else {
             write_json(&app.bridge.join("current.json"), &self.current)?;
         }
+        let mut note = "";
         if let Some(target) = self.adapter_target {
             let mut settings = crate::adapter::settings(app)?;
             settings["target"] = target;
@@ -397,12 +422,24 @@ impl Prepared {
                 && !crate::integration::startup_file().exists()
             {
                 crate::integration::autostart(true, &app.bridge)?;
+                note = "已开启开机自启转换服务（可在切换器中关闭）。";
+            } else if !crate::integration::startup_file().exists() {
+                note = "注意：未开启开机自启，重启电脑后需先打开切换器，Codex 才能使用该配置。";
             }
         }
         effect(&home, &app.bridge)?;
-        Ok(
-            json!({"label":self.label,"mode":self.current["mode"].as_str().unwrap_or("direct"),"catalogCount":count}),
-        )
+        let mode = self.current["mode"].as_str().unwrap_or("direct");
+        let message = format!(
+            "已切换到「{}」（{}，模型 {}）。{catalog_note}{note}官方登录凭据未改动。{EFFECT}\n\n当前为 API 模式，适用于 Codex。聊天 / Work 或部分官方旧会话无法加载时，请选择官方账号并切换。",
+            self.label,
+            if mode == "adapter" {
+                "经本机转换"
+            } else {
+                "直连"
+            },
+            self.current["model"].as_str().unwrap_or("")
+        );
+        Ok(json!({"label":self.label,"mode":mode,"catalogCount":count,"message":message}))
     }
 }
 pub async fn prepare_api(app: &App, input: &Value) -> io::Result<Prepared> {
@@ -425,6 +462,9 @@ pub async fn prepare_api(app: &App, input: &Value) -> io::Result<Prepared> {
     }
     let adapter = mode == "adapter" || access(&app.bridge, &p)? == "adapter";
     let target = if adapter {
+        if std::env::args().nth(1).as_deref() == Some("--mcp") {
+            crate::mcp::ensure_service(app).await?;
+        }
         crate::adapter::local_provider(app, &p).await?
     } else {
         p.clone()
@@ -750,16 +790,6 @@ pub async fn action(app: &std::sync::Arc<App>, action: &str, input: &Value) -> i
             .await
             .map_err(|(e, _)| e)?;
             result["threads"] = threads;
-            result["message"] = json!(format!(
-                "已切换到「{}」（{}，模型 {}）。{EFFECT}",
-                result["label"].as_str().unwrap_or(""),
-                if result["mode"] == "adapter" {
-                    "经本机转换"
-                } else {
-                    "直连"
-                },
-                input["model"].as_str().unwrap_or("")
-            ));
             Ok(result)
         }
         "restore" => {

@@ -46,6 +46,31 @@ pub fn project_root() -> PathBuf {
         .and_then(|p| p.parent().map(PathBuf::from))
         .unwrap_or_else(|| env::current_exe().unwrap().parent().unwrap().to_path_buf())
 }
+pub fn fixture_app() -> io::Result<crate::server::App> {
+    let (home, bridge) = crate::lifecycle::paths();
+    fs::create_dir_all(&bridge)?;
+    Ok(crate::server::App {
+        home,
+        bridge: bridge.clone(),
+        web: project_root().join("web"),
+        token: env::var("SWITCHER_TEST_TOKEN").unwrap_or_default(),
+        port: env::var("BRIDGE_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0),
+        protection: crate::platform::DataProtection {
+            ok: true,
+            path: bridge.clone(),
+            error: None,
+        },
+        first_request: std::sync::atomic::AtomicBool::new(false),
+        ready_at: Instant::now(),
+        downloads: std::sync::Mutex::new(std::collections::HashMap::new()),
+        accounts: crate::accounts::Runtime::default(),
+        editors: crate::editors::Runtime::default(),
+        updates: crate::update::Runtime::default(),
+    })
+}
 pub fn other_action(old: u64, current: u64) -> &'static str {
     if old >= current {
         "deferred"
@@ -248,6 +273,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(&bridge)?;
     let running_path = bridge.join("running.json");
     let discovery = env::var_os("BRIDGE_DISCOVERY_DIR")
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .or_else(|| {
             explicit_bridge
@@ -364,8 +390,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         downloads: std::sync::Mutex::new(std::collections::HashMap::new()),
         accounts: crate::accounts::Runtime::default(),
         editors: crate::editors::Runtime::default(),
+        updates: crate::update::Runtime::default(),
     };
     crate::adapter::settings(&app)?;
+    crate::mcp::migrate(&app)?;
     let service_ms = service_started.elapsed().as_millis();
     let mut handover = json!({});
     let listen_started = Instant::now();

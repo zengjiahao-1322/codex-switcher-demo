@@ -12,6 +12,7 @@ http-body-util = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 toml = { version = "0.8", features = ["preserve_order"] }
+toml_edit = "=0.22.27"
 regex = "1"
 sha2 = "0.10"
 time = { version = "0.3", features = ["formatting", "parsing"] }

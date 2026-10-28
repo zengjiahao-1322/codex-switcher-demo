@@ -30,6 +30,7 @@ pub(crate) struct App {
     pub downloads: Mutex<HashMap<String, Download>>,
     pub accounts: crate::accounts::Runtime,
     pub editors: crate::editors::Runtime,
+    pub updates: crate::update::Runtime,
 }
 pub fn extension_archive(app: &App, remote: bool) -> io::Result<Vec<u8>> {
     let source = app.web.parent().unwrap().join(if remote {
@@ -360,6 +361,11 @@ pub(crate) async fn serve(
                     ));
                 }
                 if [
+                    "checkUpdate",
+                    "installUpdate",
+                    "updateCompanions",
+                    "quit",
+                    "uninstall",
                     "clientHeartbeat",
                     "clients",
                     "reloadClients",
@@ -376,6 +382,11 @@ pub(crate) async fn serve(
                     let input = input.unwrap();
                     let result = match action {
                         "clientHeartbeat" => crate::editors::heartbeat(app.clone(), &input).await,
+                        "checkUpdate" => crate::update::check(&app).await,
+                        "installUpdate" => crate::update::install(app.clone(), &input).await,
+                        "updateCompanions" => crate::editor_integration::update_all(&app).await,
+                        "quit" => crate::lifecycle::quit(app.clone()),
+                        "uninstall" => crate::lifecycle::uninstall(app.clone(), &input).await,
                         "clients" => crate::editors::status(&app).await.map(|mut v| {
                             v["remotes"] =
                                 json!(crate::remote::groups(&app.bridge).unwrap_or_default());
@@ -437,6 +448,7 @@ pub(crate) async fn serve(
                     });
                 }
                 let result = match action {
+                    "integrate" => Some(crate::mcp::integrate(&app, &input.unwrap())),
                     "exportDiagnostics" => Some(crate::diagnostics::export(&app)),
                     "threads" => Some(Ok(crate::diagnostics::threads(
                         &app.codex_home(),

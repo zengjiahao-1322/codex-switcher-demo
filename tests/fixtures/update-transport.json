@@ -1,0 +1,92 @@
+[
+  {
+    "exe": "curl.exe",
+    "args": [
+      "--fail",
+      "--location",
+      "--silent",
+      "--show-error",
+      "--connect-timeout",
+      "10",
+      "--max-time",
+      "20",
+      "--ssl-revoke-best-effort",
+      "https://github.com/fixture/package.zip"
+    ],
+    "message": "连接 GitHub 失败：证书吊销检查无法完成（网络无法访问吊销服务器）。",
+    "curl": {
+      "code": 35,
+      "detail": "curl: (35) schannel: CRYPT_E_REVOCATION_OFFLINE"
+    }
+  },
+  {
+    "exe": "/usr/bin/curl",
+    "args": [
+      "--fail",
+      "--location",
+      "--silent",
+      "--show-error",
+      "--connect-timeout",
+      "15",
+      "--max-time",
+      "240",
+      "--speed-limit",
+      "1",
+      "--speed-time",
+      "20",
+      "--output",
+      "fixture-output.zip",
+      "https://github.com/fixture/package.zip"
+    ],
+    "message": "连接 GitHub 超时，请检查网络或代理后重试。",
+    "curl": {
+      "code": 28,
+      "detail": "curl: (28) Operation timed out"
+    }
+  },
+  {
+    "exe": "curl.exe",
+    "args": [
+      "--fail",
+      "--location",
+      "--silent",
+      "--show-error",
+      "--connect-timeout",
+      "15",
+      "--max-time",
+      "240",
+      "--speed-limit",
+      "1",
+      "--speed-time",
+      "20",
+      "--ssl-revoke-best-effort",
+      "--output",
+      "fixture-output.zip",
+      "https://github.com/fixture/package.zip"
+    ],
+    "message": "连接 GitHub 失败：服务器证书验证未通过。",
+    "curl": {
+      "code": 60,
+      "detail": "curl: (60) SSL certificate verify failed"
+    }
+  },
+  {
+    "exe": "/usr/bin/curl",
+    "args": [
+      "--fail",
+      "--location",
+      "--silent",
+      "--show-error",
+      "--connect-timeout",
+      "10",
+      "--max-time",
+      "20",
+      "https://github.com/fixture/package.zip"
+    ],
+    "message": "连接 GitHub 失败（curl 退出码 7），请检查网络或代理。",
+    "curl": {
+      "code": 7,
+      "detail": "curl: (7) Failed to connect"
+    }
+  }
+]

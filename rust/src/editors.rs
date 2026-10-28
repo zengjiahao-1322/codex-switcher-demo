@@ -754,7 +754,7 @@ pub fn reload(app: &App, input: &Value, stopped: &[Value], only: bool) -> io::Re
     }
     wake(app);
     Ok(
-        json!({"count":output.len(),"detectedEditors":status["ide"],"connectedEditors":status["connectedEditors"],"targets":output,"message":format!("已向 {} 个已接入的编辑器窗口发送重载请求，等待窗口执行。",output.len())}),
+        json!({"count":output.len(),"detectedEditors":status["ide"],"connectedEditors":status["connectedEditors"],"targets":output,"message":if output.is_empty(){"未向任何编辑器窗口发送重载：请先接入伴随扩展，并在客户端列表确认配置目录。".into()}else{format!("已向 {} 个已接入的编辑器窗口发送重载请求，等待窗口执行。",output.len())}}),
     )
 }
 pub fn reload_results(bridge: &Path, targets: &Value) -> io::Result<Value> {

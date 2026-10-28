@@ -251,6 +251,7 @@ pub async fn worker(file: &Path) -> io::Result<()> {
         downloads: std::sync::Mutex::new(std::collections::HashMap::new()),
         accounts: accounts::Runtime::default(),
         editors: editors::Runtime::default(),
+        updates: crate::update::Runtime::default(),
     });
     run(app, job).await
 }

@@ -221,17 +221,7 @@ impl App {
         let build = crate::instance::runtime();
         Ok(json!({
             "build":build,
-            "update":{
-                "current":{
-                    "version":build["version"],
-                    "build":build["id"],
-                    "sequence":build["sequence"]
-                },
-                "dev":build["sequence"].is_null(),
-                "latest":null,
-                "checkedAt":null,
-                "status":"idle"
-            },
+            "update":crate::update::snapshot(self),
             "dataDirProtection":self.protection,
             "environment":environment,
             "current":{
