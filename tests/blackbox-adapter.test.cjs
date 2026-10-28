@@ -283,23 +283,33 @@ test('upstream HTTP errors sanitized and redirects never followed', async (t) =>
   assert.equal(leaked, 0);
 });
 test('timeout aborts upstream and reports 504', async (t) => {
-  let disconnected;
+  let disconnected, received;
   const closed = new Promise((r) => (disconnected = r));
+  const started = new Promise((r) => (received = r));
   const up = await serve((q, s) => {
     s.on('close', disconnected);
+    received();
   });
   const bridge = await adapter(t, {
     baseUrl: up.url,
     apiMode: 'chat_completions',
     model: 'mock',
     apiKey: 'mock',
-    timeoutMs: 80,
+    // Leave time for the first native fetch connection on a cold CI runner.
+    timeoutMs: 1000,
   });
   t.after(async () => {
     await bridge.close();
     await up.close();
   });
-  const r = await bridge.fetch({ method: 'POST', body: JSON.stringify({ input: 'hi' }) });
+  const pending = bridge.fetch({ method: 'POST', body: JSON.stringify({ input: 'hi' }) });
+  await Promise.race([
+    started,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(Error('upstream did not receive the timed request')), 2000).unref(),
+    ),
+  ]);
+  const r = await pending;
   assert.equal(r.status, 504);
   await Promise.race([
     closed,

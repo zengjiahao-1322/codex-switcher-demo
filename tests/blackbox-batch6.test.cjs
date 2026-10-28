@@ -469,15 +469,15 @@ test(
   },
 );
 
-test(
-  '卸载黑盒：KeepData保留私有文件，只有本机转换配置恢复官方，系统清理限TEMP',
-  { timeout: 45000 },
-  async (t) => {
-    for (const { keep, manual } of [
-      { keep: true },
-      { keep: false },
-      ...(process.platform === 'win32' ? [{ keep: true, manual: true }] : []),
-    ]) {
+for (const { keep, manual } of [
+  { keep: true },
+  { keep: false },
+  ...(process.platform === 'win32' ? [{ keep: true, manual: true }] : []),
+])
+  test(
+    `卸载黑盒：KeepData保留私有文件，只有本机转换配置恢复官方，系统清理限TEMP（${manual ? '手动' : 'HTTP'}，KeepData=${keep}）`,
+    { timeout: 45000 },
+    async (t) => {
       let shellRoot, original, configBefore;
       const f = await packageFixture(t, {
         setup({ root, home, bridge, environment }, target) {
@@ -566,6 +566,16 @@ test(
         );
         assert.equal(result.status, 0, result.stdout + ' ' + result.stderr + ' ' + result.error);
       } else await api(f, 'uninstall', { keepData: keep });
+      try {
+        await until(() => f.child.exitCode !== null || f.child.signalCode !== null, 15000);
+      } catch (error) {
+        const log = path.join(f.bridge, 'logs/switcher.log');
+        throw Error(
+          error.message +
+            ': ' +
+            (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : 'no backend log'),
+        );
+      }
       await f.closed;
       if (keep)
         try {
@@ -625,9 +635,8 @@ test(
           realRegistryTested: false,
         }),
       );
-    }
-  },
-);
+    },
+  );
 
 test('MCP登记黑盒：仅迁移旧node登记，集成开关保留其他配置并使用隔离官方CLI', async (t) => {
   assert.ok(
