@@ -43,6 +43,7 @@ pub const ACTIONS: &[&str] = &[
     "accountLogin",
     "accountLoginCancel",
     "accountQuota",
+    "accountSwitch",
 ];
 pub fn read(file: &Path, fallback: Value) -> io::Result<Value> {
     match fs::read(file) {
@@ -461,6 +462,19 @@ pub async fn action(app: Arc<App>, action: &str, input: &Value) -> io::Result<Va
     }
     let _guard = app.accounts.mutation.lock().await;
     match action {
+        "accountSwitch" => {
+            let id = text(&input["id"]);
+            let saved = rows(&app)?
+                .into_iter()
+                .find(|r| r["id"] == id)
+                .ok_or_else(|| io::Error::other("请选择已添加的官方账号"))?;
+            let auth = auth(&app, id)?;
+            if identity(&auth).is_none_or(|v| v["id"] != id) {
+                return Err(io::Error::other("官方账号登录记录不完整"));
+            }
+            write_json(&app.codex_home().join("auth.json"), &auth)?;
+            crate::config_ops::action(&app,"switch",&json!({"id":"official","model":input["model"],"source":input["source"],"threadFollow":input["threadFollow"]})).await.map(|mut result|{result["accountId"]=json!(id);result["accountLabel"]=saved["label"].clone();result})
+        }
         "accounts" => {
             sync_current(&app).await?;
             status(&app).await
