@@ -107,7 +107,7 @@ async function finishJob(f) {
   }
   assert.fail('Isolated restore did not complete: ' + fs.readFileSync(file));
 }
-function algorithm(t, input) {
+function algorithm(t, input, environment = {}) {
   const os = require('node:os'),
     { execFileSync } = require('node:child_process');
   const { isRust, rustBinary } = require('./backend.cjs');
@@ -121,7 +121,7 @@ function algorithm(t, input) {
     isRust
       ? ['--algorithm-fixture', source, target]
       : [path.join(__dirname, 'fixtures/diagnostics-algorithm.cjs'), source, target],
-    { windowsHide: true },
+    { windowsHide: true, env: { ...process.env, ...environment } },
   );
   return JSON.parse(fs.readFileSync(target, 'utf8'));
 }

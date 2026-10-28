@@ -15,7 +15,15 @@ function subscriptionFrom(body, accountId) {
       }
     : null;
 }
-async function readSubscription(authFile, { bridgeHome = null, account = null } = {}) {
+async function readSubscription(
+  authFile,
+  {
+    bridgeHome = null,
+    account = null,
+    endpoint = 'https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27',
+    caFile = null,
+  } = {},
+) {
   let status = 'failed',
     httpCode = null,
     curlCode = null,
@@ -27,7 +35,7 @@ async function readSubscription(authFile, { bridgeHome = null, account = null } 
       quote = (s) => '"' + String(s).replaceAll('\\', '\\\\').replaceAll('"', '\\"') + '"';
     const config =
       [
-        'url = "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27"',
+        'url = ' + quote(endpoint),
         'header = ' + quote('Authorization: Bearer ' + auth.tokens.access_token),
         'header = ' + quote('ChatGPT-Account-Id: ' + auth.tokens.account_id),
         'header = "originator: codex_cli_rs"',
@@ -57,6 +65,7 @@ async function readSubscription(authFile, { bridgeHome = null, account = null } 
         '\n__SWITCHER_HTTP_STATUS__:%{http_code}',
       ];
       if (process.platform === 'win32') args.push('--ssl-revoke-best-effort');
+      if (caFile) args.push('--cacert', caFile);
       const child = require('node:child_process').execFile(
         process.platform === 'win32' ? 'curl.exe' : '/usr/bin/curl',
         args,

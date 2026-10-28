@@ -12,6 +12,7 @@ mod instance;
 mod integration;
 mod lifecycle;
 mod mcp;
+mod official_session;
 mod packaging;
 mod platform;
 mod server;

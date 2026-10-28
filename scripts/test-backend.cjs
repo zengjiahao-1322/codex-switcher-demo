@@ -14,6 +14,9 @@ if (!fs.existsSync(rustBinary()))
 // The others call JS modules or use JS mocks directly. Running them unchanged
 // cannot establish Rust parity. Keep their names/counts in the migration table.
 const httpPatterns = {
+  'blackbox-accounts.test.cjs': '.*',
+  'blackbox-accounts-network.test.cjs': '.*',
+  'blackbox-accounts-native.test.cjs': '.*',
   'blackbox-framework.test.cjs': '.*',
   'blackbox-diagnostics.test.cjs': '.*',
   'blackbox-platform.test.cjs': '.*',

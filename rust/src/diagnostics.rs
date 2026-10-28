@@ -256,9 +256,25 @@ fn remote_snapshot(bridge: &Path) -> io::Result<Vec<Value>> {
     }
     Ok(groups)
 }
-pub fn algorithm(args: &[String]) -> io::Result<()> {
+pub async fn algorithm(args: &[String]) -> io::Result<()> {
     let input: Value = serde_json::from_slice(&fs::read(&args[0])?).map_err(io::Error::other)?;
     let output = match input["op"].as_str() {
+        Some("subscription") => {
+            let value = crate::accounts::read(
+                std::path::Path::new(input["authFile"].as_str().unwrap()),
+                Value::Null,
+            )?;
+            crate::accounts::read_subscription(
+                std::path::Path::new(input["options"]["bridgeHome"].as_str().unwrap()),
+                &value,
+                input["options"]["endpoint"].as_str().unwrap(),
+                input["options"]["caFile"]
+                    .as_str()
+                    .map(std::path::Path::new),
+            )
+            .await
+            .unwrap_or(Value::Null)
+        }
         Some("otherInstallAction") => json!(crate::instance::other_action(
             input["old"].as_u64().unwrap_or(0),
             input["current"].as_u64().unwrap_or(0)
@@ -284,6 +300,10 @@ pub fn algorithm(args: &[String]) -> io::Result<()> {
                 .collect::<std::collections::BTreeMap<_, _>>();
             json!({"source":crate::platform::proxy_source(),"env":selected})
         }
+        Some("accountStore") => match crate::accounts::fixture(&input).await {
+            Ok(v) => v,
+            Err(e) => json!({"error":e.to_string()}),
+        },
         Some("tomlPreserve") => crate::config_text::fixture(&input)?,
         Some("discoverProviders") => {
             let providers = crate::config_store::discover(std::path::Path::new(
@@ -609,7 +629,7 @@ fn label(code: &str) -> (&str, &str) {
 fn finding(findings: &mut Vec<Value>, level: &str, title: &str, detail: &str) {
     findings.push(json!({"level":level,"title":title,"detail":detail}));
 }
-pub fn diagnose(app: &crate::server::App, input: &Value) -> io::Result<Value> {
+pub async fn diagnose(app: &crate::server::App, input: &Value) -> io::Result<Value> {
     let text = fs::read_to_string(app.codex_home().join("config.toml")).unwrap_or_default();
     let Ok(config) = toml::from_str::<toml::Value>(&text) else {
         return Ok(
@@ -671,12 +691,41 @@ pub fn diagnose(app: &crate::server::App, input: &Value) -> io::Result<Value> {
             .as_i64()
             .is_some_and(|exp| exp < time::OffsetDateTime::now_utc().unix_timestamp())
     {
-        finding(
-            &mut findings,
-            "info",
-            "官方访问令牌已到期",
-            "仅凭本地 access token 的过期时间无法判断登录失效；请通过额度刷新或应用账号进行官方验证。",
-        );
+        let identity = crate::accounts::identity(&auth).unwrap();
+        match crate::accounts::prepare(app, identity["id"].as_str().unwrap()).await {
+            Ok(_) => finding(
+                &mut findings,
+                "info",
+                "官方登录仍可用",
+                "本地 access token 已到期，但保存的账号登录可用；无需重新登录。",
+            ),
+            Err(e) if e.kind == "auth_invalid" => {
+                finding(
+                    &mut findings,
+                    "warn",
+                    "官方登录已失效",
+                    "官方服务确认当前 session 无法续期，请重新登录当前账号。",
+                );
+                actions.push(
+                    json!({"type":"reauth","id":identity["id"],"label":"重新登录当前官方账号"}),
+                );
+            }
+            Err(e) if e.kind == "network_error" => finding(
+                &mut findings,
+                "warn",
+                "无法确认官方登录状态",
+                "本地 access token 已到期，但本次官方验证遇到网络错误；请检查网络后重试，尚未确认登录失效。",
+            ),
+            Err(e) => finding(
+                &mut findings,
+                "warn",
+                "官方登录校验未完成",
+                &format!(
+                    "本地 access token 已到期，但本次校验未完成，尚未确认登录失效。{}",
+                    e.message
+                ),
+            ),
+        }
     }
     if let Some(path) = config["model_catalog_json"].as_str() {
         let path = app.codex_home().join(path);

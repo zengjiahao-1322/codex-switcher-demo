@@ -27,6 +27,7 @@ pub(crate) struct App {
     pub first_request: AtomicBool,
     pub ready_at: Instant,
     pub downloads: Mutex<HashMap<String, Download>>,
+    pub accounts: crate::accounts::Runtime,
 }
 fn companion_archive(app: &App) -> io::Result<Vec<u8>> {
     let source = app.web.parent().unwrap().join("vscode-companion");
@@ -314,6 +315,18 @@ pub(crate) async fn serve(
                     );
                     return Ok(response(200,"application/json; charset=utf-8",serde_json::to_vec(&json!({"filename":"codex-switcher-companion.vsix","url":format!("/download/{key}")})).unwrap()));
                 }
+                if crate::accounts::ACTIONS.contains(&action) {
+                    return Ok(
+                        match crate::accounts::action(app.clone(), action, &input.unwrap()).await {
+                            Ok(value) => response(
+                                200,
+                                "application/json; charset=utf-8",
+                                serde_json::to_vec(&value).unwrap(),
+                            ),
+                            Err(value) => error(400, &value.to_string()),
+                        },
+                    );
+                }
                 if crate::config_ops::ACTIONS.contains(&action) {
                     let result = crate::config_ops::action(&app, action, &input.unwrap()).await;
                     return Ok(match result {
@@ -331,7 +344,7 @@ pub(crate) async fn serve(
                         &app.codex_home(),
                         &input.unwrap(),
                     ))),
-                    "diagnose" => Some(crate::diagnostics::diagnose(&app, &input.unwrap())),
+                    "diagnose" => Some(crate::diagnostics::diagnose(&app, &input.unwrap()).await),
                     "exportContext" => Some(crate::diagnostics::export_context(
                         &app,
                         input.unwrap()["id"].as_str().unwrap_or(""),

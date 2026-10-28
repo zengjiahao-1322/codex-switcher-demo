@@ -198,7 +198,7 @@ pub fn write_json(file: &std::path::Path, value: &Value) -> io::Result<()> {
 }
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if env::args().nth(1).as_deref() == Some("--algorithm-fixture") {
-        crate::diagnostics::algorithm(&env::args().skip(2).collect::<Vec<_>>())?;
+        crate::diagnostics::algorithm(&env::args().skip(2).collect::<Vec<_>>()).await?;
         return Ok(());
     }
     if env::args().nth(1).as_deref() == Some("--probe") {
@@ -354,6 +354,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         first_request: std::sync::atomic::AtomicBool::new(false),
         ready_at: Instant::now(),
         downloads: std::sync::Mutex::new(std::collections::HashMap::new()),
+        accounts: crate::accounts::Runtime::default(),
     };
     let service_ms = service_started.elapsed().as_millis();
     let mut handover = json!({});
