@@ -26,10 +26,11 @@ test('会员HTTPS对照：本地TLS真请求校验证书、账号请求头及日
       },
     };
   const requests = [];
+  const tlsErrors = [];
   const server = require('node:https').createServer(
     {
       key: fs.readFileSync(path.join(__dirname, 'fixtures/localhost-test-key.pem')),
-      cert: fs.readFileSync(cert),
+      cert: fs.readFileSync(path.join(__dirname, 'fixtures/localhost-test-server.pem')),
     },
     (request, response) => {
       requests.push({ url: request.url, headers: request.headers });
@@ -38,6 +39,7 @@ test('会员HTTPS对照：本地TLS真请求校验证书、账号请求头及日
         .end(typeof body === 'string' ? body : JSON.stringify(body));
     },
   );
+  server.on('tlsClientError', (error) => tlsErrors.push(error.message));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   t.after(() => {
     server.closeAllConnections();
@@ -90,6 +92,14 @@ test('会员HTTPS对照：本地TLS真请求校验证书、账号请求头及日
   assert.equal(await run(false), null, 'Untrusted test certificate must be rejected');
   assert.equal(requests.length, 0);
   let result = await run();
+  assert.ok(
+    result,
+    JSON.stringify({
+      tlsErrors,
+      requests: requests.length,
+      log: fs.readFileSync(path.join(bridge, 'logs/switcher.log'), 'utf8'),
+    }),
+  );
   assert.equal(result.until, '2030-01-01T00:00:00Z');
   assert.equal(result.willRenew, false);
   assert.ok(Date.parse(result.checkedAt));
