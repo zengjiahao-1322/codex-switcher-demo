@@ -627,9 +627,14 @@ fn subscribe(
                 let _ = sender.send(event.map(|_| ()).map_err(|e| e.to_string()));
             })
             .map_err(io::Error::other)?;
-        native
-            .watch(&directory, notify::RecursiveMode::NonRecursive)
-            .map_err(io::Error::other)?;
+        // FSEvents delayed external commands beyond 500ms in macOS CI. Kqueue
+        // watches the registry entries directly, including in-place writes.
+        let mode = if cfg!(target_os = "macos") {
+            notify::RecursiveMode::Recursive
+        } else {
+            notify::RecursiveMode::NonRecursive
+        };
+        native.watch(&directory, mode).map_err(io::Error::other)?;
         *state = Some(Watch {
             _native: native,
             tx,

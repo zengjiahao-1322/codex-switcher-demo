@@ -113,7 +113,9 @@ test('长轮询黑盒：超过15秒租期有效、外部写命令唤醒、断开
   require('../src/accounts/accounts.cjs').writeJson(file('waiting-window-two'), row);
   const returned = await (await two).json();
   assert.equal(returned.command.id, 'surviving-command');
-  assert.ok(performance.now() - started < 500);
+  const wakeElapsed = performance.now() - started;
+  t.diagnostic('External command wake-up: ' + wakeElapsed + ' ms');
+  assert.ok(wakeElapsed < 500, 'External command wake-up: ' + wakeElapsed + ' ms');
   await until(
     async () => JSON.parse(fs.readFileSync(file('waiting-window-two'))),
     (r) => r.waitUntil === undefined,
