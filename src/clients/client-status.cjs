@@ -281,13 +281,40 @@ function watchCommands(directory, id, check, failed) {
   let shared = commandWatchers.get(directory);
   if (!shared) {
     const listeners = new Set();
-    const watcher = fs.watch(directory, (_event, name) => {
+    const changed = (name) => {
       for (const listener of listeners)
         if (name === null || name === listener.id + '.json') listener.check();
-    });
-    watcher.on('error', (error) => {
+    };
+    const failed = (error) => {
       for (const listener of [...listeners]) listener.failed(error);
-    });
+    };
+    let watcher;
+    if (process.platform === 'darwin') {
+      const child = cp.spawn(
+        path.join(PROJECT_ROOT, 'bin', 'mac-process-context'),
+        ['--watch-commands', directory],
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+      let closed = false,
+        error = '';
+      child.stdout.on('data', () => changed(null));
+      child.stderr.on('data', (data) => {
+        error += data;
+      });
+      child.once('error', failed);
+      child.once('exit', (code) => {
+        if (!closed) failed(Error('Command watcher exited ' + code + ': ' + error.trim()));
+      });
+      watcher = {
+        close() {
+          closed = true;
+          child.stdin.end();
+        },
+      };
+    } else {
+      watcher = fs.watch(directory, (_event, name) => changed(name));
+      watcher.on('error', failed);
+    }
     shared = { listeners, watcher };
     commandWatchers.set(directory, shared);
   }

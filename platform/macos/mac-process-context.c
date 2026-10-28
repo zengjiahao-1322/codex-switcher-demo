@@ -1,9 +1,11 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <libproc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include <sys/event.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -26,7 +28,48 @@ static void print_json_string(const char *text) {
     putchar('"');
 }
 
+/* Command records are atomically replaced. Watch those directory changes
+   through kqueue: FSEvents can batch them for over a second. One process is
+   shared by all waiting windows; closing stdin releases it without polling. */
+static int watch_commands(const char *directory) {
+    int folder = open(directory, O_EVTONLY);
+    if (folder < 0) { perror("open command directory"); return 1; }
+    int queue = kqueue();
+    if (queue < 0) { perror("kqueue"); close(folder); return 1; }
+    struct kevent changes[2];
+    EV_SET(&changes[0], folder, EVFILT_VNODE, EV_ADD | EV_CLEAR,
+           NOTE_WRITE | NOTE_RENAME | NOTE_DELETE, 0, NULL);
+    EV_SET(&changes[1], STDIN_FILENO, EVFILT_READ, EV_ADD, 0, 0, NULL);
+    if (kevent(queue, changes, 2, NULL, 0, NULL) < 0) {
+        perror("watch command directory"); close(queue); close(folder); return 1;
+    }
+    puts("ready");
+    fflush(stdout);
+    int status = 0;
+    for (;;) {
+        struct kevent event;
+        int count = kevent(queue, NULL, 0, &event, 1, NULL);
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0) { perror("wait for command"); status = 1; break; }
+        if (event.flags & EV_ERROR) {
+            fprintf(stderr, "command watcher: %s\n", strerror((int)event.data));
+            status = 1; break;
+        }
+        if (event.filter == EVFILT_READ) break;
+        if (event.fflags & (NOTE_DELETE | NOTE_RENAME)) {
+            fputs("command directory removed or renamed\n", stderr);
+            status = 1; break;
+        }
+        puts("changed");
+        if (fflush(stdout) != 0) { status = 1; break; }
+    }
+    close(queue);
+    close(folder);
+    return status;
+}
+
 int main(int argc, char **argv) {
+    if (argc == 3 && !strcmp(argv[1], "--watch-commands")) return watch_commands(argv[2]);
     if (argc != 2) return 2;
     pid_t pid = (pid_t)atoi(argv[1]);
 

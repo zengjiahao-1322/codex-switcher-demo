@@ -148,10 +148,16 @@ test(
       const timers = () => process.getActiveResourcesInfo().filter((x) => x === 'Timeout').length;
       const baseline = timers();
       const watch = fs.watch;
+      const cp = require('node:child_process'),
+        spawn = cp.spawn;
       let watchers = 0;
       t.mock.method(fs, 'watch', (...args) => {
         watchers++;
         return watch(...args);
+      });
+      t.mock.method(cp, 'spawn', (...args) => {
+        if (args[1]?.[0] === '--watch-commands') watchers++;
+        return spawn(...args);
       });
       const controller = new AbortController();
       const pending = s.beat({ id: 'window-abort-0001', wait: 25000 }, controller.signal);

@@ -26,6 +26,8 @@ const child = spawn(
   [
     '--experimental-vm-modules',
     '--test',
+    // Desktop-shaped TEMP processes are visible to every process scanner.
+    '--test-concurrency=1',
     // The remote activation black box observes the full 120-second lease.
     '--test-timeout=180000',
     '--test-reporter=./scripts/test-inventory-reporter.cjs',
