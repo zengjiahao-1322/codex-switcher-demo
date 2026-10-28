@@ -642,53 +642,6 @@ pub fn client_status(home: &std::path::Path) -> std::io::Result<serde_json::Valu
     }))
 }
 
-/// Persist a companion heartbeat in the isolated bridge directory and return a
-/// connection summary. Remote command bodies stay in the request/response
-/// process; only the public registration is written.
-pub fn heartbeat(
-    bridge: &std::path::Path,
-    input: &serde_json::Value,
-) -> std::io::Result<serde_json::Value> {
-    let id = input["id"]
-        .as_str()
-        .ok_or_else(|| std::io::Error::other("客户端编号无效"))?;
-    if !regex::Regex::new(r"^[\w-]{8,80}$").unwrap().is_match(id) {
-        return Err(std::io::Error::other("客户端编号无效"));
-    }
-    let directory = bridge.join("clients");
-    std::fs::create_dir_all(&directory)?;
-    let file = directory.join(format!("{id}.json"));
-    let mut row = match std::fs::read(&file) {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|_| serde_json::json!({})),
-        Err(_) => serde_json::json!({}),
-    };
-    row["id"] = serde_json::json!(id);
-    row["pid"] = input["pid"].clone();
-    row["name"] = input["name"].clone();
-    row["home"] = input["home"].clone();
-    row["workspace"] = input["workspace"].clone();
-    row["remoteType"] = input["remoteType"].clone();
-    row["authority"] = input["authority"].clone();
-    row["remoteAgent"] = input["remoteAgent"].clone();
-    row["companionVersion"] = input["companionVersion"].clone();
-    row["seenAt"] = serde_json::json!(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-    );
-    crate::instance::write_json(&file, &row)?;
-    let command = crate::editors::command(bridge, id).or_else(|| {
-        if row["command"].is_object() {
-            Some(row["command"].clone())
-        } else {
-            None
-        }
-    });
-    Ok(
-        serde_json::json!({"command":command,"connection":{"state":"unmatched","home":input["home"],"backendPids":[]},"longPoll":true}),
-    )
-}
 #[cfg(unix)]
 pub fn image(pid: u32) -> std::io::Result<std::path::PathBuf> {
     let output = std::process::Command::new("/bin/ps")

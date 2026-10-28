@@ -7,7 +7,7 @@ use tokio::sync::{Mutex, Semaphore, watch};
 
 type QuotaResult = Option<Result<Value, String>>;
 pub struct Runtime {
-    mutation: Mutex<()>,
+    pub(crate) mutation: Mutex<()>,
     login: Mutex<Option<Arc<Login>>>,
     quotas: Mutex<std::collections::HashMap<String, watch::Receiver<QuotaResult>>>,
     slots: Semaphore,
@@ -43,7 +43,6 @@ pub const ACTIONS: &[&str] = &[
     "accountLogin",
     "accountLoginCancel",
     "accountQuota",
-    "accountSwitch",
 ];
 pub fn read(file: &Path, fallback: Value) -> io::Result<Value> {
     match fs::read(file) {
@@ -114,6 +113,9 @@ fn auth(app: &App, id: &str) -> io::Result<Value> {
     )
 }
 pub fn saved_auth(bridge: &std::path::Path, id: &str) -> io::Result<Value> {
+    if !known(bridge, id)? {
+        return Err(io::Error::other("账号不存在，请重新选择"));
+    }
     read(
         &bridge.join("accounts").join(id).join("auth.json"),
         Value::Null,
@@ -156,6 +158,59 @@ fn remember(app: &App, value: &Value, pending: bool) -> io::Result<Value> {
     )?;
     write_json(&app.bridge.join("accounts/index.json"), &json!(items))?;
     Ok(info)
+}
+pub fn known(bridge: &Path, id: &str) -> io::Result<bool> {
+    Ok(read(&bridge.join("accounts/index.json"), json!([]))?
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|v| v["id"] == id))
+}
+pub async fn apply_saved(
+    app: &App,
+    id: &str,
+    model: Option<&str>,
+    catalog: Option<&str>,
+) -> io::Result<Value> {
+    let _guard = app.accounts.mutation.lock().await;
+    capture(app)?;
+    let auth = saved_auth(&app.bridge, id)?;
+    if identity(&auth).is_none_or(|v| v["id"] != id) {
+        return Err(io::Error::other("官方账号登录记录不完整"));
+    }
+    let file = app.codex_home().join("config.toml");
+    let original = crate::config_ops::read(&file)?;
+    let next = crate::config_text::official(
+        original.as_deref().unwrap_or(""),
+        model,
+        catalog,
+        Some("file"),
+    )?;
+    crate::config_ops::save_backup(&app.codex_home(), &app.bridge, "official")?;
+    crate::config_ops::atomic(&file, &next, Some(original.as_deref()))?;
+    write_json(&app.codex_home().join("auth.json"), &auth)?;
+    {
+        let mut credentials = app.accounts.credentials.lock().unwrap();
+        credentials.mode = false;
+        credentials.required = false;
+        credentials.auth = Value::Null;
+        credentials.notice = Value::Null;
+    }
+    let row = remember(app, &auth, false)?;
+    match fs::remove_file(app.bridge.join("current.json")) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    Ok(json!({"id":id,"email":row["email"],"label":row["label"]}))
+}
+pub async fn login_active(app: &App) -> bool {
+    app.accounts.login.lock().await.as_ref().is_some_and(|a| {
+        matches!(
+            text(&a.value.lock().unwrap()["status"]),
+            "starting" | "waiting"
+        )
+    })
 }
 fn current(app: &App) -> io::Result<Value> {
     let credentials = app.accounts.credentials.lock().unwrap();
@@ -227,7 +282,7 @@ async fn sync_current(app: &App) -> io::Result<()> {
     };
     Ok(())
 }
-fn capture(app: &App) -> io::Result<()> {
+pub fn capture(app: &App) -> io::Result<()> {
     let value = current(app)?;
     let Some(info) = identity(&value) else {
         return Ok(());
@@ -466,21 +521,13 @@ pub async fn action(app: Arc<App>, action: &str, input: &Value) -> io::Result<Va
     if action == "accountQuota" {
         return quota_action(app, input).await;
     }
+    let _operation = if action == "accounts" {
+        None
+    } else {
+        Some(crate::config_ops::operation(&app.bridge)?)
+    };
     let _guard = app.accounts.mutation.lock().await;
     match action {
-        "accountSwitch" => {
-            let id = text(&input["id"]);
-            let saved = rows(&app)?
-                .into_iter()
-                .find(|r| r["id"] == id)
-                .ok_or_else(|| io::Error::other("请选择已添加的官方账号"))?;
-            let auth = auth(&app, id)?;
-            if identity(&auth).is_none_or(|v| v["id"] != id) {
-                return Err(io::Error::other("官方账号登录记录不完整"));
-            }
-            write_json(&app.codex_home().join("auth.json"), &auth)?;
-            crate::config_ops::action(&app,"switch",&json!({"id":"official","model":input["model"],"source":input["source"],"threadFollow":input["threadFollow"]})).await.map(|mut result|{result["accountId"]=json!(id);result["accountLabel"]=saved["label"].clone();result})
-        }
         "accounts" => {
             sync_current(&app).await?;
             status(&app).await
@@ -696,6 +743,7 @@ pub async fn fixture(input: &Value) -> io::Result<Value> {
         ready_at: std::time::Instant::now(),
         downloads: std::sync::Mutex::new(std::collections::HashMap::new()),
         accounts: Runtime::default(),
+        editors: crate::editors::Runtime::default(),
     };
     capture(&app)?;
     match text(&input["method"]) {

@@ -5,6 +5,7 @@ const fs = require('node:fs'),
   path = require('node:path');
 const { startBackend } = require('./backend-process.cjs');
 const { api } = require('./config-blackbox-helpers.cjs');
+const { auth, accountId, until } = require('./official-blackbox-helpers.cjs');
 const provider = {
   id: 'fixture-provider',
   name: 'Remote Fixture',
@@ -101,4 +102,33 @@ test('双后台切换黑盒：远端独立remoteSwitch通过真实HTTP心跳读�
     results: [{ codexHome: '/srv/.codex', status: 'synced' }],
   });
   assert.equal(fs.readFileSync(path.join(f.home, 'config.toml'), 'utf8'), localConfig);
+});
+
+test('远端登录同步黑盒：SSH心跳按已保存账号读取并合并更新', async (t) => {
+  const saved = auth('target', { refreshed: '2026-10-27T00:00:00Z' });
+  const remoteAuth = auth('target', { refreshed: '2026-10-28T00:00:00Z' });
+  const id = accountId('target');
+  const f = await startBackend(t, { setup({ bridge }) {
+    fs.mkdirSync(path.join(bridge, 'accounts', id), { recursive: true });
+    fs.writeFileSync(path.join(bridge, 'accounts', 'index.json'), JSON.stringify([{ id }]));
+    fs.writeFileSync(path.join(bridge, 'accounts', id, 'auth.json'), JSON.stringify(saved));
+  }});
+  const input = { id: 'remote-sync-window', pid: process.pid, name: 'Remote VS Code', remoteType: 'ssh-remote', remote: 'ssh-remote+fixture', authority: 'ssh-remote+fixture', companionVersion: '0.1.3', remoteProtocol: 1,
+    remoteAgent: { protocol: 3, agentVersion: '0.1.3', host: 'fixture', platform: 'linux', arch: 'x64', codexHome: '/srv/.codex', startedAt: '2026-10-28T00:00:00Z', configExists: true,
+      account: { id, email: 'target@example.test', plan: 'plus', lastRefresh: remoteAuth.last_refresh }, current: { model: 'old', modelProvider: 'openai', baseUrl: null } } };
+  await api(f, 'clientHeartbeat', input);
+  const next = async () => (await api(f, 'clientHeartbeat', input)).command;
+  let command;
+  for (let i = 0; i < 100 && !command; i++) { command = await next(); if (!command) await new Promise(r => setTimeout(r, 20)); }
+  assert.ok(command); assert.equal(command.step, 'read');
+  const original = 'model="remote"\nmodel_provider="openai"\n';
+  const sha = value => require('node:crypto').createHash('sha256').update(value).digest('hex');
+  await api(f, 'clientHeartbeat', { ...input, ack: command.id, ackStatus: 'completed', ackResult: { text: original, sha256: sha(original) } });
+  command = null;
+  for (let i = 0; i < 100 && !command; i++) { command = await next(); if (!command) await new Promise(r => setTimeout(r, 20)); }
+  assert.ok(command); assert.equal(command.step, 'readAuth');
+  const authText = JSON.stringify(remoteAuth);
+  await api(f, 'clientHeartbeat', { ...input, ack: command.id, ackStatus: 'completed', ackResult: { text: authText, sha256: sha(authText) } });
+  await until(async () => JSON.parse(fs.readFileSync(path.join(f.bridge, 'accounts', id, 'auth.json'))), row => row.last_refresh === remoteAuth.last_refresh, 5000);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.bridge, 'clients', input.id + '.json'))).remoteAgent.account.id, id);
 });

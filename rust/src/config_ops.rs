@@ -69,7 +69,7 @@ pub fn atomic(file: &Path, value: &str, expected: Option<Option<&str>>) -> io::R
     }
     operation
 }
-struct Lock(PathBuf);
+pub struct Lock(PathBuf);
 impl Drop for Lock {
     fn drop(&mut self) {
         if let Err(error) = fs::remove_file(&self.0) {
@@ -107,6 +107,9 @@ fn lock(file: PathBuf, operation: bool) -> io::Result<Lock> {
     })?;
     write!(output, "{}", json!({"pid":std::process::id()}))?;
     Ok(Lock(file))
+}
+pub fn operation(bridge: &Path) -> io::Result<Lock> {
+    lock(bridge.join("operation.lock"), true)
 }
 fn parsed(value: &str) -> io::Result<Value> {
     let value = toml::from_str::<toml::Value>(value)
@@ -321,6 +324,180 @@ async fn catalog(app: &App, p: &Value, model: &str) -> io::Result<Option<StagedC
     atomic(&path, &serde_json::to_string_pretty(&value).unwrap(), None)?;
     Ok(Some(StagedCatalog { path }))
 }
+pub struct Prepared {
+    original: Option<String>,
+    next: String,
+    staged: Option<StagedCatalog>,
+    current: Value,
+    pub label: String,
+    reason: &'static str,
+    snapshot: bool,
+}
+impl Prepared {
+    pub fn apply(self, app: &App) -> io::Result<Value> {
+        let home = app.codex_home();
+        let file = home.join("config.toml");
+        let _lock = lock(home.join(".hermes-bridge.lock"), false)?;
+        if read(&file)? != self.original {
+            return Err(io::Error::other(
+                "Concurrent config modification detected; retry after review",
+            ));
+        }
+        if self.snapshot {
+            atomic(
+                &app.bridge.join("original-config.toml"),
+                self.original.as_deref().unwrap_or(""),
+                None,
+            )?;
+        }
+        save_backup(&home, &app.bridge, self.reason)?;
+        let count = if let Some(staged) = &self.staged {
+            let count = store::read_json(&staged.path)?["models"]
+                .as_array()
+                .map_or(0, Vec::len);
+            fs::rename(&staged.path, app.bridge.join("model-catalog.json"))?;
+            count
+        } else {
+            0
+        };
+        atomic(&file, &self.next, Some(self.original.as_deref()))?;
+        if self.current.is_null() {
+            remove_optional(&app.bridge.join("current.json"))?;
+        } else {
+            write_json(&app.bridge.join("current.json"), &self.current)?;
+        }
+        effect(&home, &app.bridge)?;
+        Ok(json!({"label":self.label,"mode":"direct","catalogCount":count}))
+    }
+}
+pub async fn prepare_api(app: &App, input: &Value) -> io::Result<Prepared> {
+    let id = input["id"].as_str().unwrap_or("");
+    let p = provider(&app.bridge, id)?;
+    let model = input["model"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| io::Error::other("请选择或填写模型"))?;
+    let mode = access(&app.bridge, &p)?;
+    if !["direct", "adapter"].contains(&mode.as_str()) {
+        let checked = crate::config_network::probe(&p, model).await?;
+        probe_record(&app.bridge, &p, model, &checked)?;
+        if checked["ok"] != true {
+            return Err(io::Error::other(format!(
+                "检测未通过，未切换：{}",
+                checked["message"].as_str().unwrap_or("")
+            )));
+        }
+    }
+    if mode == "adapter" || access(&app.bridge, &p)? == "adapter" {
+        return Err(io::Error::other("本机转换服务尚未迁移，未修改配置。"));
+    }
+    let original = read(&app.codex_home().join("config.toml"))?;
+    let mut staged = catalog(app, &p, model).await?;
+    let candidate = text::prepare(
+        original.as_deref().unwrap_or(""),
+        &p,
+        model,
+        staged.as_ref().and_then(|s| s.path.to_str()),
+    )?;
+    if let Err(e) = validate(app, &candidate).await {
+        if staged.is_none() {
+            return Err(e);
+        }
+        staged = None;
+        validate(
+            app,
+            &text::prepare(original.as_deref().unwrap_or(""), &p, model, None)?,
+        )
+        .await?;
+    }
+    let next = text::prepare(
+        original.as_deref().unwrap_or(""),
+        &p,
+        model,
+        staged
+            .as_ref()
+            .map(|_| app.bridge.join("model-catalog.json"))
+            .as_ref()
+            .and_then(|p| p.to_str()),
+    )?;
+    let snapshot = !app.bridge.join("original-config.toml").exists()
+        || parsed(original.as_deref().unwrap_or(""))?["model_provider"] != "hermes_bridge";
+    Ok(Prepared {
+        original,
+        next,
+        staged,
+        current: json!({"providerId":id,"model":model,"mode":"direct","at":crate::diagnostics::now()}),
+        label: p["name"].as_str().unwrap_or("").into(),
+        reason: "switch",
+        snapshot,
+    })
+}
+pub async fn prepare_backup(app: &App, id: &str) -> io::Result<Prepared> {
+    let value = backup(&app.bridge, id)?;
+    let config = parsed(&value)?;
+    let target = &config["model_providers"]["hermes_bridge"];
+    let adapter = store::read_json(&app.bridge.join("adapter.json"))?;
+    if config["model_provider"] == "hermes_bridge"
+        && adapter["port"]
+            .as_u64()
+            .is_some_and(|port| target["base_url"] == format!("http://127.0.0.1:{port}/v1"))
+    {
+        return Err(io::Error::other("本机转换服务尚未迁移，未修改配置。"));
+    }
+    let saved = store::load(&app.bridge)?["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| {
+            p["baseUrl"] == target["base_url"] && p["apiKey"] == target["experimental_bearer_token"]
+        })
+        .cloned();
+    let catalog_path = app.bridge.join("model-catalog.json");
+    let managed = config["model_provider"] == "hermes_bridge"
+        && config["model_catalog_json"].as_str() == catalog_path.to_str();
+    let fallback = json!({"name":target["name"],"baseUrl":target["base_url"],"apiKey":target["experimental_bearer_token"],"model":config["model"],"apiMode":"responses"});
+    let staged = if managed {
+        catalog(
+            app,
+            saved.as_ref().unwrap_or(&fallback),
+            config["model"].as_str().unwrap_or(""),
+        )
+        .await?
+    } else {
+        None
+    };
+    let selection = |catalog: Option<&str>| json!({"model":config["model"],"model_provider":config["model_provider"],"model_catalog_json":catalog});
+    let candidate = if managed {
+        text::edit(
+            &value,
+            &selection(staged.as_ref().and_then(|s| s.path.to_str())),
+            target,
+        )?
+    } else {
+        value.clone()
+    };
+    validate(app, &candidate).await?;
+    let next = if managed {
+        text::edit(
+            &value,
+            &selection(staged.as_ref().and_then(|_| catalog_path.to_str())),
+            target,
+        )?
+    } else {
+        value
+    };
+    let original = read(&app.codex_home().join("config.toml"))?;
+    let current=saved.map(|p|json!({"providerId":p["id"],"model":config["model"],"mode":"direct","at":crate::diagnostics::now()})).unwrap_or(Value::Null);
+    Ok(Prepared {
+        original,
+        next,
+        staged,
+        current,
+        label: summary(&config),
+        reason: "restore",
+        snapshot: false,
+    })
+}
 fn follow(input: &Value) -> io::Result<()> {
     if input["threadFollow"]
         .as_str()
@@ -338,6 +515,21 @@ fn source(input: &Value) -> io::Result<&str> {
     } else {
         Err(io::Error::other("切换来源无效"))
     }
+}
+pub fn access(bridge: &Path, p: &Value) -> io::Result<String> {
+    let records = store::read_json(&bridge.join("probe-results.json"))?;
+    let sig = format!(
+        "{:x}",
+        Sha256::digest(
+            serde_json::to_vec(&json!([p["baseUrl"], p["apiMode"], p["apiKey"]])).unwrap()
+        )
+    );
+    let record = &records[p["id"].as_str().unwrap_or("")];
+    Ok(if record["sig"] == sig[..16] {
+        record["mode"].as_str().unwrap_or("unknown").to_owned()
+    } else {
+        "unknown".to_owned()
+    })
 }
 fn probe_record(bridge: &Path, p: &Value, model: &str, result: &Value) -> io::Result<()> {
     let mut records = store::read_json(&bridge.join("probe-results.json"))?;
@@ -607,7 +799,7 @@ pub async fn action(app: &std::sync::Arc<App>, action: &str, input: &Value) -> i
         _ => Err(io::Error::other("Unknown configuration action")),
     }
 }
-async fn official(app: &App, input: &Value, restore: bool) -> io::Result<Value> {
+pub async fn official(app: &App, input: &Value, restore: bool) -> io::Result<Value> {
     let home = app.codex_home();
     let file = home.join("config.toml");
     let current = read(&file)?;

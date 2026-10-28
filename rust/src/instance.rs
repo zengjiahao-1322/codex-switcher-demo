@@ -355,6 +355,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         ready_at: Instant::now(),
         downloads: std::sync::Mutex::new(std::collections::HashMap::new()),
         accounts: crate::accounts::Runtime::default(),
+        editors: crate::editors::Runtime::default(),
     };
     let service_ms = service_started.elapsed().as_millis();
     let mut handover = json!({});

@@ -17,6 +17,8 @@ sha2 = "0.10"
 time = { version = "0.3", features = ["formatting", "parsing"] }
 reqwest = { version = "=0.12.12", features = ["json"] }
 serde_yaml = "0.9"
+notify = "=6.1.1"
+base64 = "0.22"
 
 [build-dependencies]
 sha2 = "0.10"

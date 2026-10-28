@@ -71,6 +71,39 @@ impl Session {
     ) -> Result<(Arc<Self>, mpsc::UnboundedReceiver<Value>), Failure> {
         fs::create_dir_all(home).map_err(|_| Failure::runtime())?;
         fs::write(home.join("config.toml"), "cli_auth_credentials_store = \"file\"\n[features]\nplugins = false\nremote_plugin = false\n[analytics]\nenabled = false\n").map_err(|_| Failure::runtime())?;
+        Self::spawn(bridge, home, &[])
+    }
+    pub fn threads(bridge: &Path, home: &Path, config: &Value) -> Result<Arc<Self>, Failure> {
+        let mut args = vec![];
+        for value in [
+            "notify=[]",
+            "analytics.enabled=false",
+            "features.plugins=false",
+            "features.remote_plugin=false",
+            "features.codex_hooks=false",
+        ] {
+            args.extend(["-c".to_owned(), value.to_owned()]);
+        }
+        if let Some(servers) = config["mcp_servers"].as_object() {
+            let name_pattern = regex::Regex::new(r"^[A-Za-z0-9_-]+$").unwrap();
+            for name in servers.keys() {
+                if !name_pattern.is_match(name) {
+                    return Err(Failure {
+                        message: format!("暂不支持此 MCP 配置名称：{name}"),
+                        kind: "runtime_error",
+                        code: Value::Null,
+                    });
+                }
+                args.extend(["-c".into(), format!("mcp_servers.{name}.enabled=false")]);
+            }
+        }
+        Ok(Self::spawn(bridge, home, &args)?.0)
+    }
+    fn spawn(
+        bridge: &Path,
+        home: &Path,
+        args: &[String],
+    ) -> Result<(Arc<Self>, mpsc::UnboundedReceiver<Value>), Failure> {
         let exe = crate::platform::codex_path(bridge).map_err(|_| Failure {
             code: json!("CODEX_NOT_FOUND"),
             ..Failure::runtime()
@@ -80,6 +113,7 @@ impl Session {
             .filter(|(k, _)| !k.starts_with("CODEX_") || k == "CODEX_HOME");
         let mut command = Command::new(exe);
         command
+            .args(args)
             .arg("app-server")
             .current_dir(home)
             .env_clear()

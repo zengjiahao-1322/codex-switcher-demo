@@ -28,24 +28,40 @@ pub(crate) struct App {
     pub ready_at: Instant,
     pub downloads: Mutex<HashMap<String, Download>>,
     pub accounts: crate::accounts::Runtime,
+    pub editors: crate::editors::Runtime,
 }
-fn companion_archive(app: &App) -> io::Result<Vec<u8>> {
-    let source = app.web.parent().unwrap().join("vscode-companion");
+pub fn extension_archive(app: &App, remote: bool) -> io::Result<Vec<u8>> {
+    let source = app.web.parent().unwrap().join(if remote {
+        "vscode-remote-agent"
+    } else {
+        "vscode-companion"
+    });
+    let mut files = vec![];
+    for file in ["package.json", "extension.cjs"] {
+        files.push((format!("extension/{file}"), fs::read(source.join(file))?));
+    }
+    let companion = app.web.parent().unwrap().join("vscode-companion");
+    files.push((
+        "[Content_Types].xml".to_owned(),
+        fs::read(companion.join("content-types.xml"))?,
+    ));
+    let manifest = if remote {
+        let package: Value = serde_json::from_slice(&fs::read(source.join("package.json"))?)
+            .map_err(io::Error::other)?;
+        format!(r#"<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+ <Metadata><Identity Language="en-US" Id="codex-switcher-remote" Version="{}" Publisher="codex-switcher-demo"/><DisplayName>Codex Switcher Remote Agent</DisplayName><Description xml:space="preserve">Apply a selected API to this Remote-SSH server.</Description><Properties><Property Id="Microsoft.VisualStudio.Code.Engine" Value="^1.85.0"/></Properties></Metadata>
+ <Installation><InstallationTarget Id="Microsoft.VisualStudio.Code"/></Installation><Dependencies/>
+ <Assets><Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true"/></Assets>
+</PackageManifest>"#, package["version"].as_str().unwrap()).into_bytes()
+    } else {
+        fs::read(companion.join("extension.vsixmanifest"))?
+    };
+    files.push(("extension.vsixmanifest".to_owned(), manifest));
     let mut bytes = Vec::new();
     let mut directory = Vec::new();
     let mut count = 0u16;
-    for file in [
-        "package.json",
-        "extension.cjs",
-        "extension.vsixmanifest",
-        "content-types.xml",
-    ] {
-        let name = match file {
-            "extension.vsixmanifest" => file.to_string(),
-            "content-types.xml" => "[Content_Types].xml".into(),
-            _ => format!("extension/{file}"),
-        };
-        let data = fs::read(source.join(file))?;
+    for (name, data) in files {
         let mut crc = !0u32;
         for byte in &data {
             crc ^= u32::from(*byte);
@@ -291,8 +307,14 @@ pub(crate) async fn serve(
                 if input.is_err() {
                     return Ok(error(400, "Invalid JSON"));
                 }
-                if action == "companionPackage" {
-                    let bytes = match companion_archive(&app) {
+                if ["companionPackage", "remoteAgentPackage"].contains(&action) {
+                    let remote = action == "remoteAgentPackage";
+                    let filename = if remote {
+                        "codex-switcher-remote.vsix"
+                    } else {
+                        "codex-switcher-companion.vsix"
+                    };
+                    let bytes = match extension_archive(&app, remote) {
                         Ok(bytes) => bytes,
                         Err(value) => return Ok(error(400, &value.to_string())),
                     };
@@ -305,64 +327,68 @@ pub(crate) async fn serve(
                     };
                     let mut downloads = app.downloads.lock().unwrap();
                     downloads.retain(|_, (at, _, _)| at.elapsed() < Duration::from_secs(300));
-                    downloads.insert(
-                        key.clone(),
-                        (
-                            Instant::now(),
-                            "codex-switcher-companion.vsix".into(),
-                            bytes,
-                        ),
-                    );
-                    return Ok(response(200,"application/json; charset=utf-8",serde_json::to_vec(&json!({"filename":"codex-switcher-companion.vsix","url":format!("/download/{key}")})).unwrap()));
-                }
-                if action == "clientHeartbeat" {
-                    let input_value = input.unwrap();
-                    let _remote_ack = crate::editors::acknowledge(&app.bridge, &input_value);
-                    let mut result = match crate::platform::heartbeat(&app.bridge, &input_value) {
-                        Ok(value) => response(
-                            200,
-                            "application/json; charset=utf-8",
-                            serde_json::to_vec(&value).unwrap(),
-                        ),
-                        Err(value) => error(400, &value.to_string()),
-                    };
-                    let wait = input_value["wait"].as_u64().unwrap_or(0).min(25000);
-                    if wait > 0 {
-                        let id = input_value["id"].as_str().unwrap_or("").to_owned();
-                        let file = app.bridge.join("clients").join(format!("{id}.json"));
-                        let until = tokio::time::Instant::now() + Duration::from_millis(wait);
-                        loop {
-                            if let Ok(bytes) = fs::read(&file)
-                                && let Ok(row) = serde_json::from_slice::<Value>(&bytes)
-                                && row["command"].is_object()
-                            {
-                                result=response(200,"application/json; charset=utf-8",serde_json::to_vec(&json!({"command":row["command"],"connection":{"state":"unmatched","home":input_value["home"],"backendPids":[]},"longPoll":true})).unwrap());
-                                break;
-                            }
-                            if tokio::time::Instant::now() >= until {
-                                break;
-                            }
-                            tokio::time::sleep(Duration::from_millis(25)).await;
-                        }
-                    }
-                    return Ok(result);
+                    downloads.insert(key.clone(), (Instant::now(), filename.into(), bytes));
+                    return Ok(response(
+                        200,
+                        "application/json; charset=utf-8",
+                        serde_json::to_vec(
+                            &json!({"filename":filename,"url":format!("/download/{key}")}),
+                        )
+                        .unwrap(),
+                    ));
                 }
                 if [
-                    "desktopSwitch",
-                    "resumeThreadSync",
+                    "clientHeartbeat",
+                    "clients",
                     "reloadClients",
                     "remoteSwitch",
+                    "installRemoteAgent",
+                    "companionInstall",
+                    "desktopSwitch",
+                    "accountSwitch",
+                    "resumeThreadSync",
+                    "restoreBackup",
                 ]
                 .contains(&action)
                 {
-                    let result = crate::editors::action(app.clone(), action, &input.unwrap()).await;
+                    let input = input.unwrap();
+                    let result = match action {
+                        "clientHeartbeat" => crate::editors::heartbeat(app.clone(), &input).await,
+                        "clients" => crate::editors::status(&app).await.map(|mut v| {
+                            v["remotes"] =
+                                json!(crate::remote::groups(&app.bridge).unwrap_or_default());
+                            v["runtime"] = json!(
+                                crate::platform::codex_path(&app.bridge)
+                                    .ok()
+                                    .map(|p| crate::platform::display_path(&p))
+                            );
+                            v["editors"] = json!(
+                                crate::editor_integration::editors()
+                                    .unwrap_or_default()
+                                    .into_iter()
+                                    .map(|mut e| {
+                                        e.as_object_mut().unwrap().remove("file");
+                                        e
+                                    })
+                                    .collect::<Vec<_>>()
+                            );
+                            v
+                        }),
+                        "reloadClients" => crate::editors::reload(&app, &input, &[], false),
+                        "remoteSwitch" => crate::remote::apply(app.clone(), &input).await,
+                        "installRemoteAgent" => crate::remote::install(app.clone(), &input).await,
+                        "companionInstall" => {
+                            crate::editor_integration::install(&app, &input).await
+                        }
+                        _ => crate::switching::schedule(app.clone(), action, &input).await,
+                    };
                     return Ok(match result {
-                        Ok(value) => response(
+                        Ok(v) => response(
                             200,
                             "application/json; charset=utf-8",
-                            serde_json::to_vec(&value).unwrap(),
+                            serde_json::to_vec(&v).unwrap(),
                         ),
-                        Err(value) => error(400, &value.to_string()),
+                        Err(e) => error(400, &e.to_string()),
                     });
                 }
                 if crate::accounts::ACTIONS.contains(&action) {
@@ -398,31 +424,6 @@ pub(crate) async fn serve(
                     "exportContext" => Some(crate::diagnostics::export_context(
                         &app,
                         input.unwrap()["id"].as_str().unwrap_or(""),
-                    )),
-                    "clients" => Some(crate::platform::client_status(&app.codex_home()).map(
-                        |mut value| {
-                            if let Ok(entries) = fs::read_dir(app.bridge.join("clients")) {
-                                let mut remotes = Vec::new();
-                                for entry in entries.flatten().filter(|e| {
-                                    e.path().extension().and_then(|s| s.to_str()) == Some("json")
-                                }) {
-                                    if let Ok(bytes) = fs::read(entry.path())
-                                        && let Ok(row) = serde_json::from_slice::<Value>(&bytes)
-                                        && row["remoteType"] == "ssh-remote"
-                                    {
-                                        remotes.push(row);
-                                    }
-                                }
-                                value["connectedEditors"] = json!(remotes.len());
-                                value["remotes"] = json!(remotes);
-                            }
-                            value["runtime"] = json!(
-                                crate::platform::codex_path(&app.bridge)
-                                    .ok()
-                                    .map(|path| crate::platform::display_path(&path))
-                            );
-                            value
-                        },
                     )),
                     "setEnvironment" => {
                         Some(crate::platform::set_environment(&app, &input.unwrap()))

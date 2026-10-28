@@ -25,7 +25,8 @@ function launchBackend(environment) {
 }
 
 async function startBackend(t, options = {}) {
-  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-blackbox-')));
+  const temporaryBase = fs.realpathSync.native(options.shortRoot && process.platform === 'darwin' ? '/tmp' : os.tmpdir());
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(temporaryBase, 'switcher-blackbox-')));
   const home = path.join(root, 'codex'),
     bridge = path.join(root, 'bridge');
   fs.mkdirSync(home);
@@ -122,7 +123,7 @@ async function startBackend(t, options = {}) {
     }
     if (child.exitCode === null && child.signalCode === null) child.kill();
     await closed;
-    if (path.dirname(root) !== fs.realpathSync.native(os.tmpdir()))
+    if (path.dirname(root) !== temporaryBase)
       throw Error('Fixture path escaped TEMP');
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });

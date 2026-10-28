@@ -18,7 +18,23 @@ function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.' + crypto.randomUUID() + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, file);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(tmp, file);
+      break;
+    } catch (error) {
+      // Windows scanners can hold the destination for a short interval while
+      // the switch worker publishes its status. Retry only that observed
+      // transient access error; all other failures remain visible.
+      if (
+        process.platform !== 'win32' ||
+        !['EPERM', 'EACCES'].includes(error.code) ||
+        attempt >= 4
+      )
+        throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
 }
 function claims(token) {
   try {
