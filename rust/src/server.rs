@@ -387,12 +387,11 @@ pub(crate) async fn serve(
                                 for entry in entries.flatten().filter(|e| {
                                     e.path().extension().and_then(|s| s.to_str()) == Some("json")
                                 }) {
-                                    if let Ok(bytes) = fs::read(entry.path()) {
-                                        if let Ok(row) = serde_json::from_slice::<Value>(&bytes) {
-                                            if row["remoteType"] == "ssh-remote" {
-                                                remotes.push(row);
-                                            }
-                                        }
+                                    if let Ok(bytes) = fs::read(entry.path())
+                                        && let Ok(row) = serde_json::from_slice::<Value>(&bytes)
+                                        && row["remoteType"] == "ssh-remote"
+                                    {
+                                        remotes.push(row);
                                     }
                                 }
                                 value["connectedEditors"] = json!(remotes.len());
