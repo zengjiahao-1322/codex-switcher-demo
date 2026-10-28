@@ -52,7 +52,7 @@ test('HTTP core：concurrent external edit during snapshot aborts without overwr
   fs.appendFileSync(path.join(f.home, 'config.toml'), large);
   const changed = await interfere(t, f, f.bridge, 'original-config.toml.');
   const result = await api(f, 'switch', { id: f.id, model: 'm', threadFollow: 'off' }, 400);
-  assert.equal(changed(), true);
+  assert.equal(await changed(), true);
   assert.match(result.error, /concurrent/i);
   assert.equal(read(f), 'model="external"\n');
 });
@@ -75,7 +75,7 @@ test('HTTP core：restore detects an external edit while writing temporary confi
   );
   const changed = await interfere(t, f, f.home, 'config.toml.');
   const result = await api(f, 'restore', { threadFollow: 'off' }, 400);
-  assert.equal(changed(), true);
+  assert.equal(await changed(), true);
   assert.match(result.error, /concurrent/i);
   assert.equal(read(f), 'model="external"\n');
 });

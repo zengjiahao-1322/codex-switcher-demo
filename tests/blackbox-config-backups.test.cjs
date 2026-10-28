@@ -54,11 +54,21 @@ test('HTTP backups：deduplicate, keep ten complete copies and restore via isola
     fs.readFileSync(path.join(f.bridge, 'backups/codex-config', items[0].id), 'utf8'),
     'model="current-unsaved"\n',
   );
-  const events = fs
-    .readFileSync(path.join(f.bridge, 'logs/switcher.log'), 'utf8')
-    .trim()
-    .split('\n')
-    .map(JSON.parse);
+  let events;
+  const deadline = Date.now() + 5000;
+  do {
+    events = fs
+      .readFileSync(path.join(f.bridge, 'logs/switcher.log'), 'utf8')
+      .trim()
+      .split('\n')
+      .map(JSON.parse);
+    if (
+      events.some((e) => e.event === 'config.restore') &&
+      events.some((e) => e.event === 'switch.end' && e.job)
+    )
+      break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  } while (Date.now() < deadline);
   assert.equal(events.find((e) => e.event === 'config.restore').status, 'restored');
   assert.ok(events.some((e) => e.event === 'switch.start' && e.job));
   assert.ok(events.some((e) => e.event === 'switch.end' && e.job));

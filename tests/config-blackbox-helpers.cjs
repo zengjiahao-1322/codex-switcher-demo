@@ -70,7 +70,16 @@ async function isolatedEditor(t, f) {
       name: 'Fixture editor',
     }),
   );
-  const status = await api(f, 'clients', {});
+  // Other test files briefly run a desktop-shaped TEMP process. Wait for it
+  // to leave before scheduling restore; retain the strict safety precondition.
+  let status;
+  const deadline = Date.now() + 15000;
+  do {
+    status = await api(f, 'clients', {});
+    if (status.clients.filter((c) => c.kind === 'desktop').every((c) => c.confirmed && !c.shared))
+      break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } while (Date.now() < deadline);
   assert.ok(status.clients.some((c) => c.pid === child.pid && c.confirmed && c.shared));
   // An actual confirmed fake backend and synthetic parent heartbeat prevent
   // desktop fallback. No test may select, stop or reopen a real client.
@@ -82,6 +91,7 @@ async function isolatedEditor(t, f) {
     assert.ok(status.clients.some((c) => c.kind === 'editor' && c.confirmed && c.shared));
   assert.ok(
     status.clients.filter((c) => c.kind === 'desktop').every((c) => c.confirmed && !c.shared),
+    JSON.stringify(status.clients),
   );
 }
 async function finishJob(f) {
@@ -131,9 +141,13 @@ async function interfere(t, f, directory, prefix) {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     f.track(child);
+    const finished = require('node:events').once(child, 'close');
     const ready = await require('node:events').once(child.stdout, 'data');
     assert.equal(String(ready[0]).trim(), 'ready');
-    return () => fs.existsSync(marker);
+    return async () => {
+      await finished;
+      return fs.existsSync(marker);
+    };
   }
   let changed = false;
   const watcher = fs.watch(directory, (_, name) => {
