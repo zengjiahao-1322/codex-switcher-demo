@@ -26,11 +26,7 @@ function writeJson(file, value) {
       // Windows scanners can hold the destination for a short interval while
       // the switch worker publishes its status. Retry only that observed
       // transient access error; all other failures remain visible.
-      if (
-        process.platform !== 'win32' ||
-        !['EPERM', 'EACCES'].includes(error.code) ||
-        attempt >= 4
-      )
+      if (process.platform !== 'win32' || !['EPERM', 'EACCES'].includes(error.code) || attempt >= 4)
         throw error;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }

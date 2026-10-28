@@ -69,13 +69,33 @@ pub fn atomic(file: &Path, value: &str, expected: Option<Option<&str>>) -> io::R
     }
     operation
 }
-pub struct Lock(PathBuf);
+pub struct Lock {
+    file: PathBuf,
+    owned: bool,
+}
 impl Drop for Lock {
     fn drop(&mut self) {
-        if let Err(error) = fs::remove_file(&self.0) {
+        if self.owned
+            && let Err(error) = fs::remove_file(&self.file)
+        {
             eprintln!("Configuration lock cleanup failed: {error}");
         }
     }
+}
+impl Lock {
+    pub fn handoff(mut self, pid: u32) -> io::Result<()> {
+        write_json(&self.file, &json!({"pid":pid}))?;
+        self.owned = false;
+        Ok(())
+    }
+}
+pub fn adopt_operation(bridge: &Path) -> io::Result<Lock> {
+    let file = bridge.join("operation.lock");
+    let owner = store::read_json(&file)?;
+    if owner["pid"] != std::process::id() {
+        return Err(io::Error::other("切换任务尚未取得配置锁。"));
+    }
+    Ok(Lock { file, owned: true })
 }
 fn lock(file: PathBuf, operation: bool) -> io::Result<Lock> {
     if operation && file.exists() {
@@ -106,7 +126,7 @@ fn lock(file: PathBuf, operation: bool) -> io::Result<Lock> {
         }
     })?;
     write!(output, "{}", json!({"pid":std::process::id()}))?;
-    Ok(Lock(file))
+    Ok(Lock { file, owned: true })
 }
 pub fn operation(bridge: &Path) -> io::Result<Lock> {
     lock(bridge.join("operation.lock"), true)
@@ -205,7 +225,7 @@ pub fn save_backup(home: &Path, bridge: &Path, reason: &str) -> io::Result<()> {
         json!({"reason":reason,"kept":(previous.len()+1).min(10)}),
     )
 }
-fn backup(bridge: &Path, id: &str) -> io::Result<String> {
+pub fn backup(bridge: &Path, id: &str) -> io::Result<String> {
     if !files(bridge)?.iter().any(|name| name == id) {
         return Err(io::Error::other("配置备份不存在，请刷新列表。"));
     }
@@ -560,7 +580,6 @@ pub const ACTIONS: &[&str] = &[
     "providerRemove",
     "importHermes",
     "backups",
-    "restoreBackup",
     "models",
     "probe",
     "switch",
@@ -677,6 +696,12 @@ pub async fn action(app: &std::sync::Arc<App>, action: &str, input: &Value) -> i
         "switch" => {
             follow(input)?;
             let _source = source(input)?;
+            let previous_provider = parsed(
+                read(&home.join("config.toml"))?.as_deref().unwrap_or(""),
+            )?["model_provider"]
+                .as_str()
+                .unwrap_or("openai")
+                .to_owned();
             let id = input["id"].as_str().unwrap_or("");
             if id == "official" {
                 return official(app, input, false).await;
@@ -740,61 +765,22 @@ pub async fn action(app: &std::sync::Arc<App>, action: &str, input: &Value) -> i
                 &json!({"providerId":id,"model":model,"mode":"direct","at":crate::diagnostics::now()}),
             )?;
             effect(&home, &app.bridge)?;
+            drop(_lock);
+            let threads = crate::thread_routing::synchronize(
+                app,
+                crate::switching::mode(input)?,
+                Some(&previous_provider),
+            )
+            .await
+            .map_err(|(e, _)| e)?;
             Ok(
-                json!({"mode":"direct","catalogCount":staged.as_ref().map_or(0, |_| store::read_json(&catalog_path).ok().and_then(|v|v["models"].as_array().map(Vec::len)).unwrap_or(0)),"threads":{"updated":0,"skipped":0,"failed":0},"message":format!("已切换到「{}」（直连，模型 {model}）。{EFFECT}",p["name"].as_str().unwrap())}),
+                json!({"mode":"direct","catalogCount":staged.as_ref().map_or(0, |_| store::read_json(&catalog_path).ok().and_then(|v|v["models"].as_array().map(Vec::len)).unwrap_or(0)),"threads":threads,"message":format!("已切换到「{}」（直连，模型 {model}）。{EFFECT}",p["name"].as_str().unwrap())}),
             )
         }
         "restore" => {
             follow(input)?;
             source(input)?;
             official(app, input, true).await
-        }
-        "restoreBackup" => {
-            source(input)?;
-            backup(&app.bridge, input["id"].as_str().unwrap_or(""))?;
-            let job = json!({"id":"config-restore","pid":std::process::id(),"kind":"restore","backupId":input["id"],"source":source(input)?,"codexHome":home,"bridgeHome":app.bridge,"desktopExe":null,"reloadEditors":input["reloadEditors"].as_bool().unwrap_or(true),"threadFollow":"all"});
-            write_json(&app.bridge.join("account-switch-job.json"), &job)?;
-            write_json(
-                &app.bridge.join("account-switch.json"),
-                &json!({"id":"config-restore","pid":std::process::id(),"status":"queued","message":"正在检查配置备份。"}),
-            )?;
-            let app = app.clone();
-            let input = input.clone();
-            tokio::spawn(async move {
-                let _operation = _operation;
-                let started = std::time::Instant::now();
-                if let Err(error) = crate::diagnostics::log(
-                    &app.bridge,
-                    "switch.start",
-                    json!({"job":"config-restore","kind":"restore","source":input["source"].as_str().unwrap_or("web"),"desktop":false}),
-                ) {
-                    eprintln!("Restore start log failed: {error}");
-                }
-                if let Err(error) = write_json(
-                    &app.bridge.join("account-switch.json"),
-                    &json!({"id":"config-restore","pid":std::process::id(),"status":"preparing","message":"正在检查配置备份。"}),
-                ) {
-                    eprintln!("Restore status persistence failed: {error}");
-                }
-                let result = restore_backup(&app, &input).await;
-                let status = if result.is_ok() { "done" } else { "error" };
-                let message = result
-                    .err()
-                    .map(|e| e.to_string())
-                    .unwrap_or_else(|| "已恢复配置备份。".into());
-                let record = json!({"id":"config-restore","pid":std::process::id(),"status":status,"message":message,"finishedAt":crate::diagnostics::now(),"elapsedMs":started.elapsed().as_millis()});
-                if let Err(error) = write_json(&app.bridge.join("account-switch.json"), &record) {
-                    eprintln!("Restore status persistence failed: {error}");
-                }
-                if let Err(error) = crate::diagnostics::log(
-                    &app.bridge,
-                    "switch.end",
-                    json!({"job":"config-restore","source":input["source"].as_str().unwrap_or("web"),"status":status,"elapsedMs":started.elapsed().as_millis(),"configurationApplied":status=="done"}),
-                ) {
-                    eprintln!("Restore completion log failed: {error}");
-                }
-            });
-            Ok(json!({"message":"正在检查配置备份。"}))
         }
         _ => Err(io::Error::other("Unknown configuration action")),
     }
@@ -805,9 +791,14 @@ pub async fn official(app: &App, input: &Value, restore: bool) -> io::Result<Val
     let current = read(&file)?;
     let config = parsed(current.as_deref().unwrap_or(""))?;
     if restore && config["model_provider"] != "hermes_bridge" {
-        return Ok(
-            json!({"threads":{"updated":0,"skipped":0,"failed":0},"message":"Codex 当前已是官方登录。"}),
-        );
+        let threads = crate::thread_routing::synchronize(
+            app,
+            crate::switching::mode(input)?,
+            config["model_provider"].as_str().or(Some("openai")),
+        )
+        .await
+        .map_err(|(e, _)| e)?;
+        return Ok(json!({"threads":threads,"message":"Codex 当前已是官方登录。"}));
     }
     let snapshot = read(&app.bridge.join("original-config.toml"))?;
     let original = if config["model_provider"] == "hermes_bridge" {
@@ -841,112 +832,15 @@ pub async fn official(app: &App, input: &Value, restore: bool) -> io::Result<Val
     atomic(&file, &next, Some(current.as_deref()))?;
     remove_optional(&app.bridge.join("current.json"))?;
     effect(&home, &app.bridge)?;
-    Ok(
-        json!({"mode":"official","threads":{"updated":0,"skipped":0,"failed":0},"message":format!("已切回 Codex 官方登录。{EFFECT}")}),
+    drop(_lock);
+    let threads = crate::thread_routing::synchronize(
+        app,
+        crate::switching::mode(input)?,
+        config["model_provider"].as_str().or(Some("openai")),
     )
-}
-
-async fn restore_backup(app: &App, input: &Value) -> io::Result<Value> {
-    let home = app.codex_home();
-    // Client restart/reload and old-conversation routing belong to batch 4.
-    // Until then never label those unperformed operations as completed.
-    if input["reloadEditors"] != false
-        && crate::platform::client_status(&home)?["clients"]
-            .as_array()
-            .is_some_and(|rows| rows.iter().any(|v| v["shared"] == true))
-    {
-        return Err(io::Error::other("客户端重载尚未迁移，未修改配置。"));
-    }
-    if fs::read_dir(&home)?.any(|e| {
-        e.is_ok_and(|e| {
-            e.file_name().to_string_lossy().starts_with("state_")
-                && e.path().extension().is_some_and(|s| s == "sqlite")
-        })
-    }) {
-        return Err(io::Error::other("旧对话同步尚未迁移，未修改配置。"));
-    }
-    let mut value = backup(&app.bridge, input["id"].as_str().unwrap_or(""))?;
-    let config = parsed(&value)?;
-    let target = &config["model_providers"]["hermes_bridge"];
-    let adapter = store::read_json(&app.bridge.join("adapter.json"))?;
-    if config["model_provider"] == "hermes_bridge"
-        && adapter["port"]
-            .as_u64()
-            .is_some_and(|port| target["base_url"] == format!("http://127.0.0.1:{port}/v1"))
-    {
-        return Err(io::Error::other("本机转换服务尚未迁移，未修改配置。"));
-    }
-    let saved = store::load(&app.bridge)?["providers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|p| {
-            p["baseUrl"] == target["base_url"] && p["apiKey"] == target["experimental_bearer_token"]
-        })
-        .cloned();
-    let catalog_path = app.bridge.join("model-catalog.json");
-    let managed = config["model_provider"] == "hermes_bridge"
-        && config["model_catalog_json"].as_str() == catalog_path.to_str();
-    let fallback = json!({"name":target["name"],"baseUrl":target["base_url"],"apiKey":target["experimental_bearer_token"],"model":config["model"],"apiMode":"responses"});
-    let staged = if managed {
-        catalog(
-            app,
-            saved.as_ref().unwrap_or(&fallback),
-            config["model"].as_str().unwrap_or(""),
-        )
-        .await?
-    } else {
-        None
-    };
-    let selected = |catalog: Option<&str>| json!({"model":config["model"],"model_provider":config["model_provider"],"model_catalog_json":catalog});
-    let candidate = if managed {
-        text::edit(
-            &value,
-            &selected(staged.as_ref().map(|s| s.path.to_str().unwrap())),
-            target,
-        )?
-    } else {
-        value.clone()
-    };
-    validate(app, &candidate).await?;
-    crate::diagnostics::log(
-        &app.bridge,
-        "switch.step",
-        json!({"job":"config-restore","source":source(input)?,"id":"prepare","status":"done"}),
-    )?;
-    if managed {
-        value = text::edit(
-            &value,
-            &selected(staged.as_ref().map(|_| catalog_path.to_str().unwrap())),
-            target,
-        )?;
-    }
-    let _lock = lock(home.join(".hermes-bridge.lock"), false)?;
-    let file = home.join("config.toml");
-    let original = read(&file)?;
-    save_backup(&home, &app.bridge, "restore")?;
-    if let Some(staged) = &staged {
-        fs::rename(&staged.path, &catalog_path)?;
-    }
-    atomic(&file, &value, Some(original.as_deref()))?;
-    if let Some(p) = saved {
-        write_json(
-            &app.bridge.join("current.json"),
-            &json!({"providerId":p["id"],"model":config["model"],"mode":"direct","at":crate::diagnostics::now()}),
-        )?;
-    } else {
-        remove_optional(&app.bridge.join("current.json"))?;
-    }
-    effect(&home, &app.bridge)?;
-    crate::diagnostics::log(
-        &app.bridge,
-        "switch.step",
-        json!({"job":"config-restore","source":source(input)?,"id":"apply","status":"done"}),
-    )?;
-    crate::diagnostics::log(
-        &app.bridge,
-        "config.restore",
-        json!({"status":"restored","source":source(input)?}),
-    )?;
-    Ok(json!({"message":"已恢复配置备份。"}))
+    .await
+    .map_err(|(e, _)| e)?;
+    Ok(
+        json!({"mode":"official","threads":threads,"message":format!("已切回 Codex 官方登录。{EFFECT}")}),
+    )
 }

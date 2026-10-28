@@ -28,7 +28,7 @@ pub fn mode(input: &Value) -> io::Result<&str> {
         Err(io::Error::other("旧对话跟随模式无效。"))
     }
 }
-fn selected_desktop(snapshot: &Value) -> io::Result<Option<String>> {
+async fn selected_desktop(snapshot: &Value) -> io::Result<Option<String>> {
     let clients = snapshot["clients"].as_array().unwrap();
     if clients
         .iter()
@@ -46,10 +46,12 @@ fn selected_desktop(snapshot: &Value) -> io::Result<Option<String>> {
     }
     // Running independent desktops and confirmed editor-only sessions are
     // deliberately left alone. Do not open a second desktop for them.
-    if clients
-        .iter()
-        .any(|c| c["kind"] == "desktop" || (c["kind"] == "editor" && c["shared"] == true))
-    {
+    if clients.iter().any(|c| {
+        c["kind"] == "desktop"
+            || (["ide", "editor"].contains(&text(&c["kind"]))
+                && c["confirmed"] == true
+                && c["shared"] == true)
+    }) {
         return Ok(None);
     }
     #[cfg(unix)]
@@ -62,6 +64,19 @@ fn selected_desktop(snapshot: &Value) -> io::Result<Option<String>> {
             if file.is_file() {
                 return Ok(Some(crate::platform::display_path(&file)));
             }
+        }
+    }
+    #[cfg(windows)]
+    {
+        let output = tokio::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; $pkg=Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1; if($pkg){[Console]::Write((Join-Path $pkg.InstallLocation 'app\\ChatGPT.exe'))}"])
+            .creation_flags(0x08000000).output().await?;
+        if !output.status.success() {
+            return Err(io::Error::other("无法读取 Codex 桌面应用的安装位置。"));
+        }
+        let path = String::from_utf8(output.stdout).map_err(io::Error::other)?;
+        if !path.trim().is_empty() {
+            return Ok(Some(path.trim().to_owned()));
         }
     }
     Ok(None)
@@ -104,11 +119,12 @@ pub async fn schedule(app: Arc<App>, action: &str, input: &Value) -> io::Result<
         return Err(io::Error::other("请先完成或取消当前登录"));
     }
     let operation = config_ops::operation(&app.bridge)?;
-    let mut job = input.clone();
+    let mut job = json!({"id":input["id"],"model":input["model"],"autostart":input["autostart"],"reloadEditors":input["reloadEditors"]});
     job["source"] = json!(crate::remote::source(input)?);
     job["threadFollow"] = json!(mode(input)?);
     job["codexHome"] = json!(app.codex_home());
     job["bridgeHome"] = json!(app.bridge);
+    job["projectDir"] = json!(crate::instance::project_root());
     job["pid"] = json!(std::process::id());
     match action {
         "accountSwitch" => {
@@ -150,6 +166,8 @@ pub async fn schedule(app: Arc<App>, action: &str, input: &Value) -> io::Result<
             job["kind"] = json!("api");
         }
         "restoreBackup" => {
+            config_ops::backup(&app.bridge, text(&input["id"]))?;
+            job["threadFollow"] = json!("all");
             job["backupId"] = input["id"].clone();
             job["id"] = json!("config-restore");
             job["kind"] = json!("restore");
@@ -168,20 +186,73 @@ pub async fn schedule(app: Arc<App>, action: &str, input: &Value) -> io::Result<
         _ => unreachable!(),
     }
     let snapshot = editors::status(&app).await?;
-    job["desktopExe"] = json!(selected_desktop(&snapshot)?);
-    write_json(&app.bridge.join("account-switch-job.json"), &job)?;
-    // Both files are persisted while holding operation.lock before spawning.
+    job["desktopExe"] = json!(selected_desktop(&snapshot).await?);
+    let file = app.bridge.join("account-switch-job.json");
+    write_json(&file, &job)?;
+    let mut command = tokio::process::Command::new(std::env::current_exe()?);
+    command
+        .arg("--switch-job")
+        .arg(&file)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    command.creation_flags(0x08000000 | 0x00000200);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.as_std_mut().process_group(0);
+    }
+    let mut child = command.spawn()?;
+    let pid = child
+        .id()
+        .ok_or_else(|| io::Error::other("切换进程未启动。"))?;
+    job["pid"] = json!(pid);
+    write_json(&file, &job)?;
+    operation.handoff(pid)?;
+    // The worker cannot start until the lock owner and queued state are saved.
     write_json(
         &app.bridge.join("account-switch.json"),
-        &json!({"id":job["id"],"pid":std::process::id(),"status":"queued","message":"正在准备切换；完成后重载共用此目录的客户端。"}),
+        &json!({"id":job["id"],"pid":pid,"status":"queued","message":"正在准备切换；完成后重载共用此目录的客户端。"}),
     )?;
+    use tokio::io::AsyncWriteExt;
+    let mut start = child.stdin.take().unwrap();
+    start.write_all(b"start\n").await?;
+    drop(start);
     tokio::spawn(async move {
-        let _lock = operation;
-        if let Err(e) = run(app.clone(), job).await {
-            eprintln!("Switch failed: {e}");
+        if let Err(error) = child.wait().await {
+            eprintln!("Switch worker exit query failed: {error}");
         }
     });
     Ok(json!({"message":"正在准备切换；完成后重载共用此目录的客户端。"}))
+}
+pub async fn worker(file: &Path) -> io::Result<()> {
+    let mut start = String::new();
+    std::io::stdin().read_line(&mut start)?;
+    if start.trim() != "start" {
+        return Err(io::Error::other("切换进程未收到开始确认。"));
+    }
+    let job = accounts::read(file, Value::Null)?;
+    let bridge = std::path::PathBuf::from(text(&job["bridgeHome"]));
+    let _operation = config_ops::adopt_operation(&bridge)?;
+    let app = Arc::new(App {
+        home: std::path::PathBuf::from(text(&job["codexHome"])),
+        bridge: bridge.clone(),
+        web: std::path::PathBuf::from(text(&job["projectDir"])).join("web"),
+        port: 0,
+        token: String::new(),
+        protection: crate::platform::DataProtection {
+            ok: true,
+            path: bridge,
+            error: None,
+        },
+        first_request: std::sync::atomic::AtomicBool::new(false),
+        ready_at: Instant::now(),
+        downloads: std::sync::Mutex::new(std::collections::HashMap::new()),
+        accounts: accounts::Runtime::default(),
+        editors: editors::Runtime::default(),
+    });
+    run(app, job).await
 }
 struct Run {
     app: Arc<App>,
@@ -247,17 +318,26 @@ async fn stop_set(ids: Vec<u32>) -> io::Result<()> {
     }
 }
 async fn reopen(app: &App, exe: &str) -> io::Result<Value> {
-    let mut cmd = tokio::process::Command::new(exe);
-    cmd.envs(crate::platform::codex_env(&app.codex_home()))
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
     #[cfg(windows)]
-    cmd.creation_flags(0x08000000);
-    let mut child = cmd.spawn()?;
+    {
+        let output = tokio::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; $pkg=Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1; if(-not $pkg){throw 'Codex desktop package missing'}; Start-Process explorer.exe -ArgumentList ('shell:AppsFolder\\'+$pkg.PackageFamilyName+'!App')"])
+            .creation_flags(0x08000000).output().await?;
+        if !output.status.success() {
+            return Err(io::Error::other("未能重新打开 Codex 桌面应用。"));
+        }
+    }
+    #[cfg(unix)]
+    {
+        let mut cmd = tokio::process::Command::new(exe);
+        cmd.envs(crate::platform::codex_env(&app.codex_home()))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        cmd.spawn()?;
+    }
     let until = Instant::now() + Duration::from_secs(20);
     while Instant::now() < until {
-        let _ = child.try_wait()?;
         let snapshot = editors::status(app).await?;
         if let Some(c) = snapshot["clients"].as_array().unwrap().iter().find(|c| {
             editors::same(text(&c["executable"]), exe)
@@ -272,12 +352,7 @@ async fn reopen(app: &App, exe: &str) -> io::Result<Value> {
         "未检测到 Codex 桌面主进程重新启动，请查看系统是否阻止打开应用。",
     ))
 }
-async fn run(app: Arc<App>, mut job: Value) -> io::Result<()> {
-    if job["resumeThreads"] != true {
-        job["previousProvider"] = config(&app.codex_home())?["model_provider"]
-            .as_str()
-            .map_or(json!("openai"), |v| json!(v));
-    }
+async fn run(app: Arc<App>, job: Value) -> io::Result<()> {
     let mut state = Run {
         app: app.clone(),
         applied: job["resumeThreads"] == true,
@@ -296,19 +371,114 @@ async fn run(app: Arc<App>, mut job: Value) -> io::Result<()> {
         "switch.start",
         json!({"job":state.job["id"],"source":state.job["source"],"kind":state.job["kind"],"target":state.job["target"],"threadFollow":state.job["threadFollow"],"reloadEditors":state.job["reloadEditors"]!=false,"desktop":state.job["desktopExe"].is_string()}),
     )?;
-    let work=async{
-        let at=state.begin("prepare","检查目标配置与客户端")?;let prepare=async{match text(&state.job["kind"]){"api"=>config_ops::prepare_api(&app,&state.job).await.map(Some),"restore"=>config_ops::prepare_backup(&app,text(&state.job["backupId"])).await.map(Some),"resume"=>Ok(None),_=>{accounts::prepare(&app,text(&state.job["id"])).await.map_err(|e|io::Error::other(e.message))?;Ok(None)}}};let check=async{if state.job["reloadEditors"]==false{return Ok(());}let snapshot=editors::status(&app).await?;log(&app.bridge,"switch.clients",json!({"job":state.job["id"],"source":state.job["source"],"phase":"check","clients":crate::diagnostics::redact(&snapshot["clients"])}))?;check_editors(&snapshot)};
-        let (prepared,checked)=tokio::join!(prepare,check);let error=prepared.as_ref().err().or(checked.as_ref().err()).map(ToString::to_string);state.end("prepare",at,error.as_deref())?;let prepared=prepared?;checked?;
-        let latest=editors::status(&app).await?;log(&app.bridge,"switch.clients",json!({"job":state.job["id"],"source":state.job["source"],"phase":"recheck","clients":crate::diagnostics::redact(&latest["clients"])}))?;if state.job["reloadEditors"]!=false{check_editors(&latest)?;}
-        let clients=latest["clients"].as_array().unwrap();let shared=state.job["reloadEditors"]!=false&&clients.iter().any(|c|c["kind"]=="ide"&&c["confirmed"]==true&&c["shared"]==true);
-        let editor_ids=if shared{clients.iter().filter(|c|c["kind"]=="ide"&&c["confirmed"]==true&&c["shared"]==true).filter_map(|c|c["pid"].as_u64().map(|v|v as u32)).collect()}else{vec![]};let editors=if shared{clients.iter().filter(|c|c["kind"]=="editor"&&c["canReload"]==true).cloned().collect::<Vec<_>>()}else{vec![]};
-        let desktop_ids=clients.iter().filter(|c|state.job["desktopExe"].is_string()&&c["kind"]=="desktop"&&c["confirmed"]==true&&c["shared"]==true&&editors::same(text(&c["desktopExecutable"]),text(&state.job["desktopExe"]))).flat_map(|c|[c["pid"].as_u64(),c["desktopPid"].as_u64()]).flatten().map(|id|id as u32).collect::<std::collections::HashSet<_>>().into_iter().collect();
-        state.status="switching";let release=state.begin("release","释放目标客户端")?;let (desktop_result,editor_result)=tokio::join!(stop_set(desktop_ids),stop_set(editor_ids));if editor_result.is_ok(){stopped=editors;}let error=desktop_result.as_ref().err().or(editor_result.as_ref().err()).map(ToString::to_string);state.end("release",release,error.as_deref())?;desktop_result?;editor_result?;
-        let at=state.begin("apply","保存并应用目标配置")?;let applied=async{if state.job["resumeThreads"]==true{return Ok(json!({"label":"当前来源"}));}accounts::capture(&app)?;if let Some(p)=prepared{p.apply(&app)}else{accounts::apply_saved(&app,text(&state.job["id"]),state.job["model"].as_str(),state.job["catalog"].as_str()).await}}.await;state.end("apply",at,applied.as_ref().err().map(ToString::to_string).as_deref())?;let applied=applied?;state.applied=true;state.effect("thread_sync_pending","配置已写入，正在同步旧对话，尚未完成切换。")?;
-        let at=state.begin("threads","同步并核对旧对话")?;let synced=crate::thread_routing::synchronize(&app,text(&state.job["threadFollow"]),state.job["previousProvider"].as_str()).await;match synced{Ok(v)=>state.threads=v,Err((e,counts))=>{state.threads=counts;state.end("threads",at,Some(&e.to_string()))?;return Err(e);}}state.end("threads",at,None)?;state.effect("restart_required","配置已应用，客户端尚未重新打开。")?;
-        if let Some(exe)=state.job["desktopExe"].as_str(){let exe=exe.to_owned();state.status="reopening";let at=state.begin("reopen","重新打开并确认桌面主进程")?;let opened=reopen(&app,&exe).await;state.end("reopen",at,opened.as_ref().err().map(ToString::to_string).as_deref())?;state.desktop_started=opened?;}
-        if shared{let at=state.begin("reload","发送编辑器重载请求")?;state.reload=editors::reload(&app,&json!({}),&stopped,false)?;state.end("reload",at,None)?;}
-        state.effect("reopen_requested","配置已应用，已请求客户端重新加载；CLI请重新启动。")?;Ok::<_,io::Error>(applied)
+    let work = async {
+        let at = state.begin("prepare", "检查目标配置与客户端")?;
+        if state.job["resumeThreads"] != true {
+            state.job["previousProvider"] = config(&app.codex_home())?["model_provider"].as_str().map_or(json!("openai"), |v| json!(v));
+        }
+        let prepare = async {
+            if state.job["kind"] != "restore" {
+                accounts::sync_current(&app, true).await?;
+            }
+            match text(&state.job["kind"]) {
+                "api" => config_ops::prepare_api(&app, &state.job).await.map(Some),
+                "restore" => config_ops::prepare_backup(&app, text(&state.job["backupId"])).await.map(Some),
+                "resume" => Ok(None),
+                _ => {
+                    accounts::prepare(&app, text(&state.job["id"]))
+                        .await.map_err(|e| io::Error::other(e.message))?;
+                    Ok(None)
+                }
+            }
+        };
+        let check = async {
+            if state.job["reloadEditors"] == false { return Ok(()); }
+            let snapshot = editors::status(&app).await?;
+            log(&app.bridge, "switch.clients", json!({
+                "job":state.job["id"], "source":state.job["source"], "phase":"check", "clients":snapshot["clients"]
+            }))?;
+            check_editors(&snapshot)
+        };
+        // Wait for both checks even on error: the operation lock remains held
+        // until the other preparation has stopped writing account copies.
+        let (prepared, checked) = tokio::join!(prepare, check);
+        let error = prepared.as_ref().err().or(checked.as_ref().err()).map(ToString::to_string);
+        state.end("prepare", at, error.as_deref())?;
+        let prepared = prepared?;
+        checked?;
+        let latest = editors::status(&app).await?;
+        log(&app.bridge, "switch.clients", json!({
+            "job":state.job["id"], "source":state.job["source"], "phase":"recheck", "clients":latest["clients"]
+        }))?;
+        if state.job["reloadEditors"] != false { check_editors(&latest)?; }
+        let clients = latest["clients"].as_array().unwrap();
+        let shared = state.job["reloadEditors"] != false && clients.iter().any(|c|
+            c["kind"] == "ide" && c["confirmed"] == true && c["shared"] == true
+        );
+        let editor_ids = if shared {
+            clients.iter().filter(|c| c["kind"] == "ide" && c["confirmed"] == true && c["shared"] == true)
+                .filter_map(|c| c["pid"].as_u64().map(|v| v as u32)).collect()
+        } else { vec![] };
+        let editors = if shared {
+            clients.iter().filter(|c| c["kind"] == "editor" && c["canReload"] == true).cloned().collect::<Vec<_>>()
+        } else { vec![] };
+        let desktop_ids = clients.iter().filter(|c|
+            state.job["desktopExe"].is_string() && c["kind"] == "desktop" && c["confirmed"] == true && c["shared"] == true
+                && editors::same(text(&c["desktopExecutable"]), text(&state.job["desktopExe"]))
+        ).flat_map(|c| [c["pid"].as_u64(), c["desktopPid"].as_u64()]).flatten()
+            .map(|id| id as u32).collect::<std::collections::HashSet<_>>().into_iter().collect();
+        state.status = "switching";
+        let at = state.begin("release", "释放目标客户端")?;
+        let (desktop_result, editor_result) = tokio::join!(crate::platform::stop_desktop(desktop_ids), stop_set(editor_ids));
+        if editor_result.is_ok() { stopped = editors; }
+        let error = desktop_result.as_ref().err().or(editor_result.as_ref().err()).map(ToString::to_string);
+        state.end("release", at, error.as_deref())?;
+        desktop_result?;
+        editor_result?;
+        let at = state.begin("apply", "保存并应用目标配置")?;
+        let applied = async {
+            if state.job["resumeThreads"] == true { return Ok(json!({"label":"当前来源"})); }
+            if state.job["kind"] != "restore" {
+                accounts::sync_current(&app, true).await?;
+            }
+            accounts::capture(&app)?;
+            if let Some(prepared) = prepared {
+                prepared.apply(&app)
+            } else {
+                accounts::apply_saved(&app, text(&state.job["id"]), state.job["model"].as_str(), state.job["catalog"].as_str()).await
+            }
+        }.await;
+        state.end("apply", at, applied.as_ref().err().map(ToString::to_string).as_deref())?;
+        let applied = applied?;
+        state.applied = true;
+        state.effect("thread_sync_pending", "配置已写入，正在同步旧对话，尚未完成切换。")?;
+        let at = state.begin("threads", "同步并核对旧对话")?;
+        match crate::thread_routing::synchronize(&app, text(&state.job["threadFollow"]), state.job["previousProvider"].as_str()).await {
+            Ok(counts) => state.threads = counts,
+            Err((error, counts)) => {
+                state.threads = counts;
+                state.end("threads", at, Some(&error.to_string()))?;
+                return Err(error);
+            }
+        }
+        state.end("threads", at, None)?;
+        state.effect("restart_required", "配置已应用，客户端尚未重新打开。")?;
+        if let Some(exe) = state.job["desktopExe"].as_str() {
+            let exe = exe.to_owned();
+            state.status = "reopening";
+            let at = state.begin("reopen", "重新打开并确认桌面主进程")?;
+            let opened = reopen(&app, &exe).await;
+            state.end("reopen", at, opened.as_ref().err().map(ToString::to_string).as_deref())?;
+            state.desktop_started = opened?;
+        }
+        if shared {
+            let at = state.begin("reload", "发送编辑器重载请求")?;
+            let result = editors::reload(&app, &json!({}), &stopped, false);
+            state.end("reload", at, result.as_ref().err().map(ToString::to_string).as_deref())?;
+            state.reload = result?;
+        }
+        state.effect("reopen_requested", "配置已应用，已请求客户端重新加载；CLI请重新启动。")?;
+        Ok::<_, io::Error>(applied)
     }.await;
     match work {
         Ok(applied) => state.report(
@@ -319,16 +489,27 @@ async fn run(app: Arc<App>, mut job: Value) -> io::Result<()> {
             ),
         )?,
         Err(e) => {
+            let mut recovery = String::new();
             if !stopped.is_empty() && state.reload.is_null() {
-                state.reload = editors::reload(&app, &json!({}), &stopped, true)?;
+                let at = state.begin("recoverEditors", "恢复已停止的编辑器插件")?;
+                let result = editors::reload(&app, &json!({}), &stopped, true);
+                state.end(
+                    "recoverEditors",
+                    at,
+                    result.as_ref().err().map(ToString::to_string).as_deref(),
+                )?;
+                match result {
+                    Ok(value) => state.reload = value,
+                    Err(error) => recovery = format!(" 插件恢复请求未发送：{error}"),
+                }
             }
             if state.applied {
-                state.effect("switch_incomplete", &format!("切换未完成：{e}"))?;
+                state.effect("switch_incomplete", &format!("切换未完成：{e}{recovery}"))?;
             }
             state.report(
                 "error",
                 &format!(
-                    "{}：{e}",
+                    "{}：{e}{recovery}",
                     if state.applied {
                         "配置已应用，但旧对话同步或客户端重新加载未完成"
                     } else {

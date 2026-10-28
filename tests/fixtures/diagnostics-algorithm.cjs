@@ -5,7 +5,15 @@ const [inputFile, outputFile] = process.argv.slice(2);
 const input = JSON.parse(fs.readFileSync(inputFile, 'utf8'));
 async function run() {
   let output;
-  if (input.op === 'otherInstallAction')
+  if (input.op === 'clientSnapshot')
+    output = require('../../src/clients/client-status.cjs').snapshot(input.home, input.bridge, {
+      inventory: input.inventory,
+    });
+  else if (input.op === 'serviceTier')
+    output =
+      (await require('../../src/diagnostics/thread-routing.cjs').savedServiceTier(input.file)) ??
+      null;
+  else if (input.op === 'otherInstallAction')
     output = require('../../src/platform/app-lifecycle.cjs').otherInstallAction(
       input.old,
       input.current,

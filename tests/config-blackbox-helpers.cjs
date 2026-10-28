@@ -76,19 +76,20 @@ async function isolatedEditor(t, f) {
   const deadline = Date.now() + 15000;
   do {
     status = await api(f, 'clients', {});
-    if (status.clients.filter((c) => c.kind === 'desktop').every((c) => c.confirmed && !c.shared))
+    if (
+      status.clients.some((c) => c.pid === child.pid && c.confirmed && c.shared) &&
+      status.clients.some((c) => c.kind === 'editor' && c.confirmed && c.shared) &&
+      status.clients.filter((c) => c.kind === 'desktop').every((c) => c.confirmed && !c.shared)
+    )
       break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   } while (Date.now() < deadline);
   assert.ok(status.clients.some((c) => c.pid === child.pid && c.confirmed && c.shared));
   // An actual confirmed fake backend and synthetic parent heartbeat prevent
   // desktop fallback. No test may select, stop or reopen a real client.
-  // Node's existing desktop scheduler falls back to the installed desktop
-  // when it has no editor. Rust currently queues config-only restore tasks
-  // without a desktop scheduler. This is a fixture safety precondition,
-  // not an assertion that Rust has implemented batch-4 window association.
-  if (!require('./backend.cjs').isRust)
-    assert.ok(status.clients.some((c) => c.kind === 'editor' && c.confirmed && c.shared));
+  // Both schedulers fall back to the installed desktop without an editor.
+  // Confirm the real TEMP backend and parent heartbeat before any switch.
+  assert.ok(status.clients.some((c) => c.kind === 'editor' && c.confirmed && c.shared));
   assert.ok(
     status.clients.filter((c) => c.kind === 'desktop').every((c) => c.confirmed && !c.shared),
     JSON.stringify(status.clients),

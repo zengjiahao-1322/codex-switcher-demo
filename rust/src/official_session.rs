@@ -51,7 +51,11 @@ impl Failure {
             "service_error"
         };
         Self {
-            message: format!("官方服务请求失败（{}）。", code),
+            message: if raw.contains("active writer") {
+                "旧对话仍被客户端占用，请关闭该客户端后继续同步。".into()
+            } else {
+                format!("官方服务请求失败（{}）。", code)
+            },
             kind,
             code,
         }

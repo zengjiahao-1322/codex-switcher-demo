@@ -58,7 +58,7 @@ pub async fn dispatch(
     editors::wake(&app);
     tokio::time::timeout(Duration::from_secs(timeout), receiver)
         .await
-        .map_err(|_| io::Error::other("等待远端窗口确认命令超时"))?
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "等待远端窗口确认命令超时"))?
         .map_err(io::Error::other)?
         .map_err(io::Error::other)
 }
@@ -140,6 +140,7 @@ fn auth_secrets(auth: &Value) -> Vec<String> {
         .as_object()
         .into_iter()
         .flat_map(|o| o.values())
+        .chain(auth.get("OPENAI_API_KEY"))
         .filter_map(|v| v.as_str().map(str::to_owned))
         .collect()
 }
@@ -223,10 +224,21 @@ pub fn confirm(app: &App, input: &Value) -> io::Result<bool> {
     let Some(target) = target else {
         return Ok(false);
     };
+    let registered = accounts::read(
+        &app.bridge.join("clients").join(format!("{old}.json")),
+        Value::Null,
+    )?;
+    let completed_matches = completed.is_object()
+        && completed["commandId"] == registered["lastAck"]["id"]
+        && matches!(
+            text(&registered["lastAck"]["status"]),
+            "reload_requested" | "reloaded"
+        );
     let matched = input["authority"] == target["authority"]
         && (target["codexHome"].is_null()
             || input["remoteAgent"]["codexHome"] == target["codexHome"])
         && input["remoteAgent"]["agentVersion"] == input["companionVersion"]
+        && (target["kind"] != "install" || input["remoteAgent"]["agentVersion"] == target["to"])
         && input["remoteAgent"]["protocol"].as_u64().unwrap_or(0) >= 3;
     let restarted = target["method"] == "remoteHostExit"
         && time::OffsetDateTime::parse(
@@ -238,12 +250,12 @@ pub fn confirm(app: &App, input: &Value) -> io::Result<bool> {
             v.unix_timestamp_nanos() / 1_000_000
                 > i128::from(target["requestedAt"].as_u64().unwrap_or(u64::MAX))
         });
-    if matched && (completed.is_object() || restarted) {
+    if matched && (completed_matches || restarted) {
         app.editors.reloads.lock().unwrap().remove(old);
         record_reload(app, &target, true, "")?;
         return Ok(true);
     }
-    if input["ackStatus"] == "reload_failed" {
+    if input["ackStatus"] == "reload_failed" && input["ack"] == registered["lastAck"]["id"] {
         app.editors.reloads.lock().unwrap().remove(old);
         record_reload(app, &target, false, text(&input["ackError"]))?;
     }
@@ -384,14 +396,57 @@ async fn apply_group(
     let mut secrets = auth_secrets(&auth);
     secrets.push(text(&p["apiKey"]).into());
     let mut step = "read";
-    let operation=async {
-        let read=dispatch(app.clone(),id,json!({"type":"remoteApply","step":"read"}),30).await?;original=read["text"].as_str().ok_or_else(||io::Error::other("远端配置读取结果或校验值无效"))?.to_owned();if read["sha256"]!=digest(&original){return Err(io::Error::other("远端配置读取结果或校验值无效"));}
-        let mut previous=Value::Null;let next=if auth.is_object(){let config=toml::from_str::<toml::Value>(&original).map_err(|_|io::Error::other("服务器配置无法解析，未写入官方登录"))?;let config=serde_json::to_value(config).unwrap();let mode=text(&config["cli_auth_credentials_store"]);if ["keyring","ephemeral"].contains(&mode){return Err(io::Error::other(format!("服务器使用{mode}凭证存储，写入auth.json不会生效；未修改配置或登录")));}step="readAuth";previous=read_auth(app.clone(),id).await?;secrets.extend(auth_secrets(&previous["auth"]));secrets.push(text(&previous["text"]).into());let selected=model.as_str().or_else(||if config["model_provider"].is_null()||config["model_provider"]=="openai"{config["model"].as_str()}else{None});let own=path(&group,"switcher-model-catalog.json");let catalog=config["model_catalog_json"].as_str().filter(|v|*v!=own);crate::config_text::official(&original,selected,catalog,Some("file"))?}else{crate::config_text::prepare(&original,&p,text(&model),catalog.as_ref().map(|_|path(&group,"switcher-model-catalog.json")).as_deref())?};
-        let mut write=json!({"type":"remoteApply","step":"write","text":next,"expectedSha256":read["sha256"],"catalog":catalog,"reload":true});let auth_text=if auth.is_object(){Some(serde_json::to_string_pretty(&auth).unwrap())}else{None};if let Some(body)=&auth_text{write["auth"]=json!({"text":body,"expectedSha256":previous["sha256"]});}step="write";let requested=millis();let written=dispatch(app.clone(),id,write,30).await?;if written["ok"]!=true||written["sha256"]!=digest(&next){return Err(io::Error::other("远端未确认写入目标配置"));}
-if auth_text.is_some_and(|body|written["authSha256"]!=digest(&body)){return Err(io::Error::other("远端未确认写入目标登录"));}
-        mark_reload(app.clone(),id,json!({"host":group["host"],"authority":group["authority"],"codexHome":group["codexHome"],"requestedAt":requested,"source":origin,"method":written["reload"]["method"].as_str().unwrap_or("remoteHostExit"),"reason":written["reload"]["reason"]}))?;
-        for other in group["windows"].as_array().unwrap().iter().filter(|v|v["id"]!=id){let requested=millis();let out=dispatch(app.clone(),text(&other["id"]),json!({"type":"remoteReload","reload":true}),30).await?;mark_reload(app.clone(),text(&other["id"]),json!({"host":group["host"],"authority":group["authority"],"codexHome":group["codexHome"],"requestedAt":requested,"source":origin,"method":out["reload"]["method"],"reason":out["reload"]["reason"]}))?;}
-        Ok::<_,io::Error>(written)
+    let operation = async {
+        let read = dispatch(app.clone(), id, json!({"type":"remoteApply","step":"read"}), 30).await?;
+        original = read["text"].as_str().ok_or_else(|| io::Error::other("远端配置读取结果或校验值无效"))?.to_owned();
+        if read["sha256"] != digest(&original) { return Err(io::Error::other("远端配置读取结果或校验值无效")); }
+        let mut previous = Value::Null;
+        let next = if auth.is_object() {
+            let config = toml::from_str::<toml::Value>(&original).map_err(|_| io::Error::other("服务器配置无法解析，未写入官方登录"))?;
+            let config = serde_json::to_value(config).unwrap();
+            let mode = text(&config["cli_auth_credentials_store"]);
+            if ["keyring", "ephemeral"].contains(&mode) { return Err(io::Error::other(format!("服务器使用{mode}凭证存储，写入auth.json不会生效；未修改配置或登录"))); }
+            step = "readAuth";
+            previous = read_auth(app.clone(), id).await?;
+            secrets.extend(auth_secrets(&previous["auth"]));
+            secrets.push(text(&previous["text"]).into());
+            let selected = model.as_str().or_else(|| {
+                if config["model_provider"].is_null() || config["model_provider"] == "openai" { config["model"].as_str() } else { None }
+            });
+            let own = path(&group, "switcher-model-catalog.json");
+            let catalog = config["model_catalog_json"].as_str().filter(|v| *v != own);
+            crate::config_text::official(&original, selected, catalog, Some("file"))?
+        } else {
+            let target_catalog = catalog.as_ref().map(|_| path(&group, "switcher-model-catalog.json"));
+            crate::config_text::prepare(&original, &p, text(&model), target_catalog.as_deref())?
+        };
+        let mut write = json!({"type":"remoteApply","step":"write","text":next,"expectedSha256":read["sha256"],"catalog":catalog,"reload":true});
+        let auth_text = auth.is_object().then(|| serde_json::to_string_pretty(&auth).unwrap());
+        if let Some(body) = &auth_text { write["auth"] = json!({"text":body,"expectedSha256":previous["sha256"]}); }
+        step = "write";
+        let requested = millis();
+        let written = dispatch(app.clone(), id, write, 30).await?;
+        if written["ok"] != true || written["sha256"] != digest(&next) { return Err(io::Error::other("远端未确认写入目标配置")); }
+        if auth_text.is_some_and(|body| written["authSha256"] != digest(&body)) { return Err(io::Error::other("远端未确认写入目标登录")); }
+        mark_reload(app.clone(), id, json!({"host":group["host"],"authority":group["authority"],"codexHome":group["codexHome"],"requestedAt":requested,"source":origin,"method":written["reload"]["method"].as_str().unwrap_or("remoteHostExit"),"reason":written["reload"]["reason"]}))?;
+        let mut reloading = vec![];
+        for other in group["windows"].as_array().unwrap().iter().filter(|v| v["id"] != id) {
+            let app = app.clone();
+            let group = group.clone();
+            let id = text(&other["id"]).to_owned();
+            let origin = origin.to_owned();
+            reloading.push(tokio::spawn(async move {
+                let requested = millis();
+                let out = dispatch(app.clone(), &id, json!({"type":"remoteReload","reload":true}), 30).await?;
+                mark_reload(app, &id, json!({"host":group["host"],"authority":group["authority"],"codexHome":group["codexHome"],"requestedAt":requested,"source":origin,"method":out["reload"]["method"],"reason":out["reload"]["reason"]}))
+            }));
+        }
+        let mut failure = None;
+        for result in reloading {
+            if let Err(error) = result.await.map_err(io::Error::other).and_then(|result|result) { failure.get_or_insert(error); }
+        }
+        if let Some(error) = failure { return Err(error); }
+        Ok::<_, io::Error>(written)
     }.await;
     match operation {
         Ok(written) => {
@@ -404,6 +459,9 @@ if auth_text.is_some_and(|body|written["authSha256"]!=digest(&body)){return Err(
         }
         Err(e) => {
             secrets.push(original);
+            if e.kind() == io::ErrorKind::TimedOut {
+                step = "timeout";
+            }
             let reason = redact(&e.to_string(), &secrets);
             result["status"] = json!("failed");
             result["reason"] = json!(reason);
@@ -467,13 +525,63 @@ async fn synchronize(app: Arc<App>, id: &str) -> io::Result<()> {
     if !accounts::known(&app.bridge, id)? {
         return Ok(());
     }
+    accounts::sync_current(&app, false).await?;
     let mut latest = accounts::saved_auth(&app.bridge, id)?;
     let mut snapshots = vec![];
     let mut secrets = auth_secrets(&latest);
-    let operation=async{
-        let groups=groups(&app.bridge)?.into_iter().filter(|g|g["account"]["id"]==id).collect::<Vec<_>>();if groups.iter().any(|g|g["account"]["lastRefresh"]!=latest["last_refresh"]){for group in groups{let Some(w)=window(&app.bridge,&group)?else{continue};let config=dispatch(app.clone(),text(&w["id"]),json!({"type":"remoteApply","step":"read"}),30).await?;let config=toml::from_str::<toml::Value>(text(&config["text"])).map_err(|_|io::Error::other("服务器配置无法解析，未同步登录"))?;if matches!(config.get("cli_auth_credentials_store").and_then(|v|v.as_str()),Some("keyring"|"ephemeral")){continue;}let saved=read_auth(app.clone(),text(&w["id"])).await?;if accounts::identity(&saved["auth"]).is_none_or(|v|v["id"]!=id){continue;}secrets.extend(auth_secrets(&saved["auth"]));snapshots.push((group,w,saved));}}
-        {let _guard=app.accounts.mutation.lock().await;for (group,_,saved) in &snapshots{if accounts::merge_auth(&app,&saved["auth"])?{log(&app.bridge,"official.sync",json!({"account":accounts::identity(&latest).unwrap()["email"],"direction":"remote→saved","target":format!("{}:{}",text(&group["authority"]),text(&group["codexHome"])),"status":"saved"}))?;}}accounts::capture(&app)?;latest=accounts::saved_auth(&app.bridge,id)?;if accounts::sync_local_auth(&app,&latest)?{log(&app.bridge,"official.sync",json!({"account":accounts::identity(&latest).unwrap()["email"],"direction":"saved→local","target":"本机当前登录","status":"synced"}))?;}}
-        let body=serde_json::to_string_pretty(&latest).unwrap();for (group,w,saved) in &snapshots{if text(&saved["auth"]["last_refresh"])>=text(&latest["last_refresh"]){continue;}let out=dispatch(app.clone(),text(&w["id"]),json!({"type":"remoteApply","step":"write","text":null,"expectedSha256":null,"catalog":null,"auth":{"text":body,"expectedSha256":saved["sha256"]},"reload":false}),30).await?;if out["ok"]!=true||out["authSha256"]!=digest(&body){return Err(io::Error::other("服务器未确认写入最新登录"));}log(&app.bridge,"official.sync",json!({"account":accounts::identity(&latest).unwrap()["email"],"direction":"saved→remote","target":format!("{}:{}",text(&group["authority"]),text(&group["codexHome"])),"status":"synced"}))?;}Ok::<_,io::Error>(())
+    let operation = async {
+        let groups = groups(&app.bridge)?.into_iter().filter(|group| group["account"]["id"] == id).collect::<Vec<_>>();
+        if groups.iter().any(|group| group["account"]["lastRefresh"] != latest["last_refresh"]) {
+            for group in groups {
+                let Some(window) = window(&app.bridge, &group)? else { continue; };
+                let config = dispatch(app.clone(), text(&window["id"]), json!({"type":"remoteApply","step":"read"}), 30).await?;
+                let config = toml::from_str::<toml::Value>(text(&config["text"]))
+                    .map_err(|_| io::Error::other("服务器配置无法解析，未同步登录"))?;
+                let mode = config.get("cli_auth_credentials_store").and_then(|v| v.as_str());
+                let target = format!("{}:{}", text(&group["authority"]), text(&group["codexHome"]));
+                if matches!(mode, Some("keyring" | "ephemeral")) {
+                    log(&app.bridge, "official.sync", json!({"account":accounts::identity(&latest).unwrap()["email"],"direction":"remote→saved","target":target,"status":"skipped","reason":format!("服务器使用{}凭证存储",mode.unwrap())}))?;
+                    continue;
+                }
+                let saved = read_auth(app.clone(), text(&window["id"])).await?;
+                if accounts::identity(&saved["auth"]).is_none_or(|v| v["id"] != id) {
+                    log(&app.bridge, "official.sync", json!({"account":accounts::identity(&latest).unwrap()["email"],"direction":"remote→saved","target":target,"status":"skipped","reason":"服务器当前登录已变化"}))?;
+                    continue;
+                }
+                secrets.extend(auth_secrets(&saved["auth"]));
+                secrets.push(text(&saved["text"]).into());
+                snapshots.push((group, window, saved));
+            }
+        }
+        {
+            let _guard = app.accounts.mutation.lock().await;
+            for (group, _, saved) in &snapshots {
+                if accounts::merge_auth(&app, &saved["auth"])? {
+                    log(&app.bridge, "official.sync", json!({"account":accounts::identity(&latest).unwrap()["email"],"direction":"remote→saved","target":format!("{}:{}",text(&group["authority"]),text(&group["codexHome"])),"status":"saved"}))?;
+                }
+            }
+            accounts::capture(&app)?;
+            latest = accounts::saved_auth(&app.bridge, id)?;
+            if accounts::sync_local_auth(&app, &latest)? {
+                log(&app.bridge, "official.sync", json!({"account":accounts::identity(&latest).unwrap()["email"],"direction":"saved→local","target":"本机当前登录","status":"synced"}))?;
+            }
+        }
+        let refreshed = |auth: &Value| time::OffsetDateTime::parse(text(&auth["last_refresh"]), &time::format_description::well_known::Rfc3339)
+            .map_or(0, |at| at.unix_timestamp_nanos());
+        let body = serde_json::to_string_pretty(&latest).unwrap();
+        for (group, window, saved) in &snapshots {
+            if refreshed(&saved["auth"]) >= refreshed(&latest) { continue; }
+            let output = dispatch(app.clone(), text(&window["id"]), json!({"type":"remoteApply","step":"write","text":null,"expectedSha256":null,"catalog":null,"auth":{"text":body,"expectedSha256":saved["sha256"]},"reload":false}), 30).await?;
+            if output["ok"] != true || output["authSha256"] != digest(&body) { return Err(io::Error::other("服务器未确认写入最新登录")); }
+            log(&app.bridge, "official.sync", json!({"account":accounts::identity(&latest).unwrap()["email"],"direction":"saved→remote","target":format!("{}:{}",text(&group["authority"]),text(&group["codexHome"])),"status":"synced"}))?;
+        }
+        Ok::<_, io::Error>(())
     }.await;
-    operation.map_err(|e|{let reason=redact(&e.to_string(),&secrets);if let Err(error)=log(&app.bridge,"official.sync",json!({"account":accounts::identity(&latest).unwrap_or(Value::Null)["email"],"status":"failed","reason":reason})){eprintln!("Sync failure log failed: {error}");}io::Error::other(reason)})
+    operation.map_err(|error| {
+        let reason = redact(&error.to_string(), &secrets);
+        if let Err(error) = log(&app.bridge, "official.sync", json!({"account":accounts::identity(&latest).unwrap_or(Value::Null)["email"],"status":"failed","reason":reason})) {
+            eprintln!("Sync failure log failed: {error}");
+        }
+        io::Error::other(reason)
+    })
 }

@@ -194,9 +194,17 @@ pub fn write_json(file: &std::path::Path, value: &Value) -> io::Result<()> {
         output.set_permissions(fs::Permissions::from_mode(0o600))?;
     }
     output.write_all(&serde_json::to_vec_pretty(value).map_err(io::Error::other)?)?;
+    drop(output);
     fs::rename(&temporary, file)
 }
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    if env::args().nth(1).as_deref() == Some("--switch-job") {
+        crate::switching::worker(std::path::Path::new(
+            &env::args().nth(2).ok_or("Switch job path required")?,
+        ))
+        .await?;
+        return Ok(());
+    }
     if env::args().nth(1).as_deref() == Some("--algorithm-fixture") {
         crate::diagnostics::algorithm(&env::args().skip(2).collect::<Vec<_>>()).await?;
         return Ok(());

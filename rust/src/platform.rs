@@ -352,6 +352,24 @@ mod windows {
         }
         ok != 0 && code == 259
     }
+    pub fn running(pid: u32) -> io::Result<bool> {
+        let handle = unsafe { OpenProcess(0x1000, 0, pid) };
+        if handle.is_null() {
+            let error = io::Error::last_os_error();
+            return if error.raw_os_error() == Some(87) {
+                Ok(false)
+            } else {
+                Err(error)
+            };
+        }
+        let mut code = 0;
+        let ok = unsafe { GetExitCodeProcess(handle, &mut code) };
+        let error = io::Error::last_os_error();
+        unsafe {
+            CloseHandle(handle);
+        }
+        if ok == 0 { Err(error) } else { Ok(code == 259) }
+    }
     pub fn terminate(pid: u32) -> io::Result<()> {
         let handle = unsafe { OpenProcess(1, 0, pid) };
         if handle.is_null() {
@@ -689,6 +707,27 @@ pub fn alive(pid: u32) -> bool {
         })
 }
 #[cfg(unix)]
+pub fn running(pid: u32) -> std::io::Result<bool> {
+    unsafe extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+    if unsafe { kill(pid as i32, 0) } != 0 {
+        let error = std::io::Error::last_os_error();
+        return if error.raw_os_error() == Some(3) {
+            Ok(false)
+        } else {
+            Err(error)
+        };
+    }
+    let output = std::process::Command::new("/bin/ps")
+        .args(["-o", "state=", "-p", &pid.to_string()])
+        .output()?;
+    Ok(output.status.success()
+        && !String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .starts_with('Z'))
+}
+#[cfg(unix)]
 pub fn terminate(pid: u32) -> std::io::Result<()> {
     unsafe extern "C" {
         fn kill(pid: i32, signal: i32) -> i32;
@@ -849,6 +888,8 @@ pub fn scan() -> std::io::Result<serde_json::Value> {
 }
 #[cfg(windows)]
 pub use windows::protect_directory;
+#[cfg(windows)]
+pub use windows::running;
 #[cfg(unix)]
 pub fn protect_directory(path: &std::path::Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -1356,18 +1397,82 @@ pub fn codex_env(home: &std::path::Path) -> std::collections::BTreeMap<String, S
     }
     env
 }
+pub async fn stop_desktop(ids: Vec<u32>) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::ffi::c_void;
+        #[link(name = "user32")]
+        unsafe extern "system" {
+            fn EnumWindows(
+                callback: unsafe extern "system" fn(*mut c_void, isize) -> i32,
+                parameter: isize,
+            ) -> i32;
+            fn GetWindowThreadProcessId(window: *mut c_void, process: *mut u32) -> u32;
+            fn PostMessageW(window: *mut c_void, message: u32, wparam: usize, lparam: isize)
+            -> i32;
+        }
+        unsafe extern "system" fn close(window: *mut c_void, parameter: isize) -> i32 {
+            let ids = unsafe { &*(parameter as *const Vec<u32>) };
+            let mut pid = 0;
+            unsafe {
+                GetWindowThreadProcessId(window, &mut pid);
+            }
+            if ids.contains(&pid) {
+                unsafe {
+                    PostMessageW(window, 0x10, 0, 0);
+                }
+            }
+            1
+        }
+        if !ids.is_empty() {
+            if unsafe { EnumWindows(close, &ids as *const Vec<u32> as isize) } == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while std::time::Instant::now() < deadline {
+                let mut active = false;
+                for pid in &ids {
+                    active |= running(*pid)?;
+                }
+                if !active {
+                    return Ok(());
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+        }
+    }
+    let mut stops = vec![];
+    for pid in ids {
+        stops.push(tokio::spawn(async move { stop(pid).await }));
+    }
+    let mut failure = None;
+    for stopped in stops {
+        if let Err(error) = stopped
+            .await
+            .map_err(std::io::Error::other)
+            .and_then(|result| result)
+        {
+            failure.get_or_insert(error);
+        }
+    }
+    if let Some(error) = failure {
+        Err(error)
+    } else {
+        Ok(())
+    }
+}
 pub async fn stop(pid: u32) -> std::io::Result<()> {
     use std::time::{Duration, Instant};
-    if !alive(pid) {
+    if !running(pid)? {
         return Ok(());
     }
     terminate(pid)?;
     let until = Instant::now() + Duration::from_millis(1500);
-    while alive(pid) && Instant::now() < until {
+    while running(pid)? && Instant::now() < until {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     #[cfg(unix)]
-    if alive(pid) {
+    if running(pid)? {
         unsafe extern "C" {
             fn kill(pid: i32, signal: i32) -> i32;
         }
@@ -1376,10 +1481,10 @@ pub async fn stop(pid: u32) -> std::io::Result<()> {
         }
     }
     let until = Instant::now() + Duration::from_millis(1000);
-    while alive(pid) && Instant::now() < until {
+    while running(pid)? && Instant::now() < until {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    if alive(pid) {
+    if running(pid)? {
         return Err(std::io::Error::other(
             "旧 Codex 进程尚未退出，未继续同步对话或重载客户端。",
         ));

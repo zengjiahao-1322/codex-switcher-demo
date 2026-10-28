@@ -121,7 +121,7 @@ pub fn records(bridge: &Path) -> io::Result<Vec<Value>> {
     Ok(rows)
 }
 fn desktop(exe: &str) -> bool {
-    regex::Regex::new(r"(?i)([\\/]OpenAI\.Codex_[^\\/]+[\\/]app[\\/]Codex\.exe$|[\\/]Codex\.app[\\/]Contents[\\/]MacOS[\\/](Codex|ChatGPT)$)").unwrap().is_match(exe)
+    regex::Regex::new(r"(?i)([\\/]OpenAI\.Codex_[^\\/]+[\\/]app[\\/](Codex|ChatGPT)\.exe$|[\\/]Codex\.app[\\/]Contents[\\/]MacOS[\\/](Codex|ChatGPT)$)").unwrap().is_match(exe)
 }
 fn editor(name: &str) -> bool {
     regex::Regex::new(r"(?i)^(Code|Code - Insiders|Cursor|Windsurf)(\.exe| Helper( \(Plugin\))?)?$")
@@ -274,7 +274,12 @@ pub fn snapshot(home: &Path, bridge: &Path, inventory: &Value) -> io::Result<Val
         let stale = shared
             && timestamp(&p["startedAt"]) < timestamp(&effect["at"])
             && timestamp(&p["startedAt"]) > 0;
-        clients.push(json!({"id":format!("process-{}",p["pid"]),"pid":p["pid"],"parentPid":p["parentPid"],"kind":kind,"exe":p["exe"],"executable":p["exe"],"desktopExecutable":shell.map(|v|v["exe"].clone()),"desktopPid":shell.map(|v|v["pid"].clone()),"name":if kind=="desktop"{"Codex 桌面端"}else if kind=="ide"{"编辑器 · Codex"}else{"Codex CLI / app-server"},"home":context["home"],"homeSource":context["homeSource"],"confirmed":context["ok"]==true,"shared":shared,"startedAt":p["startedAt"],"stale":stale,"cwd":context["cwd"],"profile":context["profile"],"layers":ls,"overridden":ls.iter().any(|v|matches!(text(&v["source"]),"启动配置档"|"启动参数")&&v["values"].as_object().is_some_and(|o|!o.is_empty())),"overrides":context["overrides"],"editorId":companion.map(|w|w["id"].clone()),"error":context["error"]}));
+        let chain = std::iter::once(p)
+            .chain(ancestors.iter().copied())
+            .take(8)
+            .map(|row| format!("{}:{}", row["pid"], text(&row["name"])))
+            .collect::<Vec<_>>();
+        clients.push(json!({"id":format!("process-{}",p["pid"]),"pid":p["pid"],"parentPid":p["parentPid"],"chain":chain,"kind":kind,"exe":p["exe"],"executable":p["exe"],"desktopExecutable":shell.map(|v|v["exe"].clone()),"desktopPid":shell.map(|v|v["pid"].clone()),"name":if kind=="desktop"{"Codex 桌面端"}else if kind=="ide"{"编辑器 · Codex"}else{"Codex CLI / app-server"},"home":context["home"],"homeSource":context["homeSource"],"confirmed":context["ok"]==true,"shared":shared,"startedAt":p["startedAt"],"stale":stale,"cwd":context["cwd"],"profile":context["profile"],"layers":ls,"overridden":ls.iter().any(|v|matches!(text(&v["source"]),"启动配置档"|"启动参数")&&v["values"].as_object().is_some_and(|o|!o.is_empty())),"overrides":context["overrides"],"editorId":companion.map(|w|w["id"].clone()),"error":context["error"]}));
     }
     let shells = clients
         .iter()
@@ -342,10 +347,37 @@ pub fn agent_status(input: &Value) -> io::Result<Value> {
     if input.is_null() {
         return Ok(Value::Null);
     }
+    let strings = |object: &Value, fields: &[&str], optional: bool| -> io::Result<()> {
+        for field in fields {
+            if !object[*field].is_string() && !(optional && object[*field].is_null()) {
+                return Err(io::Error::other("远端代理状态字段无效"));
+            }
+        }
+        Ok(())
+    };
+    strings(
+        input,
+        &["agentVersion", "host", "platform", "arch", "codexHome"],
+        false,
+    )?;
+    strings(input, &["startedAt"], true)?;
+    if !input["current"].is_null() {
+        strings(
+            &input["current"],
+            &["model", "modelProvider", "baseUrl"],
+            true,
+        )?;
+    }
+    if !input["account"].is_null() {
+        strings(&input["account"], &["id", "email", "plan"], false)?;
+        strings(&input["account"], &["lastRefresh"], true)?;
+    }
     let platform = text(&input["platform"]);
     let home = text(&input["codexHome"]);
     let absolute = if platform == "win32" {
-        home.starts_with("\\\\") || home.as_bytes().get(1) == Some(&b':')
+        home.starts_with("\\\\")
+            || (home.as_bytes().get(1) == Some(&b':')
+                && home.as_bytes().get(2).is_some_and(|v| b"/\\".contains(v)))
     } else {
         home.starts_with('/')
     };

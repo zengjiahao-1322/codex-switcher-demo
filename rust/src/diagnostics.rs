@@ -259,6 +259,15 @@ fn remote_snapshot(bridge: &Path) -> io::Result<Vec<Value>> {
 pub async fn algorithm(args: &[String]) -> io::Result<()> {
     let input: Value = serde_json::from_slice(&fs::read(&args[0])?).map_err(io::Error::other)?;
     let output = match input["op"].as_str() {
+        Some("clientSnapshot") => crate::editors::snapshot(
+            Path::new(input["home"].as_str().unwrap()),
+            Path::new(input["bridge"].as_str().unwrap()),
+            &input["inventory"],
+        )?,
+        Some("serviceTier") => {
+            crate::thread_routing::service_tier(Path::new(input["file"].as_str().unwrap()))?
+                .unwrap_or(Value::Null)
+        }
         Some("subscription") => {
             let value = crate::accounts::read(
                 std::path::Path::new(input["authFile"].as_str().unwrap()),

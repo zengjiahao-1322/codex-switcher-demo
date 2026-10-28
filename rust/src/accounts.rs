@@ -219,7 +219,7 @@ fn current(app: &App) -> io::Result<Value> {
     }
     read(&app.codex_home().join("auth.json"), Value::Null)
 }
-async fn sync_current(app: &App) -> io::Result<()> {
+pub async fn sync_current(app: &App, force: bool) -> io::Result<()> {
     if !cfg!(target_os = "macos") {
         return Ok(());
     }
@@ -240,9 +240,10 @@ async fn sync_current(app: &App) -> io::Result<()> {
             credentials.notice = Value::Null;
             return Ok(());
         }
-        if credentials
-            .checked
-            .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(30))
+        if !force
+            && credentials
+                .checked
+                .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(30))
         {
             return Ok(());
         }
@@ -331,8 +332,13 @@ async fn status(app: &App) -> io::Result<Value> {
         .await
         .as_ref()
         .map(|v| v.value.lock().unwrap().clone());
+    let mut job = read(&app.bridge.join("account-switch.json"), Value::Null)?;
+    if job["editorReload"]["targets"].is_array() {
+        job["editorReload"]["results"] =
+            crate::editors::reload_results(&app.bridge, &job["editorReload"]["targets"])?;
+    }
     Ok(
-        json!({"items":items,"credentialsNotice":app.accounts.credentials.lock().unwrap().notice.clone(),"login":login,"switchJob":read(&app.bridge.join("account-switch.json"),Value::Null)?}),
+        json!({"items":items,"credentialsNotice":app.accounts.credentials.lock().unwrap().notice.clone(),"login":login,"switchJob":job}),
     )
 }
 fn sanitize(reason: &str) -> String {
@@ -529,7 +535,7 @@ pub async fn action(app: Arc<App>, action: &str, input: &Value) -> io::Result<Va
     let _guard = app.accounts.mutation.lock().await;
     match action {
         "accounts" => {
-            sync_current(&app).await?;
+            sync_current(&app, false).await?;
             status(&app).await
         }
         "accountLogin" => {

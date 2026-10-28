@@ -26,7 +26,8 @@ const child = spawn(
   [
     '--experimental-vm-modules',
     '--test',
-    '--test-timeout=120000',
+    // The remote activation black box observes the full 120-second lease.
+    '--test-timeout=180000',
     '--test-reporter=./scripts/test-inventory-reporter.cjs',
     ...files.map((name) => path.join(tests, name)),
   ],
