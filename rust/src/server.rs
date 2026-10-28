@@ -317,6 +317,7 @@ pub(crate) async fn serve(
                 }
                 if action == "clientHeartbeat" {
                     let input_value = input.unwrap();
+                    let _remote_ack = crate::editors::acknowledge(&app.bridge, &input_value);
                     let mut result = match crate::platform::heartbeat(&app.bridge, &input_value) {
                         Ok(value) => response(
                             200,
@@ -345,6 +346,24 @@ pub(crate) async fn serve(
                         }
                     }
                     return Ok(result);
+                }
+                if [
+                    "desktopSwitch",
+                    "resumeThreadSync",
+                    "reloadClients",
+                    "remoteSwitch",
+                ]
+                .contains(&action)
+                {
+                    let result = crate::editors::action(app.clone(), action, &input.unwrap()).await;
+                    return Ok(match result {
+                        Ok(value) => response(
+                            200,
+                            "application/json; charset=utf-8",
+                            serde_json::to_vec(&value).unwrap(),
+                        ),
+                        Err(value) => error(400, &value.to_string()),
+                    });
                 }
                 if crate::accounts::ACTIONS.contains(&action) {
                     return Ok(

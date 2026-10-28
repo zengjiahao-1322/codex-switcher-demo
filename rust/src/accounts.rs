@@ -113,6 +113,12 @@ fn auth(app: &App, id: &str) -> io::Result<Value> {
         Value::Null,
     )
 }
+pub fn saved_auth(bridge: &std::path::Path, id: &str) -> io::Result<Value> {
+    read(
+        &bridge.join("accounts").join(id).join("auth.json"),
+        Value::Null,
+    )
+}
 fn remember(app: &App, value: &Value, pending: bool) -> io::Result<Value> {
     let mut info =
         identity(value).ok_or_else(|| io::Error::other("登录成功但未读到官方账号，请重试"))?;

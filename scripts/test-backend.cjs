@@ -17,6 +17,7 @@ const httpPatterns = {
   'blackbox-accounts.test.cjs': '.*',
   'blackbox-accounts-network.test.cjs': '.*',
   'blackbox-accounts-native.test.cjs': '.*',
+  'blackbox-switching.test.cjs': '.*',
   'blackbox-framework.test.cjs': '.*',
   'blackbox-diagnostics.test.cjs': '.*',
   'blackbox-platform.test.cjs': '.*',

@@ -678,8 +678,15 @@ pub fn heartbeat(
             .as_millis()
     );
     crate::instance::write_json(&file, &row)?;
+    let command = crate::editors::command(bridge, id).or_else(|| {
+        if row["command"].is_object() {
+            Some(row["command"].clone())
+        } else {
+            None
+        }
+    });
     Ok(
-        serde_json::json!({"command":row["command"],"connection":{"state":"unmatched","home":input["home"],"backendPids":[]},"longPoll":true}),
+        serde_json::json!({"command":command,"connection":{"state":"unmatched","home":input["home"],"backendPids":[]},"longPoll":true}),
     )
 }
 #[cfg(unix)]

@@ -56,6 +56,7 @@ test('官方账号HTTP：非当前账号读取最新套餐并防止旧live覆盖
   assert.deepEqual(JSON.parse(fs.readFileSync(file)), newer);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.home, 'auth.json'))), old);
 });
+
 test('官方登录HTTP：隔离app-server等待与取消不改变live及账号库', async (t) => {
   const live = auth('alice'),
     f = await officialFixture(t, { live });
