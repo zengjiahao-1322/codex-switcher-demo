@@ -617,7 +617,7 @@ for (const { keep, manual, stale } of [
                 .join(' '),
           );
         }
-      else await until(() => !fs.existsSync(f.target), 15000);
+      else await until(() => !fs.existsSync(f.target) && !fs.existsSync(f.bridge), 15000);
       if (process.platform === 'win32') assert.equal(fs.existsSync(privateSentinel(f)), keep);
       assert.equal(fs.existsSync(path.join(f.bridge, 'accounts/keep.txt')), keep);
       const config = fs.readFileSync(path.join(f.home, 'config.toml'), 'utf8');
