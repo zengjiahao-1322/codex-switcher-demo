@@ -449,6 +449,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 handover["portFallback"] = json!({
                     "port":desired_port,
                     "ownerPid":owner,
+                    "ownerImage":owner.and_then(|pid| platform::image(pid).ok()).map(|path| platform::display_path(&path)),
                     "reason":if error.kind()==io::ErrorKind::PermissionDenied{
                         "EACCES"
                     }else if owner.is_some(){

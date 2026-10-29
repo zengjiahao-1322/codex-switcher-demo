@@ -327,6 +327,90 @@ test('生命周期黑盒：活动任务拒绝退出，退出只清本进程运�
   assert.equal(fs.existsSync(path.join(f.root, 'discovery/connection.json')), false);
 });
 
+test(
+  'Windows Rust后台：TEMP快捷方式启动无可见窗口或控制台宿主，PowerShell仍能捕获CLI输出',
+  { skip: process.platform !== 'win32' || !isRust },
+  async (t) => {
+    const f = await packageFixture(t);
+    await api(f, 'quit', {});
+    await f.closed;
+    const executable = path.join(f.target, 'codex-switcher.exe');
+    const probe = path.join(__dirname, 'fixtures/windows-shortcut.ps1');
+    execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        probe,
+        '-Action',
+        'launch',
+        '-Link',
+        path.join(f.root, 'start.lnk'),
+        '-Executable',
+        executable,
+      ],
+      {
+        env: f.environment,
+        windowsHide: true,
+        stdio: 'pipe',
+      },
+    );
+    const record = await until(() => {
+      const file = path.join(f.bridge, 'running.json');
+      if (!fs.existsSync(file)) return false;
+      const value = JSON.parse(fs.readFileSync(file));
+      return value.pid !== f.child.pid && value;
+    });
+    const windows = JSON.parse(
+      execFileSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-File',
+          probe,
+          '-Action',
+          'probe',
+          '-TargetProcessId',
+          String(record.pid),
+        ],
+        {
+          env: f.environment,
+          windowsHide: true,
+          encoding: 'utf8',
+        },
+      ),
+    );
+    assert.deepEqual(windows.visibleWindows, []);
+    assert.deepEqual(windows.consoleHosts, []);
+    const cli = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        '$value = & $env:SWITCHER_TEST_NATIVE --cli status 2>&1 | Out-String; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $value.Trim()',
+      ],
+      {
+        env: { ...f.environment, SWITCHER_TEST_NATIVE: executable },
+        windowsHide: true,
+        encoding: 'utf8',
+      },
+    ).trim();
+    assert.equal(cli, 'OFFICIAL');
+    console.log(
+      JSON.stringify({
+        event: 'shortcut-background-window-check',
+        pid: record.pid,
+        ...windows,
+        cli,
+      }),
+    );
+  },
+);
+
 test('CLI黑盒：status、restore、cleanup全文和退出码，保留原配置与关闭TEMP自启', async (t) => {
   const f = await startBackend(t);
   await api(f, 'quit', {});

@@ -37,6 +37,9 @@ mod windows {
         fn Process32NextW(snapshot: Handle, entry: *mut ProcessEntry) -> i32;
         fn CloseHandle(handle: Handle) -> i32;
         fn GetCurrentProcess() -> Handle;
+        fn AttachConsole(process: u32) -> i32;
+        fn GetStdHandle(stream: u32) -> Handle;
+        fn GetFileType(handle: Handle) -> u32;
         fn LocalFree(memory: Handle) -> Handle;
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
         fn QueryFullProcessImageNameW(
@@ -59,6 +62,17 @@ mod windows {
     #[link(name = "shell32")]
     unsafe extern "system" {
         fn CommandLineToArgvW(command: *const u16, count: *mut i32) -> *mut *mut u16;
+    }
+    pub fn attach_parent_console() {
+        let redirected = [-10i32, -11, -12].into_iter().any(|id| {
+            let handle = unsafe { GetStdHandle(id as u32) };
+            matches!(unsafe { GetFileType(handle) }, 1 | 3)
+        });
+        // GUI launches stay detached. Interactive CLI/MCP may reuse their
+        // parent's console, while inherited files and pipes must stay intact.
+        if !redirected {
+            unsafe { AttachConsole(u32::MAX) };
+        }
     }
     fn read_memory(handle: Handle, address: usize, count: usize) -> io::Result<Vec<u8>> {
         let mut bytes = vec![0u8; count];
@@ -559,6 +573,8 @@ mod windows {
         Ok(random)
     }
 }
+#[cfg(windows)]
+pub use windows::attach_parent_console;
 #[cfg(windows)]
 pub use windows::scan;
 #[cfg(windows)]

@@ -6,6 +6,7 @@ const { test } = require('node:test'),
 const { startBackend } = require('./backend-process.cjs');
 const { api, isolatedEditor } = require('./config-blackbox-helpers.cjs');
 const { until } = require('./official-blackbox-helpers.cjs');
+const { isRust } = require('./backend.cjs');
 test('窗口黑盒：真实父子PID关联、独立目录隔离、对应重载编号和失败回报', async (t) => {
   const f = await startBackend(t);
   await isolatedEditor(t, f);
@@ -19,6 +20,14 @@ test('窗口黑盒：真实父子PID关联、独立目录隔离、对应重载�
   const linked = await api(f, 'clientHeartbeat', registration);
   assert.equal(linked.connection.state, 'ready');
   assert.ok(linked.connection.backendPids.length > 0);
+  const stateLog = fs
+    .readFileSync(path.join(f.bridge, 'logs/switcher.log'), 'utf8')
+    .trim()
+    .split('\n')
+    .map(JSON.parse)
+    .find((row) => row.event === 'companion.state');
+  assert.equal(stateLog.to, 'ready');
+  assert.equal(stateLog.editor, registration.id);
   const status = await api(f, 'clients', {});
   const editor = status.clients.find((c) => c.editorId === registration.id && c.kind === 'editor');
   assert.equal(editor.canReload, true);
@@ -175,4 +184,35 @@ test('心跳黑盒：非可信程序路径不入库，SSH公开字段去除正�
     .map(JSON.parse);
   assert.equal(logs.filter((e) => e.event === 'remote.agent').length, 1);
   await api(f, 'clientHeartbeat', { ...input, id: '../../escape' }, 400);
+  if (isRust) {
+    const denied = await f.request('/api/clientHeartbeat', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer private-rejected-bearer',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    });
+    assert.equal(denied.status, 401);
+    const malformed = await f.request('/api/clientHeartbeat', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + f.token, 'Content-Type': 'application/json' },
+      body: '{"companionVersion":"0.1.3",broken',
+    });
+    assert.equal(malformed.status, 400);
+    const text = fs.readFileSync(path.join(f.bridge, 'logs/switcher.log'), 'utf8');
+    const rejected = text
+      .trim()
+      .split('\n')
+      .map(JSON.parse)
+      .filter((row) => row.event === 'companion.reject');
+    assert.equal(rejected.length, 3);
+    assert.match(rejected[0].reason, /400.*客户端编号/);
+    assert.equal(rejected[0].companionVersion, '0.1.3');
+    assert.match(rejected[1].reason, /401/);
+    assert.equal(rejected[1].companionVersion, '0.1.3');
+    assert.match(rejected[2].reason, /Invalid JSON/);
+    assert.equal(rejected[2].companionVersion, null);
+    assert.doesNotMatch(text, /private-rejected-bearer/);
+  }
 });

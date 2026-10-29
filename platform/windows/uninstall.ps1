@@ -39,12 +39,12 @@ if (Test-Path -LiteralPath $running) {
 }
 
 if ((Test-Path $cliExe) -and ((Test-Path $native) -or (Test-Path $cli))) {
-  if (-not $KeepCodexConfig -and (& $cliExe @cliPrefix status --no-open) -eq 'BRIDGED') {
+  if (-not $KeepCodexConfig -and (& $cliExe @cliPrefix status --no-open | Out-String).Trim() -eq 'BRIDGED') {
     Step 'Switching Codex back to its official login'
-    & $cliExe @cliPrefix restore --no-open; if ($LASTEXITCODE -ne 0) { throw 'Could not restore the official Codex config; nothing was removed.' }
+    & $cliExe @cliPrefix restore --no-open | Out-Host; if ($LASTEXITCODE -ne 0) { throw 'Could not restore the official Codex config; nothing was removed.' }
     Step 'Cleaning the switcher entries from Codex config'
-    & $cliExe @cliPrefix cleanup --no-open; if ($LASTEXITCODE -ne 0) { throw 'Could not clean Codex config; nothing was removed.' }
-  } elseif ((& $cliExe @cliPrefix status --no-open) -eq 'BRIDGED') {
+    & $cliExe @cliPrefix cleanup --no-open | Out-Host; if ($LASTEXITCODE -ne 0) { throw 'Could not clean Codex config; nothing was removed.' }
+  } elseif ((& $cliExe @cliPrefix status --no-open | Out-String).Trim() -eq 'BRIDGED') {
     Write-Warning 'Codex still uses a config from this tool and will stop working once the tool is removed.'
   }
 }

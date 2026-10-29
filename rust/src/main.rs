@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod accounts;
 mod adapter;
 mod adapter_convert;
@@ -27,6 +29,10 @@ mod update;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(windows)]
+    if matches!(std::env::args().nth(1).as_deref(), Some("--cli" | "--mcp")) {
+        platform::attach_parent_console();
+    }
     if std::env::args().nth(1).as_deref() == Some("--stop-installed") {
         let record = std::env::args().nth(2).ok_or("Running record required")?;
         let target = std::env::args()

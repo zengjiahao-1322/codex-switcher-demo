@@ -431,10 +431,22 @@ test(
     );
     assert.notEqual(new URL(fallbackRecord.url).port, String(foreignPort));
     assert.equal(process.kill(foreign.child.pid, 0), true);
-    assert.deepEqual(
-      readRecent(fallbackDirs.bridge, 10).find((e) => e.event === 'startup').portFallback,
-      { port: foreignPort, ownerPid: foreign.child.pid, reason: 'different_process' },
-    );
+    const fallbackLog = readRecent(fallbackDirs.bridge, 10).find(
+      (e) => e.event === 'startup',
+    ).portFallback;
+    assert.deepEqual(fallbackLog, {
+      port: foreignPort,
+      ownerPid: foreign.child.pid,
+      reason: 'different_process',
+      ...(require('./backend.cjs').isRust
+        ? {
+            ownerImage: process.execPath.replace(
+              process.env[process.platform === 'win32' ? 'USERPROFILE' : 'HOME'],
+              '~',
+            ),
+          }
+        : {}),
+    });
   },
 );
 

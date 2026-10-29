@@ -179,6 +179,32 @@ fn error(status: u16, message: &str) -> Response<Body> {
         serde_json::to_vec(&json!({"error":message})).unwrap(),
     )
 }
+fn companion_reject(app: &App, reason: &str, input: &Value) {
+    if let Err(error) = crate::diagnostics::log(
+        &app.bridge,
+        "companion.reject",
+        json!({"reason":reason,"companionVersion":input["companionVersion"].as_str()}),
+    ) {
+        eprintln!("Companion rejection log failed: {error}");
+    }
+}
+async fn read_body(mut body: Incoming, limit: usize) -> Result<Vec<u8>, (u16, &'static str)> {
+    let mut bytes = Vec::new();
+    while let Some(frame) = body.frame().await {
+        match frame {
+            Ok(frame) => {
+                if let Some(data) = frame.data_ref() {
+                    if bytes.len() + data.len() > limit {
+                        return Err((413, "Payload too large"));
+                    }
+                    bytes.extend_from_slice(data);
+                }
+            }
+            Err(_) => return Err((400, "Request body unavailable")),
+        }
+    }
+    Ok(bytes)
+}
 pub(crate) async fn serve(
     req: Request<Incoming>,
     app: Arc<App>,
@@ -279,6 +305,14 @@ pub(crate) async fn serve(
             return Ok(res);
         }
         if !bearer && !cookie {
+            if action == "clientHeartbeat" {
+                let input = read_body(req.into_body(), 1024 * 1024)
+                    .await
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                    .unwrap_or(Value::Null);
+                companion_reject(&app, "401: authentication rejected", &input);
+            }
             return Ok(error(
                 401,
                 "本机会话已过期，请从桌面快捷方式重新打开切换器。",
@@ -307,27 +341,24 @@ pub(crate) async fn serve(
                 } else {
                     16384
                 };
-                let mut body = req.into_body();
-                let mut bytes = Vec::new();
-                while let Some(frame) = body.frame().await {
-                    match frame {
-                        Ok(frame) => {
-                            if let Some(data) = frame.data_ref() {
-                                if bytes.len() + data.len() > limit {
-                                    return Ok(error(413, "Payload too large"));
-                                }
-                                bytes.extend_from_slice(data);
-                            }
+                let bytes = match read_body(req.into_body(), limit).await {
+                    Ok(bytes) => bytes,
+                    Err((status, reason)) => {
+                        if action == "clientHeartbeat" {
+                            companion_reject(&app, reason, &Value::Null);
                         }
-                        Err(_) => return Ok(error(400, "Request body unavailable")),
+                        return Ok(error(status, reason));
                     }
-                }
+                };
                 let input = if bytes.is_empty() {
                     Ok(json!({}))
                 } else {
                     serde_json::from_slice::<Value>(&bytes)
                 };
                 if input.is_err() {
+                    if action == "clientHeartbeat" {
+                        companion_reject(&app, "400: Invalid JSON", &Value::Null);
+                    }
                     return Ok(error(400, "Invalid JSON"));
                 }
                 if ["companionPackage", "remoteAgentPackage"].contains(&action) {
@@ -381,7 +412,13 @@ pub(crate) async fn serve(
                 {
                     let input = input.unwrap();
                     let result = match action {
-                        "clientHeartbeat" => crate::editors::heartbeat(app.clone(), &input).await,
+                        "clientHeartbeat" => {
+                            let result = crate::editors::heartbeat(app.clone(), &input).await;
+                            if let Err(error) = &result {
+                                companion_reject(&app, &format!("400: {error}"), &input);
+                            }
+                            result
+                        }
                         "checkUpdate" => crate::update::check(&app).await,
                         "installUpdate" => crate::update::install(app.clone(), &input).await,
                         "updateCompanions" => crate::editor_integration::update_all(&app).await,

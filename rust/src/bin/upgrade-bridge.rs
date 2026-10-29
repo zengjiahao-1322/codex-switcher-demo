@@ -1,5 +1,7 @@
 //! The seq136 updater launches runtime/node with main.cjs. This short-lived
 //! entry point hands that invocation to the native service, without a Node VM.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::{
     env,
     io::{self, Write},
