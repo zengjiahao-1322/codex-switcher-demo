@@ -17,13 +17,19 @@ jobs:
           - os: windows-latest
             target: win32
             arch: x64
+            rust-target: x86_64-pc-windows-gnu
           - os: macos-15
             target: darwin
             arch: arm64
+            rust-target: aarch64-apple-darwin
           - os: macos-15-intel
             target: darwin
             arch: x64
+            rust-target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+      SWITCHER_RUST_BIN_DIR: rust/target/${{ matrix.rust-target }}/release
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,6 +43,13 @@ jobs:
         shell: bash
         run: CODEX_NPM_ROOT="$(npm root -g)" node scripts/ci-setup.cjs
       - run: node scripts/test-all.cjs
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --target ${{ matrix.rust-target }}
+          rustup override set stable
+      - name: Compile native release
+        run: cargo build --locked --release --manifest-path rust/Cargo.toml --target ${{ matrix.rust-target }}
       # 同一批浏览器回归同时覆盖 Windows 和两种 Mac 架构。
       - name: Prepare an isolated test browser
         run: |
@@ -44,8 +57,14 @@ jobs:
           node .build-cache/browser-check/node_modules/playwright/cli.js install chromium
       # 每项独占一步，避免 Windows PowerShell 用后一条命令的成功覆盖前一项失败。
       - name: Verify direct browser entry
+        env:
+          SWITCHER_BACKEND: rust
+          SWITCHER_RUST_EXE: ${{ github.workspace }}/rust/target/${{ matrix.rust-target }}/release/codex-switcher${{ runner.os == 'Windows' && '.exe' || '' }}
         run: node scripts/verify-web-entry.cjs
       - name: Verify independent quota refresh
+        env:
+          SWITCHER_BACKEND: rust
+          SWITCHER_RUST_EXE: ${{ github.workspace }}/rust/target/${{ matrix.rust-target }}/release/codex-switcher${{ runner.os == 'Windows' && '.exe' || '' }}
         run: node scripts/verify-quota-ui.cjs
       - name: Save regression reports
         if: always()
@@ -57,7 +76,7 @@ jobs:
             verification/web-entry.json
             verification/quota-ui.json
           if-no-files-found: warn
-      - run: node scripts/build-release.cjs ${{ matrix.target }} --arch=${{ matrix.arch }}
+      - run: node scripts/build-release.cjs ${{ matrix.target }} --arch=${{ matrix.arch }} --backend=rust
       - name: Verify extracted release
         run: node scripts/smoke-package.cjs ${{ matrix.target }}
       - name: Verify the macOS installer with the system Bash
@@ -86,6 +105,7 @@ jobs:
       - name: Create release metadata
         env:
           GITHUB_SHA: ${{ github.sha }}
+          SWITCHER_RELEASE_BACKEND: rust
         run: node scripts/create-release-json.cjs "$GITHUB_REF_NAME" artifacts release.json
       - name: Publish the platform downloads
         env:
@@ -94,7 +114,7 @@ jobs:
           # 用户要求替换同一版本时，更新现有下载；只有本次全部检查通过才会执行。
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" artifacts/* release.json --clobber
-            gh release edit "$GITHUB_REF_NAME" --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file docs/RELEASE.md --latest
+            gh release edit "$GITHUB_REF_NAME" --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file docs/RELEASE.md --prerelease=false --latest
           else
-            gh release create "$GITHUB_REF_NAME" artifacts/* release.json --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file docs/RELEASE.md --latest
+            gh release create "$GITHUB_REF_NAME" artifacts/* release.json --title "Codex Switcher $GITHUB_REF_NAME Demo" --notes-file docs/RELEASE.md --prerelease=false --latest
           fi
