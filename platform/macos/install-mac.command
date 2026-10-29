@@ -14,6 +14,9 @@ mkdir -p "$HOME/Applications"
 if [ ! -d "$SOURCE" ]; then echo 'Missing Codex Switcher.app beside installer'; exit 1; fi
 DATA="$HOME/Library/Application Support/CodexApiSwitcher"
 if [ -f "$DATA/running.json" ]; then
+  if [ -x "$SOURCE/Contents/Resources/codex-switcher" ]; then
+    "$SOURCE/Contents/Resources/codex-switcher" --stop-installed "$DATA/running.json" "$TARGET/Contents/Resources"
+  else
   NODE="$SOURCE/Contents/Resources/runtime/$ARCH/node"
   "$NODE" - "$DATA/running.json" <<'JS'
 const fs = require('fs');
@@ -31,6 +34,7 @@ try {
   // 旧服务已退出或运行记录失效时，继续安装。
 }
 JS
+  fi
 fi
 /usr/bin/ditto "$SOURCE" "$TARGET"
 echo "Installed to $TARGET. Account data stays in $DATA."

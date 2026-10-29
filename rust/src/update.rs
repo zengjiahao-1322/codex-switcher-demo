@@ -407,9 +407,9 @@ fn package_root(extracted: &Path) -> PathBuf {
 }
 fn executable(root: &Path) -> PathBuf {
     root.join(if cfg!(windows) {
-        "switcher-prototype.exe"
+        "codex-switcher.exe"
     } else {
-        "switcher-prototype"
+        "codex-switcher"
     })
 }
 async fn extract(archive: &Path, destination: &Path) -> io::Result<()> {
@@ -825,7 +825,26 @@ async fn wait_exit(pid: u32, timeout: Duration) -> io::Result<()> {
     Ok(())
 }
 async fn launch(job: &Job) -> io::Result<u32> {
-    let mut command = Command::new(executable(&job.target));
+    let native = executable(&job.target);
+    let mut command = if native.exists() {
+        Command::new(native)
+    } else {
+        let node = if cfg!(windows) {
+            job.target.join("runtime/node.exe")
+        } else {
+            job.target.join(format!(
+                "runtime/{}/node",
+                if cfg!(target_arch = "aarch64") {
+                    "arm64"
+                } else {
+                    "x64"
+                }
+            ))
+        };
+        let mut command = Command::new(node);
+        command.arg(job.target.join("main.cjs"));
+        command
+    };
     command
         .current_dir(&job.target)
         .stdin(Stdio::null())

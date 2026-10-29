@@ -15,6 +15,9 @@ if [ -f "$DATA/runtime.env" ]; then
   source "$DATA/runtime.env"
 fi
 # 保留命令行参数，便于在精简环境中验证同一个应用入口。
-nohup "$RESOURCES/runtime/$ARCH/node" "$RESOURCES/main.cjs" "$@" \
-  >>"$DATA/service.log" 2>>"$DATA/service-error.log" </dev/null &
+if [ -x "$RESOURCES/codex-switcher" ]; then
+  nohup "$RESOURCES/codex-switcher" "$@" >>"$DATA/service.log" 2>>"$DATA/service-error.log" </dev/null &
+else
+  nohup "$RESOURCES/runtime/$ARCH/node" "$RESOURCES/main.cjs" "$@" >>"$DATA/service.log" 2>>"$DATA/service-error.log" </dev/null &
+fi
 exit 0

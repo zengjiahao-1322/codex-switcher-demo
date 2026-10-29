@@ -14,7 +14,7 @@ const rustBinary = () =>
     'rust',
     'target',
     'release',
-    'switcher-prototype' + (process.platform === 'win32' ? '.exe' : ''),
+    'codex-switcher' + (process.platform === 'win32' ? '.exe' : ''),
   );
 
 // Only the transport/lifetime changes. JS callbacks, mocks and actions are never
@@ -68,7 +68,7 @@ function createServer(options, fixture = {}) {
         BRIDGE_CODEX_HOME: home,
         BRIDGE_HOME: bridge,
         BRIDGE_PORT: String(port),
-        SWITCHER_WEB_ROOT: path.join(root, 'web'),
+        SWITCHER_WEB_ROOT: fixture.env?.SWITCHER_WEB_ROOT || path.join(root, 'web'),
         SWITCHER_TEST_TOKEN: options.token || 'fixture-token',
       },
     });

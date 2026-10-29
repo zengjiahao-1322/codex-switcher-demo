@@ -8,4 +8,8 @@ If WScript.Arguments.Count > 0 Then
   If WScript.Arguments(0) = "open" Then extra = ""
 End If
 shell.CurrentDirectory = dir
-shell.Run """" & dir & "\runtime\node.exe"" """ & dir & "\main.cjs""" & extra, 0, False
+If CreateObject("Scripting.FileSystemObject").FileExists(dir & "\codex-switcher.exe") Then
+  shell.Run """" & dir & "\codex-switcher.exe""" & extra, 0, False
+Else
+  shell.Run """" & dir & "\runtime\node.exe"" """ & dir & "\main.cjs""" & extra, 0, False
+End If

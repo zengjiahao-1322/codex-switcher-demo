@@ -11,6 +11,7 @@ fn main() {
     files.push(root.parent().unwrap().join("package.json"));
     files.push(root.join("Cargo.toml"));
     files.push(root.join("Cargo.lock"));
+    files.push(root.join("src/bin/upgrade-bridge.rs"));
     files.sort();
     let mut hash = Sha256::new();
     for file in files {

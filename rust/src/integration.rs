@@ -135,6 +135,17 @@ mod windows {
         result
     }
     pub fn register(exe: &Path) -> io::Result<()> {
+        if let Some(root) = env::var_os("SWITCHER_TEST_SHELL_ROOT") {
+            let root = PathBuf::from(root);
+            fs::create_dir_all(&root)?;
+            return crate::instance::write_json(
+                &root.join("registration.json"),
+                &serde_json::json!({
+                    "InstallLocation": exe.parent(), "DisplayIcon":format!("{},0",crate::platform::display_path(exe)),
+                    "UninstallString":format!("powershell -NoProfile -ExecutionPolicy Bypass -File \"{}\" -KeepData",crate::platform::display_path(&exe.parent().unwrap().join("uninstall.ps1")))
+                }),
+            );
+        }
         let mut key = std::ptr::null_mut();
         let root = 0x80000001u32 as i32 as isize as Handle;
         let path = wide(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexSwitcher");
@@ -393,11 +404,15 @@ pub fn desktop(discovery: &Path, sequence: u64) -> io::Result<()> {
         while unsafe { *directory.add(length) } != 0 {
             length += 1;
         }
-        let directory_path = PathBuf::from(String::from_utf16_lossy(unsafe {
+        let mut directory_path = PathBuf::from(String::from_utf16_lossy(unsafe {
             std::slice::from_raw_parts(directory, length)
         }));
         unsafe {
             CoTaskMemFree(directory.cast());
+        }
+        if let Some(root) = env::var_os("SWITCHER_TEST_SHELL_ROOT") {
+            directory_path = PathBuf::from(root).join("Desktop");
+            fs::create_dir_all(&directory_path)?;
         }
         let link = directory_path.join("Codex API Switcher.lnk");
         if link.exists() {

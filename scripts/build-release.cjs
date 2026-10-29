@@ -9,7 +9,11 @@ const project = path.resolve(__dirname, '..'),
   out = path.resolve(
     options.find((value) => !value.startsWith('--')) || path.join(project, 'dist'),
   ),
-  macArch = options.find((value) => value.startsWith('--arch='))?.slice(7) || 'universal';
+  macArch =
+    options.find((value) => value.startsWith('--arch='))?.slice(7) ||
+    (options.includes('--backend=rust') ? process.arch : 'universal');
+const nativeRelease = options.includes('--backend=rust');
+const binaryDir = process.env.SWITCHER_RUST_BIN_DIR || path.join(project, 'rust/target/release');
 const files = require('../release-files.json'),
   version = require('../package.json').version,
   nodeVersion = 'v22.22.0';
@@ -80,19 +84,33 @@ async function runtime(platform, arch) {
 (async () => {
   let entries, filename;
   if (target === 'win32') {
-    const r = await runtime('win', 'x64');
-    cp.execFileSync(process.execPath, [path.join(project, 'scripts', 'build-windows-helper.cjs')], {
-      stdio: 'inherit',
-    });
-    entries = sourceEntries('Codex Switcher/');
-    entries.push(
-      { name: 'Codex Switcher/runtime/node.exe', file: r.exe },
-      { name: 'Codex Switcher/runtime/NODE-LICENSE', file: r.license },
-      {
-        name: 'Codex Switcher/bin/process-context.exe',
-        file: path.join(project, 'bin', 'process-context.exe'),
-      },
-    );
+    if (nativeRelease) {
+      entries = require('./rust-release.cjs').entries(
+        'Codex Switcher/',
+        sequence,
+        target,
+        'x64',
+        binaryDir,
+      );
+    } else {
+      const r = await runtime('win', 'x64');
+      cp.execFileSync(
+        process.execPath,
+        [path.join(project, 'scripts', 'build-windows-helper.cjs')],
+        {
+          stdio: 'inherit',
+        },
+      );
+      entries = sourceEntries('Codex Switcher/');
+      entries.push(
+        { name: 'Codex Switcher/runtime/node.exe', file: r.exe },
+        { name: 'Codex Switcher/runtime/NODE-LICENSE', file: r.license },
+        {
+          name: 'Codex Switcher/bin/process-context.exe',
+          file: path.join(project, 'bin', 'process-context.exe'),
+        },
+      );
+    }
     filename = 'codex-switcher-windows-x64.zip';
   } else if (target === 'darwin') {
     if (process.platform !== 'darwin')
@@ -130,7 +148,9 @@ async function runtime(platform, arch) {
     ]);
     const bundle = 'Codex Switcher.app/Contents/',
       resources = bundle + 'Resources/';
-    entries = sourceEntries(resources);
+    entries = nativeRelease
+      ? require('./rust-release.cjs').entries(resources, sequence, target, macArch, binaryDir)
+      : sourceEntries(resources);
     entries.push(
       { name: resources + 'bin/mac-process-context', file: native, mode: 0o100755 },
       {
@@ -145,7 +165,11 @@ async function runtime(platform, arch) {
       },
     );
     // 按芯片发行时只带一套 Node，避免每个用户下载另一种芯片的运行时。
-    for (const arch of macArch === 'universal' ? ['arm64', 'x64'] : [macArch]) {
+    for (const arch of nativeRelease
+      ? []
+      : macArch === 'universal'
+        ? ['arm64', 'x64']
+        : [macArch]) {
       const r = await runtime('darwin', arch);
       entries.push(
         { name: resources + `runtime/${arch}/node`, file: r.exe, mode: 0o100755 },
@@ -172,6 +196,13 @@ async function runtime(platform, arch) {
         fs.chmodSync(file, (entry.mode || 0o100644) & 0o777);
       }
       const app = path.join(stage, 'Codex Switcher.app');
+      if (nativeRelease) {
+        for (const file of [
+          path.join(app, 'Contents/Resources/codex-switcher'),
+          path.join(app, `Contents/Resources/runtime/${macArch}/node`),
+        ])
+          cp.execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', file]);
+      }
       cp.execFileSync('/usr/bin/codesign', [
         '--force',
         '--sign',

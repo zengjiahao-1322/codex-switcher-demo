@@ -108,6 +108,25 @@ fn owner_install(pid: u32) -> Option<PathBuf> {
         image.parent().map(PathBuf::from)
     }
 }
+
+pub async fn stop_installed(record: &std::path::Path, target: &std::path::Path) -> io::Result<()> {
+    let value: Value = serde_json::from_slice(&fs::read(record)?).map_err(io::Error::other)?;
+    if let Some(pid) = value["pid"].as_u64()
+        && platform::image(pid as u32).ok().is_some_and(|image| {
+            image.file_name().is_some_and(|name| {
+                matches!(
+                    name.to_str(),
+                    Some("node" | "node.exe" | "codex-switcher" | "codex-switcher.exe")
+                )
+            })
+        })
+        && let Some(root) = owner_install(pid as u32)
+        && same_path(&root, target)
+    {
+        platform::stop(pid as u32).await?;
+    }
+    Ok(())
+}
 fn verified(pid: u32, old: &Value) -> bool {
     let Some(entry) = old["entry"].as_str() else {
         return false;
@@ -132,7 +151,9 @@ fn verified(pid: u32, old: &Value) -> bool {
             }))
 }
 fn open_url(url: &str) -> io::Result<()> {
-    if !env::args().any(|s| s == "--no-open") {
+    if !env::args().any(|s| s == "--no-open")
+        && env::var("SWITCHER_TEST_NO_OPEN").as_deref() != Ok("1")
+    {
         platform::open_url(url)?;
     }
     Ok(())

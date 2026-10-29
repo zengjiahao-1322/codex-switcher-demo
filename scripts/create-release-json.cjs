@@ -11,14 +11,18 @@ if (!Number.isSafeInteger(sequence) || sequence <= 0)
   throw Error('GITHUB_RUN_NUMBER 必须为正整数，用作发行序号。');
 const assets = {};
 for (const name of fs.readdirSync(artifactDir).sort()) {
-  if (name.endsWith('.sha256')) continue;
+  if (name.endsWith('.sha256') || path.resolve(artifactDir, name) === path.resolve(output))
+    continue;
   const file = path.join(artifactDir, name);
   if (!fs.statSync(file).isFile()) continue;
   assets[name] = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 const release = {
   version: require('../package.json').version,
-  build: require('../src/platform/build-info.cjs').buildInfo(sequence).id,
+  build: (process.env.SWITCHER_RELEASE_BACKEND === 'rust'
+    ? require('./rust-build-info.cjs')
+    : require('../src/platform/build-info.cjs')
+  ).buildInfo(sequence).id,
   sequence,
   commit:
     process.env.GITHUB_SHA ||

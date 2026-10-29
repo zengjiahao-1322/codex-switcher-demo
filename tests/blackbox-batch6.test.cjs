@@ -469,13 +469,18 @@ test(
   },
 );
 
-for (const { keep, manual } of [
+for (const { keep, manual, stale } of [
   { keep: true },
   { keep: false },
-  ...(process.platform === 'win32' ? [{ keep: true, manual: true }] : []),
+  ...(process.platform === 'win32'
+    ? [
+        { keep: true, manual: true },
+        { keep: true, manual: true, stale: true },
+      ]
+    : []),
 ])
   test(
-    `卸载黑盒：KeepData保留私有文件，只有本机转换配置恢复官方，系统清理限TEMP（${manual ? '手动' : 'HTTP'}，KeepData=${keep}）`,
+    `卸载黑盒：KeepData保留私有文件，只有本机转换配置恢复官方，系统清理限TEMP（${manual ? '手动' : 'HTTP'}，KeepData=${keep}${stale ? '，旧PID指向无关进程' : ''}）`,
     { timeout: 45000 },
     async (t) => {
       let shellRoot, original, configBefore;
@@ -540,11 +545,21 @@ for (const { keep, manual } of [
           }
         },
       });
+      let unrelated;
       if (manual) {
-        write(
-          path.join(f.target, 'private/running.json'),
-          fs.readFileSync(path.join(f.bridge, 'running.json')),
-        );
+        const running = JSON.parse(fs.readFileSync(path.join(f.bridge, 'running.json')));
+        if (stale) {
+          await api(f, 'quit', {});
+          await f.closed;
+          unrelated = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+            cwd: f.root,
+            windowsHide: true,
+            stdio: 'ignore',
+          });
+          f.track(unrelated);
+          running.pid = unrelated.pid;
+        }
+        write(path.join(f.target, 'private/running.json'), JSON.stringify(running));
         const result = require('node:child_process').spawnSync(
           'powershell.exe',
           [
@@ -625,6 +640,11 @@ for (const { keep, manual } of [
           'registration.json',
         ])
           assert.equal(fs.existsSync(path.join(shellRoot, item)), false);
+      if (stale) {
+        assert.equal(unrelated.exitCode, null);
+        assert.equal(unrelated.signalCode, null);
+        process.kill(unrelated.pid, 0);
+      }
       console.log(
         JSON.stringify({
           event: 'uninstalled',
@@ -632,6 +652,7 @@ for (const { keep, manual } of [
           keepData: keep,
           restoredOfficial: keep,
           manual: !!manual,
+          stalePidIgnored: !!stale,
           realRegistryTested: false,
         }),
       );

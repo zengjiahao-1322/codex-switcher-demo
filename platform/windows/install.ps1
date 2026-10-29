@@ -43,7 +43,13 @@ try {
   # 2. Stop a running instance before overwriting its files.
   $running = Join-Path $InstallDir 'private\running.json'
   if (Test-Path $running) {
-    try { $old = Get-Content $running -Raw | ConvertFrom-Json; $oldProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($old.pid)"; if ($oldProcess.ExecutablePath -ne (Join-Path $InstallDir 'runtime\node.exe') -or -not $oldProcess.CommandLine.Contains((Join-Path $InstallDir 'main.cjs'))) { throw 'Unexpected running process' }; Stop-Process -Id $old.pid -Force -ErrorAction Stop; Start-Sleep -Milliseconds 800; Step 'Stopped the running instance' } catch {}
+    $old = Get-Content $running -Raw | ConvertFrom-Json
+    $oldProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($old.pid)"
+    if ($oldProcess) {
+      $ownsNative = $oldProcess.ExecutablePath -eq (Join-Path $InstallDir 'codex-switcher.exe')
+      $ownsNode = $oldProcess.ExecutablePath -eq (Join-Path $InstallDir 'runtime\node.exe') -and $oldProcess.CommandLine.Contains((Join-Path $InstallDir 'main.cjs'))
+      if ($ownsNative -or $ownsNode) { Stop-Process -Id $old.pid -Force -ErrorAction Stop; Start-Sleep -Milliseconds 800; Step 'Stopped the running instance' }
+    }
   }
 
   # 3. Copy application files.
@@ -62,6 +68,8 @@ try {
   }
 
   # 4. Node.js runtime (only node.exe is needed).
+  $native = Join-Path $InstallDir 'codex-switcher.exe'
+  if (-not (Test-Path -LiteralPath $native)) {
   $nodeExe = Join-Path $InstallDir 'runtime\node.exe'
   $haveVersion = $null
   if (Test-Path $nodeExe) { try { $haveVersion = (& $nodeExe --version).Trim() } catch {} }
@@ -90,6 +98,7 @@ try {
   Step 'Installing dependencies'
   & $nodeExe (Join-Path $InstallDir 'scripts/install-deps.cjs')
   if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
+  }
 
   # 6. Share the first-launch shortcut marker and installed-app registration.
   & (Join-Path $InstallDir 'platform\windows\desktop-integration.ps1') -InstallDir $InstallDir -RegisterOnly:$NoShortcuts

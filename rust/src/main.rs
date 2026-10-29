@@ -26,6 +26,15 @@ mod update;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("--stop-installed") {
+        let record = std::env::args().nth(2).ok_or("Running record required")?;
+        let target = std::env::args()
+            .nth(3)
+            .ok_or("Installed directory required")?;
+        instance::stop_installed(std::path::Path::new(&record), std::path::Path::new(&target))
+            .await?;
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("--mcp") {
         return mcp::run().await;
     }

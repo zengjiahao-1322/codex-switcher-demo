@@ -10,7 +10,10 @@ try {
 } catch {
   ({ chromium } = require('../.build-cache/browser-check/node_modules/playwright'));
 }
-const { createServer } = require('../tests/backend.cjs');
+const { createServer, isRust } = require('../tests/backend.cjs');
+const { auth, accountId } = require('../tests/official-blackbox-helpers.cjs');
+const slowId = accountId('ui-slow'),
+  fastId = accountId('ui-fast');
 const { createService } = require('../src/server/service.cjs');
 
 // 运行发行包使用的同一份 HTML / CSS / ES 模块，验证刷新时的真实 DOM 状态。
@@ -24,6 +27,7 @@ const reportFile = path.join(reports, 'quota-ui.json');
 let browser;
 let server;
 let releaseSlow;
+let native;
 let officialMode = false,
   switches = 0;
 
@@ -50,9 +54,70 @@ let officialMode = false,
       releaseSlow = resolve;
     });
     const accounts = [
-      { id: 'fixture-slow', label: 'Slow account', email: 'slow@example.test', plan: 'plus' },
-      { id: 'fixture-fast', label: 'Fast account', email: 'fast@example.test', plan: 'plus' },
+      { id: slowId, label: 'Slow account', email: 'slow@example.test', plan: 'plus' },
+      { id: fastId, label: 'Fast account', email: 'fast@example.test', plan: 'plus' },
     ];
+    const syncNative = () => {
+      if (!native) return;
+      native.write(
+        path.join(bridgeHome, 'accounts/index.json'),
+        accounts.map(({ quota, ...row }) => row),
+      );
+      for (const row of accounts)
+        if (row.quota)
+          native.write(path.join(bridgeHome, 'accounts', row.id, 'quota.json'), row.quota);
+      if (officialMode) {
+        native.write(path.join(codexHome, 'auth.json'), auth('ui-slow'));
+        native.write(
+          path.join(codexHome, 'config.toml'),
+          'model="fixture-api"\ncli_auth_credentials_store="file"\n',
+        );
+      } else {
+        native.write(
+          path.join(codexHome, 'config.toml'),
+          'model="fixture-api"\nmodel_provider="hermes_bridge"\n',
+        );
+        native.write(path.join(bridgeHome, 'current.json'), { providerId });
+      }
+    };
+    if (isRust) {
+      native = await require('../tests/browser-native-fixture.cjs').prepare(
+        root,
+        codexHome,
+        bridgeHome,
+      );
+      for (const [id, user, remaining] of [
+        [slowId, 'ui-slow', 80],
+        [fastId, 'ui-fast', 65],
+      ]) {
+        native.write(path.join(bridgeHome, 'accounts', id, 'auth.json'), auth(user));
+        native.data.profiles[id] = {
+          methods: {
+            'account/rateLimits/read': {
+              ...(id === slowId ? { waitFile: 'release-slow' } : {}),
+              result: {
+                rateLimits: {
+                  limitId: 'codex',
+                  planType: 'plus',
+                  primary: {
+                    usedPercent: 100 - remaining,
+                    windowDurationMins: 300,
+                    resetsAt: 2000000000,
+                  },
+                },
+              },
+            },
+          },
+        };
+      }
+      native.save();
+      syncNative();
+      const release = releaseSlow;
+      releaseSlow = () => {
+        release();
+        native.write(path.join(root, 'release-slow'), 'ready');
+      };
+    }
     let calls = 0;
     server = createServer(
       {
@@ -78,7 +143,7 @@ let officialMode = false,
           },
           accountQuota: async ({ id }) => {
             calls++;
-            if (id === 'fixture-slow') await slowGate;
+            if (id === slowId) await slowGate;
             const row = accounts.find((account) => account.id === id);
             row.quota = {
               status: 'ok',
@@ -86,7 +151,7 @@ let officialMode = false,
               buckets: [
                 {
                   id: 'codex',
-                  windows: [{ minutes: 300, remainingPercent: id === 'fixture-slow' ? 80 : 65 }],
+                  windows: [{ minutes: 300, remainingPercent: id === slowId ? 80 : 65 }],
                 },
               ],
             };
@@ -94,7 +159,7 @@ let officialMode = false,
           },
         },
       },
-      { codexHome, bridgeHome },
+      { codexHome, bridgeHome, env: native?.env },
     );
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     browser = await chromium.launch({
@@ -104,6 +169,10 @@ let officialMode = false,
         : {}),
     });
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    if (isRust)
+      page.on('request', (request) => {
+        if (request.url().endsWith('/api/accountSwitch')) switches++;
+      });
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/#fixture-ui-token`);
@@ -141,12 +210,14 @@ let officialMode = false,
       );
     }
     assert.equal(await page.locator('#model').inputValue(), 'draft-kept-during-quota');
-    await page.locator('[data-source="account:fixture-fast"]').click();
+    await page.locator(`[data-source="account:${fastId}"]`).click();
     assert.equal(await page.locator('#switch').isEnabled(), true);
     assert.ok((await page.locator('#official-quota').innerText()).includes('剩余 65%'));
     report.checks.push('slow-account-does-not-lock-source-model-or-other-account');
 
-    const before = calls;
+    const quotaCalls = () =>
+      isRust ? native.rpc().filter((x) => x.method === 'account/rateLimits/read').length : calls;
+    const before = quotaCalls();
     await Promise.all([
       page.waitForResponse((response) => response.url().endsWith('/api/accountQuota')),
       fastRow.getByRole('button', { name: '刷新额度', exact: true }).click(),
@@ -154,7 +225,7 @@ let officialMode = false,
     await page.waitForFunction(() =>
       document.getElementById('quota-refresh').textContent.includes('1 个账号'),
     );
-    assert.equal(calls, before + 1, '单账号刷新只应请求所点账号');
+    assert.equal(quotaCalls(), before + 1, '单账号刷新只应请求所点账号');
     report.checks.push('single-account-refresh-is-independent');
     fs.mkdirSync(path.dirname(reportFile), { recursive: true });
     await page.screenshot({
@@ -166,9 +237,15 @@ let officialMode = false,
     await page.getByRole('button', { name: '刷新全部额度', exact: true }).waitFor();
     assert.deepEqual(errors, []);
     report.checks.push('each-account-renders-own-result-without-script-errors');
+    if (isRust)
+      for (const account of accounts)
+        account.quota = JSON.parse(
+          fs.readFileSync(path.join(bridgeHome, 'accounts', account.id, 'quota.json')),
+        );
     officialMode = true;
     accounts[0].current = true;
     accounts[0].quota.buckets[0].windows[0].remainingPercent = 10;
+    syncNative();
     await page.reload();
     await page.locator('#quota-notice').waitFor({ state: 'visible' });
     assert.ok((await page.locator('#quota-notice').innerText()).includes('10%'));
@@ -181,8 +258,9 @@ let officialMode = false,
     await swap.click();
     await page.waitForTimeout(300);
     assert.equal(switches, 1, '确认后直接切换到备用账号');
-    assert.equal(await page.locator('#provider').inputValue(), 'account:fixture-fast');
+    assert.equal(await page.locator('#provider').inputValue(), 'account:' + fastId);
     accounts[0].quota.status = 'error';
+    syncNative();
     await page.reload();
     await page.waitForFunction(
       () => document.querySelector('#source-list .source-card')?.disabled === false,
@@ -190,6 +268,7 @@ let officialMode = false,
     assert.equal(await page.locator('#quota-notice').isHidden(), true);
     accounts[0].quota.status = 'ok';
     accounts[0].quota.buckets[0].windows[0].resetsAt = Math.floor(Date.now() / 1000) - 60;
+    syncNative();
     await page.reload();
     await page.waitForFunction(
       () => document.querySelector('#source-list .source-card')?.disabled === false,
@@ -201,6 +280,7 @@ let officialMode = false,
     );
     officialMode = false;
     accounts[0].quota.buckets[0].windows[0].resetsAt = null;
+    syncNative();
     await page.reload();
     await page.waitForFunction(
       () => document.querySelector('#source-list .source-card')?.disabled === false,
@@ -214,6 +294,7 @@ let officialMode = false,
     // 账号说明（邮箱、套餐、到期、读取时间）很长时，手机宽度也只显示省略号，不能撑出横向滚动。
     accounts[1].email = 'a-very-long-mailbox-name-used-to-check-mobile-layout@example.test';
     accounts[1].subscriptionUntil = new Date(Date.now() + 86400000).toISOString();
+    syncNative();
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
     await page.waitForFunction(
@@ -234,6 +315,7 @@ let officialMode = false,
     releaseSlow?.();
     await browser?.close();
     if (server) await new Promise((resolve) => server.close(resolve));
+    native?.close();
     fs.mkdirSync(path.dirname(reportFile), { recursive: true });
     report.checkedAt = new Date().toISOString();
     fs.writeFileSync(reportFile, JSON.stringify(report, null, 2));

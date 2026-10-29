@@ -15,7 +15,7 @@ const target = process.argv[2] || process.platform,
       : 'codex-switcher-windows-x64.zip',
   );
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-package-'));
-let child, closed;
+let child, closed, servicePid;
 const freePort = () =>
   new Promise((resolve) => {
     const server = net.createServer();
@@ -51,22 +51,29 @@ const freePort = () =>
           : path.join(app, 'runtime', 'node.exe'),
       home = path.join(root, 'home'),
       bridge = path.join(root, 'private');
+    const native = path.join(app, target === 'win32' ? 'codex-switcher.exe' : 'codex-switcher');
+    const isNative = fs.existsSync(native);
     // 同一份源码的所有发行包和 release.json 必须使用同一个构建号。
     const packagedBuild = JSON.parse(
       cp
         .execFileSync(
-          node,
-          [
-            '-e',
-            "console.log(JSON.stringify(require('./src/platform/build-info.cjs').buildInfo()))",
-          ],
+          isNative ? native : node,
+          isNative
+            ? ['--build-info']
+            : [
+                '-e',
+                "console.log(JSON.stringify(require('./src/platform/build-info.cjs').buildInfo()))",
+              ],
           { cwd: app, encoding: 'utf8' },
         )
         .trim(),
     );
     assert.deepEqual(
       packagedBuild,
-      require('../src/platform/build-info.cjs').buildInfo(Number(process.env.GITHUB_RUN_NUMBER)),
+      (isNative
+        ? require('./rust-build-info.cjs')
+        : require('../src/platform/build-info.cjs')
+      ).buildInfo(Number(process.env.GITHUB_RUN_NUMBER)),
       '发行包构建号与源码不一致',
     );
     fs.mkdirSync(home);
@@ -79,7 +86,10 @@ const freePort = () =>
       BRIDGE_HERMES_HOME: path.join(root, 'no-hermes'),
       BRIDGE_DISCOVERY_DIR: path.join(root, 'discovery'),
       BRIDGE_PORT: String(await freePort()),
+      SWITCHER_TEST_SHELL_ROOT: path.join(root, 'shell'),
     };
+    // Exercise the legacy main.cjs entry as well: native packages provide a
+    // small executable bridge at runtime/node for the released Node updater.
     child = cp.spawn(node, [path.join(app, 'main.cjs'), '--no-open'], {
       env,
       windowsHide: true,
@@ -91,7 +101,7 @@ const freePort = () =>
       let text = '';
       child.stdout.on('data', (chunk) => {
         text += chunk;
-        if (text.includes('BRIDGE_READY')) {
+        if (text.includes('BRIDGE_READY') || text.includes('"event":"ready"')) {
           clearTimeout(timer);
           resolve();
         }
@@ -115,6 +125,7 @@ const freePort = () =>
         assert.equal(response.status, 200, JSON.stringify(value));
         return value;
       };
+    servicePid = JSON.parse(fs.readFileSync(path.join(bridge, 'running.json'))).pid;
     assert.equal((await fetch(u.origin + '/')).status, 200);
     assert.equal((await api('accounts')).items.length, 0);
     await api('clients');
@@ -160,27 +171,44 @@ const freePort = () =>
         ],
         { env, stdio: 'pipe', windowsHide: true, timeout: 60000 },
       );
-      for (const file of [
-        'src/platform/platform.cjs',
-        'platform/windows/process-context.cs',
-        'bin/process-context.exe',
-        'src/diagnostics/diagnostics.cjs',
-        'src/clients/editor-integration.cjs',
-        'vscode-companion/extension.cjs',
-        'vscode-remote-agent/extension.cjs',
-        'src/clients/remote-servers.cjs',
-        'node_modules/smol-toml/package.json',
-      ])
+      for (const file of isNative
+        ? [
+            'codex-switcher.exe',
+            'web/index.html',
+            'vscode-companion/extension.cjs',
+            'vscode-remote-agent/extension.cjs',
+          ]
+        : [
+            'src/platform/platform.cjs',
+            'platform/windows/process-context.cs',
+            'bin/process-context.exe',
+            'src/diagnostics/diagnostics.cjs',
+            'src/clients/editor-integration.cjs',
+            'vscode-companion/extension.cjs',
+            'vscode-remote-agent/extension.cjs',
+            'src/clients/remote-servers.cjs',
+            'node_modules/smol-toml/package.json',
+          ])
         assert.ok(
           fs.existsSync(path.join(installed, file)),
           file + ' missing after offline install',
         );
-      assert.match(
-        cp.execFileSync(path.join(installed, 'runtime', 'node.exe'), ['--version'], {
-          encoding: 'utf8',
-        }),
-        /^v22\./,
-      );
+      if (isNative)
+        assert.equal(
+          JSON.parse(
+            cp.execFileSync(path.join(installed, 'codex-switcher.exe'), ['--build-info'], {
+              encoding: 'utf8',
+            }),
+          ).id,
+          packagedBuild.id,
+        );
+      else
+        assert.match(
+          cp.execFileSync(path.join(installed, 'runtime', 'node.exe'), ['--version'], {
+            encoding: 'utf8',
+          }),
+          /^v22\./,
+        );
     }
     if (target === 'darwin') {
       cp.execFileSync('/usr/bin/plutil', ['-lint', path.resolve(app, '..', 'Info.plist')]);
@@ -223,6 +251,62 @@ const freePort = () =>
         ),
       );
     }
+    if (isNative) {
+      const probeHome = path.join(root, 'bridge-probe');
+      fs.mkdirSync(path.join(probeHome, 'updates'), { recursive: true });
+      const job = path.join(root, 'bridge-probe-job.json');
+      fs.writeFileSync(
+        job,
+        JSON.stringify({
+          pid: 2147483647,
+          source: app,
+          target: path.join(root, 'missing-target.app/Contents/Resources'),
+          staging: root,
+          bridgeHome: probeHome,
+          codexHome: home,
+          discoveryDir: path.join(root, 'probe-discovery'),
+          build: packagedBuild.id,
+          noOpen: true,
+        }),
+      );
+      const probe = cp.fork(path.join(app, 'scripts/update-worker.cjs'), [job], {
+        execPath: node,
+        cwd: root,
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      });
+      let detail = '';
+      probe.stderr.on('data', (chunk) => (detail += chunk));
+      const done = new Promise((resolve) => probe.once('close', resolve));
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          probe.kill();
+          reject(Error('Legacy worker IPC handshake timed out: ' + detail));
+        }, 10000);
+        probe.once('error', (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+        probe.once('message', (message) => {
+          clearTimeout(timer);
+          assert.equal(message.ready, true);
+          resolve();
+        });
+        probe.once('exit', (code) => {
+          clearTimeout(timer);
+          reject(Error('Legacy worker exited before ready: ' + code + ' ' + detail));
+        });
+      });
+      assert.equal(
+        await done,
+        1,
+        'Missing TEMP target must reject installation after the ready handshake',
+      );
+      assert.match(
+        JSON.parse(fs.readFileSync(path.join(probeHome, 'updates/result.json'))).error,
+        /升级未完成/,
+      );
+    }
     console.log(
       'PASS extracted ' +
         target +
@@ -230,6 +314,13 @@ const freePort = () =>
     );
   } finally {
     if (child) {
+      if (servicePid && servicePid !== child.pid) {
+        try {
+          process.kill(servicePid);
+        } catch (error) {
+          if (error.code !== 'ESRCH') throw error;
+        }
+      }
       child.kill();
       await closed;
     }

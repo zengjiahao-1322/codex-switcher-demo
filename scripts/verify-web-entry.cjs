@@ -9,7 +9,7 @@ try {
 } catch {
   ({ chromium } = require('../.build-cache/browser-check/node_modules/playwright'));
 }
-const { createServer } = require('../tests/backend.cjs');
+const { createServer, isRust } = require('../tests/backend.cjs');
 const { createService } = require('../src/server/service.cjs');
 
 // 验证真实页面；仅使用独立本机配置，不触碰用户账号和正在执行的任务。
@@ -36,6 +36,7 @@ const providerId = require('../src/config/providers.cjs').add(bridge, {
 });
 fs.writeFileSync(path.join(bridge, 'current.json'), JSON.stringify({ providerId }));
 let browser, server, port;
+let native;
 let fixtureJob = null;
 const switchRequests = [];
 const probeRequests = [];
@@ -90,7 +91,7 @@ async function start(token) {
         },
       },
     },
-    { codexHome: home, bridgeHome: bridge },
+    { codexHome: home, bridgeHome: bridge, env: native?.env },
   );
   await new Promise((resolve) => server.listen(port || 0, '127.0.0.1', resolve));
   port = server.address().port;
@@ -111,6 +112,13 @@ async function loaded(page, url) {
 }
 (async () => {
   try {
+    if (isRust) {
+      native = await require('../tests/browser-native-fixture.cjs').prepare(root, home, bridge);
+      const file = path.join(bridge, 'providers.json'),
+        data = JSON.parse(fs.readFileSync(file));
+      data.providers.find((p) => p.id === providerId).baseUrl = native.baseUrl;
+      fs.writeFileSync(file, JSON.stringify(data));
+    }
     await start('fixture-session-one');
     browser = await chromium.launch({
       headless: true,
@@ -121,6 +129,12 @@ async function loaded(page, url) {
     const context = await browser.newContext();
     const page = await context.newPage();
     const errors = [];
+    if (isRust)
+      page.on('request', (request) => {
+        if (request.url().endsWith('/api/probe')) probeRequests.push(request.postDataJSON());
+        if (request.url().endsWith('/api/desktopSwitch'))
+          switchRequests.push(request.postDataJSON());
+      });
     page.on('pageerror', (error) => errors.push(error.message));
     const base = 'http://127.0.0.1:' + port;
     await page.goto(base + '/');
@@ -182,8 +196,9 @@ async function loaded(page, url) {
     );
     await button.click();
     await response;
-    await page.waitForFunction(() =>
-      document.getElementById('status').textContent.includes('API 连接检测通过'),
+    await page.waitForFunction(
+      (text) => document.getElementById('status').textContent.includes(text),
+      isRust ? '可直连：Responses 和函数调用通过' : 'API 连接检测通过',
     );
     assert.equal(Object.hasOwn(probeRequests.at(-1), 'fast'), false);
     assert.equal(switchRequests.length, 0);
@@ -194,6 +209,34 @@ async function loaded(page, url) {
     );
     await page.locator('#switch').click();
     await applied;
+    if (isRust) {
+      const deadline = Date.now() + 15000;
+      while (Date.now() < deadline) {
+        const job = JSON.parse(fs.readFileSync(path.join(bridge, 'account-switch.json')));
+        if (['done', 'error'].includes(job.status)) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      // Fixed persisted stage rows exercise rendering; actual worker behavior is
+      // covered by the same HTTP black boxes on both backends.
+      fixtureJob = {
+        status: 'done',
+        startedAt: new Date().toISOString(),
+        elapsedMs: 1250,
+        configurationApplied: true,
+        threadFollow: 'all',
+        threads: { updated: 3, skipped: 0, failed: 0 },
+        steps: [{ id: 'apply', label: '保存并应用目标配置', status: 'done', durationMs: 250 }],
+        editorReload: {
+          results: [
+            { name: 'VS Code A', status: 'reloaded' },
+            { name: 'VS Code B', status: 'received' },
+          ],
+        },
+        message: 'fixture switch applied',
+      };
+      fs.writeFileSync(path.join(bridge, 'account-switch.json'), JSON.stringify(fixtureJob));
+      await loaded(page, base + '/');
+    }
     assert.equal(Object.hasOwn(switchRequests.at(-1), 'fast'), false);
     await page.locator('#switch-progress').waitFor({ state: 'visible' });
     await page.locator('#switch-progress-title').click();
@@ -208,6 +251,8 @@ async function loaded(page, url) {
       editorReload: undefined,
       steps: [{ id: 'threads', label: '同步并核对旧对话', status: 'error', durationMs: 500 }],
     };
+    if (isRust)
+      fs.writeFileSync(path.join(bridge, 'account-switch.json'), JSON.stringify(fixtureJob));
     await loaded(page, base + '/');
     assert.ok((await page.locator('#switch-progress-title').innerText()).includes('切换未完成'));
     assert.ok((await page.locator('#switch-steps').innerText()).includes('失败'));
@@ -262,6 +307,7 @@ async function loaded(page, url) {
   } finally {
     await browser?.close();
     if (server?.listening) await new Promise((resolve) => server.close(resolve));
+    native?.close();
     report.checkedAt = new Date().toISOString();
     report.fixtureDirectory = root;
     fs.writeFileSync(path.join(reports, 'web-entry.json'), JSON.stringify(report, null, 2));

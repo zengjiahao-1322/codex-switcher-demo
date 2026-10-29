@@ -12,7 +12,7 @@ $packageInfo = Get-Content -LiteralPath (Join-Path $InstallDir 'package.json') -
 if ($packageInfo.name -ne 'codex-api-switcher') { throw 'Unexpected uninstall folder.' }
 $node = Join-Path $InstallDir 'runtime\node.exe'
 $cli = Join-Path $InstallDir 'scripts/cli.cjs'
-$native = Join-Path $InstallDir 'switcher-prototype.exe'
+$native = Join-Path $InstallDir 'codex-switcher.exe'
 $cliExe = if (Test-Path -LiteralPath $native) { $native } else { $node }
 [string[]]$cliPrefix = if (Test-Path -LiteralPath $native) { @('--cli') } else { @($cli) }
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -29,9 +29,10 @@ if (Test-Path -LiteralPath $running) {
   if ($serviceProcess) {
     $ownsNode = $serviceProcess.ExecutablePath -eq $node -and $serviceProcess.CommandLine.Contains((Join-Path $InstallDir 'main.cjs'))
     $ownsNative = $serviceProcess.ExecutablePath -eq $native
-    if (-not ($ownsNode -or $ownsNative)) { throw 'Unexpected process in the running record; nothing was removed.' }
-    Stop-Process -Id $servicePid -Force -ErrorAction Stop
-    Step 'Stopped the running service'
+    if ($ownsNode -or $ownsNative) {
+      Stop-Process -Id $servicePid -Force -ErrorAction Stop
+      Step 'Stopped the running service'
+    }
   }
 }
 
