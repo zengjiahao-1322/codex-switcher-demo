@@ -73,7 +73,7 @@ test('安装失败时提示原因并可重试', async () => {
     }),
   });
   await page.byId('update-install').onclick();
-  assert.equal(page.byId('update-title').textContent, '更新失败');
+  assert.equal(page.byId('update-title').textContent, '更新失败：' + update.error);
   assert.equal(page.byId('update-detail').textContent, '更新校验和不匹配，未修改任何文件。');
   assert.equal(page.byId('update-install').textContent, '重试');
 });
@@ -101,6 +101,21 @@ test('已是最新或检查失败时不占用首屏，只在设置里说明', as
 });
 
 // 用户在开发目录里看到“有新版本”并点了更新，结果报“开发目录请用 git 更新”。
+test('安装失败后重启即在顶部显示原因，没有latest元数据也可重试', async () => {
+  const update = {
+    current,
+    latest: null,
+    status: 'error',
+    installationFailed: true,
+    error: '更新失败，已恢复上一版：fixture failure',
+  };
+  const page = await runPage({ update, respond: backend(() => update) });
+  assert.equal(page.byId('update-banner').hidden, false);
+  assert.equal(page.byId('update-title').textContent, '更新失败：' + update.error);
+  assert.equal(page.byId('update-install').hidden, false);
+  assert.equal(page.byId('update-install').textContent, '重试');
+});
+
 test('开发目录不提示一键升级，只在设置里说明用 git 更新', async () => {
   const dev = {
     current,
@@ -168,7 +183,7 @@ test('不确认时不更新扩展', async () => {
 });
 
 // 旧后台退出后新后台不认旧会话：提示去新页面，而不是“会话失效”。
-test('升级中旧后台断开时提示使用新打开的页面', async () => {
+test('升级中旧后台断开只提示正在更新，不提前报成功', async () => {
   let update = { current, latest: newer, checkedAt: new Date().toISOString(), status: 'available' },
     gone = false;
   const respond = backend(() => update, {
@@ -183,6 +198,7 @@ test('升级中旧后台断开时提示使用新打开的页面', async () => {
   });
   await page.byId('update-install').onclick();
   assert.equal(page.byId('session-notice').hidden, false);
-  assert.match(page.byId('session-notice').textContent, /^切换器已更新，请使用新打开的页面/);
+  assert.match(page.byId('session-notice').textContent, /^正在更新/);
+  assert.doesNotMatch(page.byId('session-notice').textContent, /已更新|成功/);
   assert.equal(page.byId('update-banner').hidden, true);
 });

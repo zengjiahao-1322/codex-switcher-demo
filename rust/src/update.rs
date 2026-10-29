@@ -26,6 +26,7 @@ struct State {
     metadata: Option<Value>,
     checked: Option<Instant>,
     task: bool,
+    install_error: Option<String>,
 }
 
 fn asset_name() -> String {
@@ -48,15 +49,35 @@ fn initial(app: &App) -> State {
     let dev = instance::project_root().join(".git").exists();
     let previous =
         config_store::read_json(&app.bridge.join("updates/result.json")).unwrap_or(Value::Null);
-    let mut value = json!({"current":{"version":build["version"],"build":build["id"],"sequence":if dev{Value::Null}else{build["sequence"].clone()}},"dev":dev,"latest":null,"checkedAt":null,"status":if previous["error"].is_string(){"error"}else{"idle"}});
-    if previous["error"].is_string() {
-        value["error"] = previous["error"].clone();
+    let install_error = previous["error"].as_str().map(str::to_owned).or_else(|| {
+        previous
+            .is_null()
+            .then(|| {
+                diagnostics::recent(&app.bridge, 2000)
+                    .ok()
+                    .and_then(|rows| {
+                        rows.into_iter()
+                            .rev()
+                            .find(|row| {
+                                ["update.install", "update.rollback"]
+                                    .contains(&row["event"].as_str().unwrap_or(""))
+                            })
+                            .and_then(|row| row["error"].as_str().map(str::to_owned))
+                    })
+            })
+            .flatten()
+    });
+    let mut value = json!({"current":{"version":build["version"],"build":build["id"],"sequence":if dev{Value::Null}else{build["sequence"].clone()}},"dev":dev,"latest":null,"checkedAt":null,"status":if install_error.is_some(){"error"}else{"idle"}});
+    if let Some(error) = &install_error {
+        value["error"] = json!(error);
     }
+    value["installationFailed"] = json!(install_error.is_some());
     State {
         value,
         metadata: None,
         checked: None,
         task: false,
+        install_error,
     }
 }
 fn with_state<T>(app: &App, action: impl FnOnce(&mut State) -> T) -> T {
@@ -340,8 +361,18 @@ pub async fn check(app: &App) -> io::Result<Value> {
                 s.metadata = Some(latest.clone());
                 s.checked = Some(Instant::now());
                 s.value["checkedAt"] = json!(diagnostics::now());
-                s.value["status"] = json!(if newer(s) { "available" } else { "idle" });
-                s.value.as_object_mut().unwrap().remove("error");
+                s.value["status"] = json!(if s.install_error.is_some() {
+                    "error"
+                } else if newer(s) {
+                    "available"
+                } else {
+                    "idle"
+                });
+                if let Some(error) = &s.install_error {
+                    s.value["error"] = json!(error);
+                } else {
+                    s.value.as_object_mut().unwrap().remove("error");
+                }
             });
             diagnostics::log(
                 &app.bridge,
@@ -486,6 +517,8 @@ pub async fn install(app: Arc<App>, input: &Value) -> io::Result<Value> {
             return Err(io::Error::other("不会安装相同或更旧的版本。"));
         }
         s.task = true;
+        s.install_error = None;
+        s.value["installationFailed"] = json!(false);
         s.value["status"] = json!("downloading");
         s.value["progress"] = json!(0);
         s.value.as_object_mut().unwrap().remove("error");
@@ -638,6 +671,9 @@ fn copy_tree(source: &Path, target: &Path) -> io::Result<()> {
     fs::create_dir_all(target)?;
     for entry in fs::read_dir(source)? {
         let entry = entry?;
+        if old_file(&entry.file_name().to_string_lossy()) {
+            continue;
+        }
         let destination = target.join(entry.file_name());
         if entry.file_type()?.is_dir() {
             copy_tree(&entry.path(), &destination)?;
@@ -653,11 +689,132 @@ fn remove_tree(path: &Path) -> io::Result<()> {
         other => other,
     }
 }
-fn remove_file(path: &Path) -> io::Result<()> {
+fn old_file(name: &str) -> bool {
+    name.rsplit_once(".old-").is_some_and(|(_, suffix)| {
+        suffix.split_once('-').is_some_and(|(time, id)| {
+            !time.is_empty()
+                && time.bytes().all(|c| c.is_ascii_digit())
+                && !id.is_empty()
+                && id.bytes().all(|c| c.is_ascii_hexdigit())
+        })
+    })
+}
+fn remove_old(path: &Path) -> io::Result<()> {
     match fs::remove_file(path) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                || error.kind() == io::ErrorKind::PermissionDenied
+                || error.raw_os_error() == Some(32) =>
+        {
+            Ok(())
+        }
         other => other,
     }
+}
+fn retire(path: &Path) -> io::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let nonce = crate::platform::random_bytes()?[..4]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let old = path.with_file_name(format!(
+        "{}.old-{stamp}-{nonce}",
+        path.file_name().unwrap().to_string_lossy()
+    ));
+    fs::rename(path, &old)?;
+    remove_old(&old)
+}
+fn replace_file(source: &Path, target: &Path) -> io::Result<()> {
+    match copy_file(source, target) {
+        Err(error)
+            if error.kind() == io::ErrorKind::PermissionDenied
+                || error.raw_os_error() == Some(32) =>
+        {
+            retire(target)?;
+            copy_file(source, target)
+        }
+        result => result,
+    }
+}
+fn remove_installed(path: &Path) -> io::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    if path.is_dir() {
+        for entry in fs::read_dir(path)? {
+            remove_installed(&entry?.path())?;
+        }
+        if fs::read_dir(path)?.next().is_none() {
+            fs::remove_dir(path)?;
+        }
+    } else if !old_file(&path.file_name().unwrap().to_string_lossy()) {
+        match fs::remove_file(path) {
+            Err(error)
+                if error.kind() == io::ErrorKind::PermissionDenied
+                    || error.raw_os_error() == Some(32) =>
+            {
+                retire(path)?
+            }
+            result => result?,
+        }
+    }
+    Ok(())
+}
+fn replace_tree(source: &Path, target: &Path) -> io::Result<()> {
+    fs::create_dir_all(target)?;
+    for entry in fs::read_dir(target)? {
+        let entry = entry?;
+        if !old_file(&entry.file_name().to_string_lossy())
+            && !source.join(entry.file_name()).exists()
+        {
+            remove_installed(&entry.path())?;
+        }
+    }
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        if old_file(&entry.file_name().to_string_lossy()) {
+            continue;
+        }
+        let destination = target.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            replace_tree(&entry.path(), &destination)?;
+        } else {
+            replace_file(&entry.path(), &destination)?;
+        }
+    }
+    Ok(())
+}
+pub fn cleanup_old(target: &Path) -> io::Result<()> {
+    if !cfg!(windows) {
+        return Ok(());
+    }
+    fn walk(path: &Path, recurse: bool) -> io::Result<()> {
+        if !path.exists() {
+            return Ok(());
+        }
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                if recurse {
+                    walk(&entry.path(), true)?;
+                }
+            } else if old_file(&entry.file_name().to_string_lossy()) {
+                remove_old(&entry.path())?;
+            }
+        }
+        Ok(())
+    }
+    walk(target, false)?;
+    for dir in ["runtime", "bin"] {
+        walk(&target.join(dir), true)?;
+    }
+    Ok(())
 }
 
 enum Replacement {
@@ -742,15 +899,14 @@ impl Replacement {
             } => {
                 for file in touched {
                     if !files.contains(file) {
-                        remove_file(&target.join(file))?;
+                        remove_installed(&target.join(file))?;
                     }
                 }
                 for file in files {
-                    copy_file(&source.join(file), &target.join(file))?;
+                    replace_file(&source.join(file), &target.join(file))?;
                 }
                 for dir in ["runtime", "bin", "node_modules"] {
-                    remove_tree(&target.join(dir))?;
-                    copy_tree(&source.join(dir), &target.join(dir))?;
+                    replace_tree(&source.join(dir), &target.join(dir))?;
                 }
                 Ok(())
             }
@@ -776,14 +932,13 @@ impl Replacement {
                 for file in touched {
                     let old = previous.join(file);
                     if old.exists() {
-                        copy_file(&old, &target.join(file))?;
+                        replace_file(&old, &target.join(file))?;
                     } else {
-                        remove_file(&target.join(file))?;
+                        remove_installed(&target.join(file))?;
                     }
                 }
                 for dir in ["runtime", "bin", "node_modules"] {
-                    remove_tree(&target.join(dir))?;
-                    copy_tree(&previous.join(dir), &target.join(dir))?;
+                    replace_tree(&previous.join(dir), &target.join(dir))?;
                 }
                 Ok(())
             }
@@ -824,7 +979,7 @@ async fn wait_exit(pid: u32, timeout: Duration) -> io::Result<()> {
     }
     Ok(())
 }
-async fn launch(job: &Job) -> io::Result<u32> {
+async fn launch(job: &Job, adapter_port: Option<u16>) -> io::Result<u32> {
     let native = executable(&job.target);
     let mut command = if native.exists() {
         Command::new(native)
@@ -857,6 +1012,9 @@ async fn launch(job: &Job) -> io::Result<u32> {
         .env("BRIDGE_HOME", &job.bridge_home)
         .env("BRIDGE_CODEX_HOME", &job.codex_home)
         .env("SWITCHER_WEB_ROOT", job.target.join("web"));
+    if let Some(port) = adapter_port {
+        command.env("BRIDGE_PORT", port.to_string());
+    }
     if let Some(directory) = &job.discovery_dir {
         command.env("BRIDGE_DISCOVERY_DIR", directory);
     } else {
@@ -864,6 +1022,48 @@ async fn launch(job: &Job) -> io::Result<u32> {
     }
     detached(&mut command);
     Ok(command.spawn()?.id())
+}
+async fn stop_adapter(job: &Job) -> io::Result<Option<u16>> {
+    if !cfg!(windows) {
+        return Ok(None);
+    }
+    let adapter = config_store::read_json(&job.bridge_home.join("adapter.json"))?;
+    let Some(port) = adapter["port"]
+        .as_u64()
+        .filter(|p| *p > 0 && *p <= 65535)
+        .map(|p| p as u16)
+    else {
+        return Ok(None);
+    };
+    let Some(pid) = crate::platform::port_pid(port)? else {
+        return Ok(None);
+    };
+    if pid == job.pid {
+        return Ok(None);
+    }
+    let image = crate::platform::image(pid)?;
+    let same = |a: &Path, b: &Path| -> bool {
+        match (fs::canonicalize(a), fs::canonicalize(b)) {
+            (Ok(a), Ok(b)) => crate::platform::display_path(&a)
+                .eq_ignore_ascii_case(&crate::platform::display_path(&b)),
+            _ => false,
+        }
+    };
+    let owned = same(&image, &job.target.join("codex-switcher.exe"))
+        || (same(&image, &job.target.join("runtime/node.exe"))
+            && crate::platform::command(pid)?
+                .to_lowercase()
+                .contains(&job.target.join("main.cjs").to_string_lossy().to_lowercase()));
+    if !owned {
+        return Ok(None);
+    }
+    crate::platform::stop(pid).await?;
+    diagnostics::log(
+        &job.bridge_home,
+        "update.adapter",
+        json!({"pid":pid,"port":port,"verified":true,"status":"stopped"}),
+    )?;
+    Ok(Some(port))
 }
 async fn healthy(job: &Job) -> io::Result<()> {
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -937,7 +1137,9 @@ async fn perform(job: &Job) -> io::Result<()> {
     let result = job.bridge_home.join("updates/result.json");
     let mut replacement = None;
     let mut new_pid = None;
+    let mut adapter_port = None;
     let apply = async {
+        adapter_port = stop_adapter(job).await?;
         remove_tree(&previous)?;
         fs::create_dir_all(&previous)?;
         replacement = Some(Replacement::prepare(job, &previous)?);
@@ -947,9 +1149,10 @@ async fn perform(job: &Job) -> io::Result<()> {
             json!({"build":job.build,"status":"started","durationMs":0}),
         )?;
         replacement.as_ref().unwrap().apply()?;
-        instance::write_json(&result, &json!({"build":job.build}))?;
-        new_pid = Some(launch(job).await?);
+        instance::write_json(&result, &json!({"build":job.build,"status":"installing"}))?;
+        new_pid = Some(launch(job, adapter_port).await?);
         healthy(job).await?;
+        instance::write_json(&result, &json!({"build":job.build,"status":"done"}))?;
         replacement.as_ref().unwrap().complete()?;
         diagnostics::log(
             &job.bridge_home,
@@ -968,7 +1171,7 @@ async fn perform(job: &Job) -> io::Result<()> {
             if let Some(pid)=new_pid{crate::platform::stop(pid).await?;}
             if let Some(replacement)=&replacement{replacement.restore()?;}
             let message=format!("{}{}",if replacement.is_some(){"更新失败，已恢复上一版："}else{"更新未完成，原版本未改动："},error);
-            instance::write_json(&result,&json!({"build":job.build,"error":message}))?;launch(job).await?;
+            instance::write_json(&result,&json!({"build":job.build,"error":message}))?;launch(job,adapter_port).await?;
             diagnostics::log(&job.bridge_home,"update.rollback",json!({"build":job.build,"status":"done","error":message,"durationMs":started.elapsed().as_millis()}))
         }.await;
         if let Err(rollback_error) = rollback {

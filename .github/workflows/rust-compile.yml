@@ -53,7 +53,11 @@ jobs:
         if: runner.os == 'Windows'
         run: node scripts/build-windows-helper.cjs
       - name: Node black-box baseline
-        run: node --test --test-concurrency=1 tests/blackbox-framework.test.cjs tests/blackbox-migration.test.cjs tests/blackbox-diagnostics.test.cjs tests/blackbox-platform.test.cjs tests/blackbox-editors.test.cjs tests/blackbox-config.test.cjs tests/blackbox-config-algorithm.test.cjs tests/blackbox-config-matrix.test.cjs tests/blackbox-config-backups.test.cjs tests/blackbox-config-network.test.cjs tests/blackbox-accounts.test.cjs tests/blackbox-accounts-network.test.cjs tests/blackbox-accounts-native.test.cjs tests/blackbox-local-switch.test.cjs tests/blackbox-switching.test.cjs tests/blackbox-remote.test.cjs tests/blackbox-threads-native.test.cjs tests/blackbox-window-algorithm.test.cjs tests/blackbox-extension-install.test.cjs tests/blackbox-remote-expiry.test.cjs tests/blackbox-adapter.test.cjs tests/blackbox-process-fault.test.cjs tests/blackbox-batch6.test.cjs
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then suffix=.exe; else suffix=; fi
+          export SWITCHER_RUST_EXE="$PWD/rust/target/${{ matrix.target }}/release/codex-switcher$suffix"
+          node --test --test-concurrency=1 tests/blackbox-framework.test.cjs tests/blackbox-migration.test.cjs tests/blackbox-diagnostics.test.cjs tests/blackbox-platform.test.cjs tests/blackbox-editors.test.cjs tests/blackbox-config.test.cjs tests/blackbox-config-algorithm.test.cjs tests/blackbox-config-matrix.test.cjs tests/blackbox-config-backups.test.cjs tests/blackbox-config-network.test.cjs tests/blackbox-accounts.test.cjs tests/blackbox-accounts-network.test.cjs tests/blackbox-accounts-native.test.cjs tests/blackbox-local-switch.test.cjs tests/blackbox-switching.test.cjs tests/blackbox-remote.test.cjs tests/blackbox-threads-native.test.cjs tests/blackbox-window-algorithm.test.cjs tests/blackbox-extension-install.test.cjs tests/blackbox-remote-expiry.test.cjs tests/blackbox-adapter.test.cjs tests/blackbox-process-fault.test.cjs tests/blackbox-batch6.test.cjs
       - name: Same black boxes against Rust
         shell: bash
         env:

@@ -19,7 +19,7 @@ const report = {
   checks: [],
   realRegistryTested: false,
 };
-let old, server, newPid;
+let old, occupant, occupantClosed, server, newPid;
 const pause = () => new Promise((r) => setTimeout(r, 50));
 async function until(read, description, timeout = 60000) {
   const deadline = Date.now() + timeout;
@@ -177,6 +177,20 @@ function extract(zip, to) {
       () => fs.existsSync(running) && JSON.parse(fs.readFileSync(running)),
       'old record',
     );
+    occupant = cp.spawn(
+      path.join(target, 'runtime/node.exe'),
+      [path.join(target, 'mcp-server.cjs')],
+      { cwd: target, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    occupantClosed = require('node:events').once(occupant, 'close');
+    let mcpOutput = '';
+    occupant.stdout.on('data', (chunk) => (mcpOutput += chunk));
+    occupant.stderr.on('data', (chunk) => (errors += chunk));
+    occupant.stdin.write(
+      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"isolated-upgrade","version":"1"}}}\n',
+    );
+    await until(() => mcpOutput.includes('"serverInfo"'), 'seq136 MCP initialize', 10000);
+    assert.throws(() => fs.unlinkSync(path.join(target, 'runtime/node.exe')), { code: 'EPERM' });
     const oldUrl = new URL(oldRecord.url),
       headers = {
         Authorization: 'Bearer ' + oldUrl.hash.slice(1),
@@ -216,6 +230,16 @@ function extract(zip, to) {
         headers: { Authorization: 'Bearer ' + url.hash.slice(1) },
       });
     assert.equal((await res.json()).runtime, 'rust');
+    assert.equal(occupant.exitCode, null);
+    assert.equal(occupant.signalCode, null);
+    report.occupiedRuntime = {
+      pid: occupant.pid,
+      survived: true,
+      parked: fs
+        .readdirSync(path.join(target, 'runtime'))
+        .filter((name) => name.startsWith('node.exe.old-')),
+    };
+    assert.ok(report.occupiedRuntime.parked.length > 0);
     for (const n of kept)
       for (const directory of [bridge, data])
         assert.equal(fs.readFileSync(path.join(directory, n)).toString('base64'), before[n]);
@@ -268,6 +292,8 @@ function extract(zip, to) {
       'discovery-handover',
       'TEMP-COM-shortcut-target',
       'TEMP-registration-target',
+      'seq136-MCP-occupied-runtime-survived',
+      'occupied-image-renamed-beside-new-runtime',
     ];
     report.native = native;
     report.migrated = migrated;
@@ -284,6 +310,10 @@ function extract(zip, to) {
     report.error = error.stack;
     process.exitCode = 1;
   } finally {
+    if (occupant) {
+      if (occupant.exitCode === null && occupant.signalCode === null) occupant.kill();
+      await occupantClosed;
+    }
     if (newPid) {
       try {
         process.kill(newPid);

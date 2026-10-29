@@ -102,7 +102,7 @@ async function finishJob(f) {
     const job = JSON.parse(fs.readFileSync(file));
     if (['done', 'error'].includes(job.status)) {
       assert.equal(job.status, 'done', JSON.stringify(job));
-      return job;
+      if (!fs.existsSync(path.join(f.bridge, 'operation.lock'))) return job;
     }
     await new Promise((r) => setTimeout(r, 25));
   }

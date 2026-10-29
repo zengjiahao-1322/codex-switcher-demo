@@ -11,7 +11,7 @@ export const sessionReady = launchToken
     })
   : null;
 export const SESSION_LOST = '本机会话已失效，请从桌面快捷方式重新打开切换器。';
-const UPGRADED = '切换器已更新，请使用新打开的页面；这个页面可以关闭。';
+const UPGRADED = '正在更新…请在新打开的页面查看结果；若未打开，请从快捷方式重新打开。';
 export let sessionLost = false,
   upgrading = false;
 // 升级期间旧后台会退出、新后台不认旧会话；此时断开是预期结果，不当作会话失效。

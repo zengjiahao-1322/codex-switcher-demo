@@ -7,10 +7,81 @@ const { test } = require('node:test'),
   crypto = require('node:crypto');
 const { spawn, execFileSync } = require('node:child_process');
 const { isRust, rustBinary } = require('./backend.cjs');
-const { startBackend } = require('./backend-process.cjs');
+const { startBackend, launchBackend } = require('./backend-process.cjs');
 const { api, serve, responseTool } = require('./config-blackbox-helpers.cjs');
 const { packageFixture, snapshot, until, write } = require('./fixtures/batch6-package.cjs');
 const project = path.resolve(__dirname, '..');
+async function occupyRuntime(f) {
+  if (process.platform !== 'win32' || (!isRust && !fs.existsSync(rustBinary()))) return null;
+  const node = path.join(f.target, 'runtime/node.exe');
+  if (!fs.existsSync(node)) fs.copyFileSync(process.execPath, node);
+  const child = spawn(node, [path.join(f.target, 'mcp-server.cjs')], {
+    cwd: f.root,
+    env: f.environment,
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  f.track(child);
+  const closed = require('node:events').once(child, 'close');
+  let error = '';
+  child.stderr.on('data', (chunk) => (error += chunk));
+  const ready = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(Error('TEMP MCP did not initialize: ' + error)), 10000);
+    child.stdout.on('data', (chunk) => {
+      if (String(chunk).includes('"serverInfo"')) {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+  });
+  child.stdin.write(
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"fixture","version":"1"}}}\n',
+  );
+  await ready;
+  assert.throws(() => fs.unlinkSync(node), { code: 'EPERM' });
+  return { child, closed };
+}
+async function verifyOldCleanup(f, record, occupant) {
+  if (!occupant) return record;
+  assert.equal(occupant.child.exitCode, null, 'the MCP must survive replacement');
+  assert.equal(occupant.child.signalCode, null);
+  const parked = fs
+    .readdirSync(path.join(f.target, 'runtime'))
+    .filter((name) => name.startsWith('node.exe.old-'));
+  assert.ok(parked.length > 0, 'the loaded image is parked beside node.exe');
+  occupant.child.kill();
+  await occupant.closed;
+  const url = new URL(record.url);
+  const stopped = await fetch(url.origin + '/api/quit', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + url.hash.slice(1), 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(stopped.status, 200);
+  await until(() => !fs.existsSync(path.join(f.bridge, 'running.json')), 5000);
+  const restarted = launchBackend(f.environment);
+  f.track(restarted);
+  const next = await until(() => {
+    const file = path.join(f.bridge, 'running.json');
+    if (!fs.existsSync(file)) return false;
+    const current = JSON.parse(fs.readFileSync(file));
+    return current.pid !== record.pid && current.build.id === record.build.id && current;
+  }, 12000);
+  assert.equal(
+    fs.readdirSync(path.join(f.target, 'runtime')).some((name) => name.startsWith('node.exe.old-')),
+    false,
+  );
+  console.log(
+    JSON.stringify({
+      event: 'occupied-runtime-preserved-and-cleaned',
+      backend: isRust ? 'rust' : 'node',
+      occupantPid: occupant.child.pid,
+      oldFiles: parked.length,
+      restartedPid: next.pid,
+    }),
+  );
+  return next;
+}
 const privateSentinel = (f) =>
   path.join(process.platform === 'win32' ? f.target : f.bridge, 'private/sentinel');
 function metadata(f, extra = {}) {
@@ -132,7 +203,30 @@ for (const field of ['build', 'sequence'])
   });
 test('更新黑盒：真实下载校验换包换进程，健康检查和发现目录交接', { timeout: 90000 }, async (t) => {
   const f = await packageFixture(t);
-  const incoming = await packageArchive(f);
+  const occupant = await occupyRuntime(f);
+  const incoming = await packageArchive(f, async (source) => {
+    if (!occupant || isRust) return;
+    const native = path.join(source, 'codex-switcher.exe');
+    fs.copyFileSync(rustBinary(), native);
+    fs.copyFileSync(
+      path.join(path.dirname(rustBinary()), 'upgrade-bridge.exe'),
+      path.join(source, 'runtime/node.exe'),
+    );
+    const build = JSON.parse(
+      execFileSync(native, ['--build-info'], {
+        env: { ...process.env, SWITCHER_WEB_ROOT: path.join(source, 'web') },
+        encoding: 'utf8',
+        windowsHide: true,
+      }),
+    );
+    write(
+      path.join(source, 'src/platform/build-info.cjs'),
+      'exports.buildInfo=()=>(' + JSON.stringify(build) + ');\n',
+    );
+    const manifest = JSON.parse(fs.readFileSync(path.join(source, 'release-files.json')));
+    manifest.push('codex-switcher.exe');
+    write(path.join(source, 'release-files.json'), JSON.stringify(manifest));
+  });
   write(path.join(f.target, 'obsolete.txt'), 'old entry');
   const oldFiles = JSON.parse(fs.readFileSync(path.join(f.target, 'release-files.json')));
   oldFiles.push('obsolete.txt');
@@ -145,12 +239,23 @@ test('更新黑盒：真实下载校验换包换进程，健康检查和发现�
       : null;
   await api(f, 'checkUpdate', {});
   await api(f, 'installUpdate', {});
+  console.log(JSON.stringify({ event: 'update-staged', root: f.root, build: incoming.build }));
   const record = await until(() => {
+    const resultFile = path.join(f.bridge, 'updates/result.json');
+    if (fs.existsSync(resultFile)) {
+      const result = JSON.parse(fs.readFileSync(resultFile));
+      if (result.error) throw Error(result.error);
+    }
     const file = path.join(f.bridge, 'running.json');
     if (!fs.existsSync(file)) return false;
     const r = JSON.parse(fs.readFileSync(file));
     return r.build.id === incoming.build.id && r;
-  }, 45000);
+  }, 45000).catch((error) => {
+    const log = path.join(f.bridge, 'logs/switcher.log');
+    throw Error(
+      error.message + '\n' + (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : 'no log'),
+    );
+  });
   await until(() => {
     const file = path.join(f.bridge, 'logs/switcher.log');
     return fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes('"status":"done"');
@@ -187,6 +292,7 @@ test('更新黑盒：真实下载校验换包换进程，健康检查和发现�
   );
   assert.equal(fs.readFileSync(old, 'utf8'), 'old entry');
   assert.deepEqual(f.requests, ['/release.json', '/' + f.asset]);
+  await verifyOldCleanup(f, record, occupant);
   console.log(
     JSON.stringify({
       event: 'update-replaced',

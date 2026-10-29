@@ -269,6 +269,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
         return Ok(());
     }
+    crate::update::cleanup_old(&project_root())?;
     let started = Instant::now();
     let explicit_bridge = crate::migration::configured_home();
     let bridge = crate::migration::data_home();
