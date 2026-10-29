@@ -115,9 +115,15 @@ function start(project, bridge, copiedLocal) {
         for (const id of imported) accountIds.add(id);
         sources.push(source);
       } catch (error) {
-        errorText = error.message;
-        worker.kill();
-        return;
+        sources.push(
+          events.redact({
+            path: message.source,
+            failed: true,
+            error: error.message,
+            accounts: 0,
+            apis: 0,
+          }),
+        );
       }
       const used = process.cpuUsage(cpu);
       mergeCpuMs += (used.user + used.system) / 1000;
@@ -126,7 +132,7 @@ function start(project, bridge, copiedLocal) {
         completed: true,
         at: new Date().toISOString(),
         copiedLocal,
-        folders: sources.length,
+        folders: sources.filter((source) => !source.failed).length,
         accounts: accountIds.size,
         apis: sources.reduce((n, s) => n + s.apis, 0),
         durationMs: performance.now() - started,

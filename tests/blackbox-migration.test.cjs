@@ -98,17 +98,24 @@ function setup({ root, home, environment }) {
   environment.SWITCHER_BLACKBOX_PROJECT = install;
   environment.SWITCHER_WEB_ROOT = path.join(install, 'web');
 }
-for (const legacyDefault of [false, true]) {
+for (const { legacyDefault, badCopy } of [{}, { legacyDefault: true }, { badCopy: true }]) {
   test(
-    legacyDefault
-      ? '双后台黑盒：seq136传入规范化private时首进程立即迁移'
-      : '双后台黑盒：Windows统一目录只读合并旧副本，较新账号与冲突API保留且只迁移一次',
+    badCopy
+      ? '双后台黑盒：坏副本记录失败后继续合并好副本，完成标记阻止重启重扫'
+      : legacyDefault
+        ? '双后台黑盒：seq136传入规范化private时首进程立即迁移'
+        : '双后台黑盒：Windows统一目录只读合并旧副本，较新账号与冲突API保留且只迁移一次',
     { skip: process.platform !== 'win32', timeout: 40000 },
     async (t) => {
       let before;
       const f = await startBackend(t, {
         setup(input) {
           setup(input);
+          if (badCopy) {
+            const bad = path.join(input.root, 'volumes/z-bad');
+            oldCopy(bad, ['bad'], '03', 'bad');
+            write(path.join(bad, 'private/accounts/index.json'), [{ id: '../invalid' }]);
+          }
           if (legacyDefault)
             input.environment.BRIDGE_HOME =
               path.join(input.root, 'volumes/one/private') +
@@ -127,6 +134,12 @@ for (const legacyDefault of [false, true]) {
       const result = await completed(marker);
       assert.equal(result.completed, true);
       assert.equal(result.folders, 2);
+      if (badCopy) {
+        const failed = result.sources.filter((source) => source.failed);
+        assert.equal(failed.length, 1);
+        assert.equal(failed[0].path.replace(/\\/g, '/'), '~/volumes/z-bad/private');
+        assert.match(failed[0].error, /账号 ID 无效/);
+      }
       assert.deepEqual(
         read(path.join(data, 'accounts/index.json'))
           .map((r) => r.id)

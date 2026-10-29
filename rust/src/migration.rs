@@ -383,7 +383,13 @@ mod windows {
         for source in scan.sources {
             let _guard = app.accounts.mutation.lock().await;
             let before = cpu_ms()?;
-            sources.push(merge(&source, &app.bridge, &mut ids)?);
+            let result = match merge(&source, &app.bridge, &mut ids) {
+                Ok(result) => result,
+                Err(error) => crate::diagnostics::redact(
+                    &json!({"path":source,"failed":true,"error":error.to_string(),"accounts":0,"apis":0}),
+                ),
+            };
+            sources.push(result);
             cpu += cpu_ms()? - before;
             drop(_guard);
             tokio::task::yield_now().await;
@@ -392,7 +398,11 @@ mod windows {
             .iter()
             .map(|s| s["apis"].as_u64().unwrap())
             .sum::<u64>();
-        let result = json!({"completed":true,"at":crate::diagnostics::now(),"copiedLocal":copied,"folders":sources.len(),"accounts":ids.len(),"apis":apis,"durationMs":started.elapsed().as_secs_f64()*1000.0,"cpuMs":cpu,"skipped":scan.skipped,"sources":sources});
+        let folders = sources
+            .iter()
+            .filter(|source| source["failed"] != true)
+            .count();
+        let result = json!({"completed":true,"at":crate::diagnostics::now(),"copiedLocal":copied,"folders":folders,"accounts":ids.len(),"apis":apis,"durationMs":started.elapsed().as_secs_f64()*1000.0,"cpuMs":cpu,"skipped":scan.skipped,"sources":sources});
         write_json(&app.bridge.join("migrated.json"), &result)?;
         crate::diagnostics::log(&app.bridge, "data.migrate", result)
     }
