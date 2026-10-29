@@ -1,9 +1,12 @@
 #import <Foundation/Foundation.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 int main(int argc, char **argv) {
   @autoreleasepool {
     for (int i=1; i<argc; i++) if (!strcmp(argv[i], "--version")) {
+      const char *log=getenv("SWITCHER_FAKE_CODEX_VERSION_LOG");
+      if(log && *log){FILE *file=fopen(log,"a");if(!file){perror(log);return 1;}fputs("version\n",file);fclose(file);}
       puts("codex-fixture 0.1.0"); return 0;
     }
     NSDictionary *environment=[NSProcessInfo processInfo].environment;

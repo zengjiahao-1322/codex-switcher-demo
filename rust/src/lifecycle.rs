@@ -112,16 +112,7 @@ fn windows_uninstaller(
 }
 
 pub fn paths() -> (PathBuf, PathBuf) {
-    let root = instance::project_root();
-    let bridge = env::var_os("BRIDGE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            if cfg!(windows) {
-                root.join("private")
-            } else {
-                crate::platform::user_home().join("Library/Application Support/CodexApiSwitcher")
-            }
-        });
+    let bridge = crate::migration::data_home();
     let settings = config_store::read_json(&bridge.join("settings.json")).unwrap_or(Value::Null);
     let home = env::var_os("BRIDGE_CODEX_HOME")
         .map(PathBuf::from)
@@ -158,7 +149,7 @@ pub fn clean_records(app: &App) -> io::Result<()> {
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
         .or_else(|| {
-            env::var_os("BRIDGE_HOME")
+            crate::migration::configured_home()
                 .is_none()
                 .then(|| crate::platform::user_home().join(".codex-api-switcher"))
         });

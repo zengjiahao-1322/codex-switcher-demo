@@ -61,15 +61,21 @@ function extract(zip, to) {
       shell = path.join(root, 'shell');
     const env = {
       ...process.env,
+      LOCALAPPDATA: path.join(root, 'local'),
+      APPDATA: path.join(root, 'roaming'),
+      HOME: path.join(root, 'profile'),
+      USERPROFILE: path.join(root, 'profile'),
       BRIDGE_HOME: bridge,
       CODEX_HOME: home,
       BRIDGE_CODEX_HOME: home,
       BRIDGE_HERMES_HOME: path.join(root, 'no-hermes'),
       BRIDGE_DISCOVERY_DIR: discovery,
       SWITCHER_TEST_SHELL_ROOT: shell,
+      SWITCHER_TEST_MIGRATION_ROOTS: JSON.stringify([root]),
       SWITCHER_TEST_NO_OPEN: '1',
       NO_PROXY: '127.0.0.1,localhost',
       no_proxy: '127.0.0.1,localhost',
+      HTTPS_PROXY: 'http://127.0.0.1:9',
     };
     const released = JSON.parse(
       cp.execFileSync(
@@ -79,6 +85,10 @@ function extract(zip, to) {
       ),
     );
     assert.equal(released.sequence, 136);
+    const reservation = require('node:net').createServer();
+    await new Promise((resolve) => reservation.listen(0, '127.0.0.1', resolve));
+    env.BRIDGE_PORT = String(reservation.address().port);
+    await new Promise((resolve) => reservation.close(resolve));
     report.releasedBuild = released;
     const native = JSON.parse(
       cp.execFileSync(path.join(source, 'codex-switcher.exe'), ['--build-info'], {
@@ -184,10 +194,12 @@ function extract(zip, to) {
     }
     assert.equal((await api('checkUpdate')).status, 'available');
     await api('installUpdate');
+    const data = path.join(env.LOCALAPPDATA, 'CodexSwitcher');
     const record = await until(
       () => {
-        if (!fs.existsSync(running)) return;
-        const r = JSON.parse(fs.readFileSync(running));
+        const migratedRunning = path.join(data, 'running.json');
+        if (!fs.existsSync(migratedRunning)) return;
+        const r = JSON.parse(fs.readFileSync(migratedRunning));
         return r.build?.id === native.id && r;
       },
       'native running record: ' + errors,
@@ -205,7 +217,16 @@ function extract(zip, to) {
       });
     assert.equal((await res.json()).runtime, 'rust');
     for (const n of kept)
-      assert.equal(fs.readFileSync(path.join(bridge, n)).toString('base64'), before[n]);
+      for (const directory of [bridge, data])
+        assert.equal(fs.readFileSync(path.join(directory, n)).toString('base64'), before[n]);
+    const migrated = await until(
+      () =>
+        fs.existsSync(path.join(data, 'migrated.json')) &&
+        JSON.parse(fs.readFileSync(path.join(data, 'migrated.json'))),
+      'migration completion',
+    );
+    assert.equal(migrated.completed, true);
+    assert.equal(migrated.copiedLocal, true);
     assert.equal(
       fs.readFileSync(path.join(home, 'config.toml'), 'utf8'),
       '# keep user text\nmodel = "fixture"\n',
@@ -241,12 +262,16 @@ function extract(zip, to) {
       'old-process-exited',
       'native-health',
       'private-bytes-preserved',
+      'legacy-private-env-migrated-on-first-process',
+      'unified-data-bytes-preserved',
       'config-full-text-preserved',
       'discovery-handover',
       'TEMP-COM-shortcut-target',
       'TEMP-registration-target',
     ];
     report.native = native;
+    report.migrated = migrated;
+    report.data = data;
     report.oldPid = old.pid;
     report.newPid = newPid;
     report.requests = requests;

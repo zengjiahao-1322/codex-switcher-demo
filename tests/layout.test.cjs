@@ -57,7 +57,7 @@ test('仅复制发布清单也能从稳定入口启动并提供网页，不依�
     cwd: root,
     env: {
       ...process.env,
-      BRIDGE_HOME: path.join(root, 'private'),
+      BRIDGE_HOME: path.join(root, 'isolated-data'),
       BRIDGE_CODEX_HOME: home,
       BRIDGE_HERMES_HOME: path.join(root, 'no-hermes'),
       BRIDGE_DISCOVERY_DIR: path.join(root, 'discovery'),

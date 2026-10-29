@@ -10,13 +10,13 @@
 
 需要 Codex 桌面版或 OpenAI 官方 Codex 编辑器扩展，任选一种。桌面包自带 Node.js 和依赖，无需另装开发环境。
 
-| 平台              | 下载                                                                                                                            | 启动                                                |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Windows x64       | [Windows 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-windows-x64.zip)    | 推荐运行 `install.cmd`；也可完整解压后双击 `Start.cmd`，首次启动会静默创建桌面图标    |
-| Mac Apple Silicon | [Mac M 系列包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-macos-arm64.zip)  | 运行 `Install.command`，或打开 `Codex Switcher.app` |
-| Mac Intel         | [Mac Intel 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-macos-x64.zip)    | 同上                                                |
-| 本机伴随扩展      | [Companion VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-companion.vsix) | 在本机编辑器安装并重载已有窗口                      |
-| 远端代理          | [Remote Agent VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-remote.vsix) | 通过远程页安装，或在 SSH 服务器侧安装               |
+| 平台              | 下载                                                                                                                            | 启动                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Windows x64       | [Windows 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-windows-x64.zip)    | 推荐运行 `install.cmd`；也可完整解压后双击 `Start.cmd`，首次启动会静默创建桌面图标 |
+| Mac Apple Silicon | [Mac M 系列包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-macos-arm64.zip)  | 运行 `Install.command`，或打开 `Codex Switcher.app`                                |
+| Mac Intel         | [Mac Intel 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-macos-x64.zip)    | 同上                                                                               |
+| 本机伴随扩展      | [Companion VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-companion.vsix) | 在本机编辑器安装并重载已有窗口                                                     |
+| 远端代理          | [Remote Agent VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-remote.vsix) | 通过远程页安装，或在 SSH 服务器侧安装                                              |
 
 五个下载均附 SHA-256 校验文件。不要只取出启动脚本；运行时需保留完整目录。Mac 使用 ad-hoc 签名，首次打开可能需在“系统设置 → 隐私与安全性”允许，尚无 Apple Developer ID 签名或公证。
 
@@ -53,16 +53,16 @@
 
 已安装 `0.1.4` 可通过页面“检查更新”升级到 `0.1.5`。若检查更新因网络或证书错误失败，可手动下载安装。升级后在“编辑器与诊断”点击“一键更新扩展”，再到“远程服务器”页更新远端代理；旧代理版本不同会提示需要更新。
 
-更新时保留原数据目录，并同时更新伴随扩展及远端代理。Windows 解压版请保留 `private/`，安装版运行新安装器；Mac 使用 `Install.command`。自定义数据目录继续沿用原路径。
+更新时保留原数据目录，并同时更新伴随扩展及远端代理。0.1.6 测试版的 Windows 数据统一保存在 `%LOCALAPPDATA%/CodexSwitcher/`：首次启动复制本安装目录的 `private/`，随后在后台只读合并找到的旧副本账号与 API，不删除旧数据。Mac 使用 `Install.command`，自定义数据目录继续沿用原路径。
 
-| 内容               | 默认位置                                          |
-| ------------------ | ------------------------------------------------- |
-| Codex 配置与登录   | `~/.codex`，尊重 `CODEX_HOME`，界面可选目录       |
-| Windows 解压版数据 | 工具目录的 `private/`                             |
-| Windows 安装版数据 | `%LOCALAPPDATA%/CodexApiSwitcher/private/`        |
-| Mac 数据           | `~/Library/Application Support/CodexApiSwitcher/` |
+| 内容                         | 默认位置                                          |
+| ---------------------------- | ------------------------------------------------- |
+| Codex 配置与登录             | `~/.codex`，尊重 `CODEX_HOME`，界面可选目录       |
+| Windows 数据（0.1.6 测试版） | `%LOCALAPPDATA%/CodexSwitcher/`                   |
+| Windows 旧版数据             | 工具目录的 `private/`（迁移后仍保留）             |
+| Mac 数据                     | `~/Library/Application Support/CodexApiSwitcher/` |
 
-`BRIDGE_HOME` 指定工具数据目录，`BRIDGE_CODEX_HOME` 强制指定 Codex 目录，`CODEX_EXE` 指定官方运行时。发布包不包含个人账号、密钥或聊天。诊断日志仅本机保存，导出时脱敏，不自动上传。
+`BRIDGE_HOME` 指定工具数据目录；Windows 下若规范化后仍是本安装的 `private/`，按旧版默认目录迁移到统一目录。`BRIDGE_CODEX_HOME` 强制指定 Codex 目录，`CODEX_EXE` 指定官方运行时。发布包不包含个人账号、密钥或聊天。诊断日志仅本机保存，导出时脱敏，不自动上传。
 
 ## 验证与开发
 

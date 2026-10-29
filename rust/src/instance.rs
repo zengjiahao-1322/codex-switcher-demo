@@ -270,17 +270,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let started = Instant::now();
-    let explicit_bridge = env::var_os("BRIDGE_HOME");
-    let bridge = explicit_bridge
-        .clone()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            if cfg!(windows) {
-                project_root().join("private")
-            } else {
-                platform::user_home().join("Library/Application Support/CodexApiSwitcher")
-            }
-        });
+    let explicit_bridge = crate::migration::configured_home();
+    let bridge = crate::migration::data_home();
+    let copied_local = crate::migration::prepare(&project_root(), &bridge)?;
     let settings: Value = fs::read(bridge.join("settings.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -500,6 +492,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
     open_url(connection["url"].as_str().unwrap())?;
     let app = Arc::new(app);
+    crate::migration::start(app.clone(), copied_local);
     if let (Some(directory), Some(sequence)) =
         (discovery, runtime()["sequence"].as_u64().filter(|n| *n > 0))
     {

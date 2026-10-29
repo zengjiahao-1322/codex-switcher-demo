@@ -1,7 +1,35 @@
 //! Configuration state assembled from compatible provider storage and disk files.
 use crate::{accounts::claims, server::App};
 use serde_json::{Value, json};
-use std::{fs, io, path::PathBuf};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
+};
+struct Version {
+    exe: PathBuf,
+    at: Instant,
+    value: Option<String>,
+}
+fn codex_version(bridge: &Path, exe: PathBuf) -> Option<String> {
+    static VERSION: OnceLock<Mutex<Option<Version>>> = OnceLock::new();
+    let mut cache = VERSION.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    if let Some(previous) = cache.as_ref()
+        && previous.exe == exe
+        && previous.at.elapsed() < Duration::from_secs(60)
+    {
+        return previous.value.clone();
+    }
+    let at = Instant::now();
+    let value = crate::platform::codex_version(bridge).ok();
+    *cache = Some(Version {
+        exe,
+        at,
+        value: value.clone(),
+    });
+    value
+}
 fn json_file(path: PathBuf) -> io::Result<Value> {
     match fs::read(path) {
         Ok(bytes) => serde_json::from_slice(&bytes).map_err(io::Error::other),
@@ -209,7 +237,7 @@ impl App {
         };
         let version = runtime
             .ok()
-            .and_then(|_| crate::platform::codex_version(&self.bridge).ok());
+            .and_then(|exe| codex_version(&self.bridge, exe));
         let effect = json_file(self.bridge.join("effect.json"))?;
         let effect = if effect["configHash"].as_str()
             == Some(format!("{:x}", Sha256::digest(text.as_bytes())).as_str())
@@ -223,6 +251,7 @@ impl App {
             "build":build,
             "update":crate::update::snapshot(self),
             "dataDirProtection":self.protection,
+            "migrated":crate::migration::summary(&self.bridge)?,
             "environment":environment,
             "current":{
                 "official":official,

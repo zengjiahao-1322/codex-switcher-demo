@@ -38,6 +38,18 @@ export async function refresh() {
     : '未能限制数据目录的访问权限，本机其他用户可能读到保存的登录凭证。建议把切换器放在你自己的用户目录下再启动。\n' +
       protection.error;
   if (state.notice) providerStatus(state.notice);
+  const migrated = state.migrated;
+  const migrationKey = migrated && 'migration:' + migrated.at;
+  $('migration-notice').hidden =
+    !migrated?.folders || localStorage.getItem(migrationKey) === 'closed';
+  if (migrated?.folders) {
+    $('migration-text').textContent =
+      `已从 ${migrated.folders} 个旧文件夹合并 ${migrated.accounts} 个账号、${migrated.apis} 个 API`;
+    $('migration-close').onclick = () => {
+      localStorage.setItem(migrationKey, 'closed');
+      $('migration-notice').hidden = true;
+    };
+  }
 }
 // 首屏三个请求互不依赖，同时发出。全部结束后再处理失败，
 // 避免先返回的失败提示被后返回的成功渲染覆盖（结果不能取决于返回顺序）。

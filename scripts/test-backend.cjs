@@ -29,6 +29,7 @@ const httpPatterns = {
   'blackbox-extension-install.test.cjs': '.*',
   'blackbox-threads-native.test.cjs': '.*',
   'blackbox-framework.test.cjs': '.*',
+  'blackbox-migration.test.cjs': '.*',
   'blackbox-diagnostics.test.cjs': '.*',
   'blackbox-platform.test.cjs': '.*',
   'blackbox-config.test.cjs': '.*',

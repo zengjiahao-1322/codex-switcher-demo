@@ -286,6 +286,7 @@ function createService({
       build,
       update: updates.state(),
       dataDirProtection,
+      migrated: require('../platform/data-migration.cjs').summary(bridgeHome),
       environment: (() => {
         try {
           const exe = findCodex({ dataHome: bridgeHome });
@@ -965,6 +966,11 @@ function createService({
         runtime,
         proxySource: platform.proxySource(codexHome),
         codexHome,
+        installDir: projectDir,
+        dataDir: bridgeHome,
+        migrated: require('../accounts/accounts.cjs').readJson(
+          path.join(bridgeHome, 'migrated.json'),
+        ),
         dataDirProtection: { ok: dataDirProtection.ok },
         current: currentSource(readConfig()),
         clients: clients.diagnosticClients(

@@ -21,7 +21,9 @@ if ($env:BRIDGE_UNINSTALL_PID) {
   while (Get-Process -Id ([int]$env:BRIDGE_UNINSTALL_PID) -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 200 }
 }
 
-$running = Join-Path $InstallDir 'private\running.json'
+$customData = $env:BRIDGE_HOME -and [IO.Path]::GetFullPath($env:BRIDGE_HOME).TrimEnd('\') -ine [IO.Path]::GetFullPath((Join-Path $InstallDir 'private')).TrimEnd('\')
+$DataDir = if ($customData) { [IO.Path]::GetFullPath($env:BRIDGE_HOME) } else { Join-Path $env:LOCALAPPDATA 'CodexSwitcher' }
+$running = Join-Path $DataDir 'running.json'
 if (Test-Path -LiteralPath $running) {
   $record = Get-Content -LiteralPath $running -Raw | ConvertFrom-Json
   $servicePid = [int]$record.pid
@@ -59,5 +61,10 @@ Get-ChildItem $startup -Filter '*.lnk' -ErrorAction SilentlyContinue | ForEach-O
 Step "Removing $InstallDir"
 Get-ChildItem -LiteralPath $InstallDir -Force | Where-Object { -not ($KeepData -and $_.Name -eq 'private') } | ForEach-Object { $targetPath = [IO.Path]::GetFullPath($_.FullName); if ([IO.Path]::GetDirectoryName($targetPath) -ne $InstallDir) { throw 'Uninstall target outside app folder' }; Remove-Item -LiteralPath $targetPath -Recurse -Force -ErrorAction SilentlyContinue }
 if (-not $KeepData) { Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction SilentlyContinue }
+if (-not $KeepData -and (Test-Path -LiteralPath $DataDir)) {
+  $resolvedData = [IO.Path]::GetFullPath($DataDir).TrimEnd('\')
+  if ($resolvedData -eq [IO.Path]::GetPathRoot($resolvedData).TrimEnd('\') -or $resolvedData -eq [IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\')) { throw 'Refusing to remove a user or drive root.' }
+  Remove-Item -LiteralPath $resolvedData -Recurse -Force
+}
 Write-Host 'Codex API Switcher has been uninstalled.' -ForegroundColor Green
-if ($KeepData) { Write-Host "Saved configs were kept in $(Join-Path $InstallDir 'private')." }
+if ($KeepData) { Write-Host "Saved configs were kept in $DataDir." }

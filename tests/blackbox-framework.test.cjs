@@ -163,6 +163,23 @@ test('双后台黑盒：GET state读取隔离配置且返回可用运行摘要',
   assert.equal(state.mcp.installed, false);
 });
 
+test('双后台黑盒：反复刷新state复用同一程序的版本查询', async (t) => {
+  const f = await startBackend(t, {
+    setup({ root, environment }) {
+      environment.SWITCHER_FAKE_CODEX_VERSION_LOG = path.join(root, 'versions.log');
+    },
+  });
+  for (let i = 0; i < 4; i++) {
+    const response = await f.api('state');
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).codexVersion, 'codex-fixture 0.1.0');
+  }
+  assert.equal(
+    fs.readFileSync(path.join(f.root, 'versions.log'), 'utf8').trim().split('\n').length,
+    1,
+  );
+});
+
 test('双后台黑盒：API方法、JSON类型、正文大小和解析错误保持Node协议', async (t) => {
   const f = await startBackend(t);
   const headers = { Authorization: 'Bearer ' + f.token };

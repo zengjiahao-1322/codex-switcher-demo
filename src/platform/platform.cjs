@@ -7,10 +7,17 @@ const fs = require('node:fs'),
   cp = require('node:child_process');
 const mac = process.platform === 'darwin';
 const dataHome = () =>
-  process.env.BRIDGE_HOME ||
+  (process.env.BRIDGE_HOME && !require('./data-migration.cjs').usesDefault(PROJECT_ROOT)
+    ? process.env.BRIDGE_HOME
+    : null) ||
   (mac
     ? path.join(os.homedir(), 'Library', 'Application Support', 'CodexApiSwitcher')
-    : path.join(PROJECT_ROOT, 'private'));
+    : process.platform === 'win32'
+      ? path.join(
+          process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData/Local'),
+          'CodexSwitcher',
+        )
+      : path.join(PROJECT_ROOT, 'private'));
 function settings() {
   try {
     return JSON.parse(fs.readFileSync(path.join(dataHome(), 'settings.json'), 'utf8'));

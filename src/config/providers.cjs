@@ -207,6 +207,8 @@ function isLocal(p) {
   }
 }
 module.exports = {
+  load,
+  save,
   list,
   add,
   update,

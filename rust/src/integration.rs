@@ -395,25 +395,29 @@ pub fn desktop(discovery: &Path, sequence: u64) -> io::Result<()> {
             c: 0x424c,
             d: [0xb0, 0x29, 0x7f, 0xe9, 0x9a, 0x87, 0xc6, 0x41],
         };
-        let mut directory = std::ptr::null_mut();
-        let status = unsafe { SHGetKnownFolderPath(&id, 0, std::ptr::null_mut(), &mut directory) };
-        if status < 0 {
-            return Err(io::Error::other("Desktop folder unavailable"));
-        }
-        let mut length = 0;
-        while unsafe { *directory.add(length) } != 0 {
-            length += 1;
-        }
-        let mut directory_path = PathBuf::from(String::from_utf16_lossy(unsafe {
-            std::slice::from_raw_parts(directory, length)
-        }));
-        unsafe {
-            CoTaskMemFree(directory.cast());
-        }
-        if let Some(root) = env::var_os("SWITCHER_TEST_SHELL_ROOT") {
-            directory_path = PathBuf::from(root).join("Desktop");
-            fs::create_dir_all(&directory_path)?;
-        }
+        let directory_path = if let Some(root) = env::var_os("SWITCHER_TEST_SHELL_ROOT") {
+            let path = PathBuf::from(root).join("Desktop");
+            fs::create_dir_all(&path)?;
+            path
+        } else {
+            let mut directory = std::ptr::null_mut();
+            let status =
+                unsafe { SHGetKnownFolderPath(&id, 0, std::ptr::null_mut(), &mut directory) };
+            if status < 0 {
+                return Err(io::Error::other("Desktop folder unavailable"));
+            }
+            let mut length = 0;
+            while unsafe { *directory.add(length) } != 0 {
+                length += 1;
+            }
+            let directory_path = PathBuf::from(String::from_utf16_lossy(unsafe {
+                std::slice::from_raw_parts(directory, length)
+            }));
+            unsafe {
+                CoTaskMemFree(directory.cast());
+            }
+            directory_path
+        };
         let link = directory_path.join("Codex API Switcher.lnk");
         if link.exists() {
             let old = windows::shortcut_directory(&link)?;

@@ -5,7 +5,11 @@ using System.Web.Script.Serialization;
 public static class FixtureCodex {
   public static void Main(string[] args) {
     Console.InputEncoding=new System.Text.UTF8Encoding(false);Console.OutputEncoding=new System.Text.UTF8Encoding(false);
-    if (Array.IndexOf(args, "--version") >= 0) {Console.WriteLine("codex-fixture 0.1.0");return;}
+    if (Array.IndexOf(args, "--version") >= 0) {
+      var log=Environment.GetEnvironmentVariable("SWITCHER_FAKE_CODEX_VERSION_LOG");
+      if(!String.IsNullOrEmpty(log))File.AppendAllText(log,DateTime.UtcNow.ToString("o")+"\n");
+      Console.WriteLine("codex-fixture 0.1.0");return;
+    }
     if (!String.IsNullOrEmpty(Environment.GetEnvironmentVariable("SWITCHER_FAKE_CODEX_SCENARIO"))) {
       var start = new System.Diagnostics.ProcessStartInfo(Environment.GetEnvironmentVariable("SWITCHER_FIXTURE_NODE"), "\""+Environment.GetEnvironmentVariable("SWITCHER_FIXTURE_SCRIPT")+"\"");
       start.UseShellExecute=false; start.CreateNoWindow=true;

@@ -46,6 +46,7 @@
   "src/platform/build-info.cjs",
   "src/platform/compatibility.cjs",
   "src/platform/data-protection.cjs",
+  "src/platform/data-migration.cjs",
   "src/platform/mac-processes.cjs",
   "src/platform/platform.cjs",
   "src/platform/process-stop.cjs",

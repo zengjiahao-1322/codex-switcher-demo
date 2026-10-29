@@ -23,6 +23,10 @@ const home = path.join(root, 'home'),
 fs.mkdirSync(home);
 fs.mkdirSync(bridge);
 fs.writeFileSync(
+  path.join(bridge, 'migrated.json'),
+  JSON.stringify({ folders: 2, accounts: 3, apis: 4, at: '2026-10-29T00:00:00Z' }),
+);
+fs.writeFileSync(
   path.join(home, 'config.toml'),
   'model="fixture-api"\nmodel_provider="hermes_bridge"\n',
 );
@@ -144,6 +148,15 @@ async function loaded(page, url) {
     await loaded(page, base + '/#fixture-session-one');
     assert.equal(new URL(page.url()).hash, '');
     checked('current-launch-token-establishes-session');
+    assert.equal(await page.locator('#migration-notice').isVisible(), true);
+    assert.equal(
+      await page.locator('#migration-text').innerText(),
+      '已从 2 个旧文件夹合并 3 个账号、4 个 API',
+    );
+    await page.locator('#migration-close').click();
+    await loaded(page, base + '/#fixture-session-one');
+    assert.equal(await page.locator('#migration-notice').isHidden(), true);
+    checked('migration-summary-closes-and-stays-dismissed');
     await page.locator('#update-banner').waitFor({ state: 'visible' });
     assert.ok((await page.locator('#update-detail').innerText()).includes('第 9 版'));
     assert.equal(await page.locator('#update-install').isVisible(), true);

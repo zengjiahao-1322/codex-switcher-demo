@@ -27,7 +27,7 @@ flowchart LR
   H[业务路由\nservice.cjs]
   CORE[配置切换核心\ncore.cjs + switch-state.cjs]
   STORE[(Codex home\nconfig.toml / auth.json)]
-  PROV[(API 供应商配置\nproviders.cjs + private/)]
+  PROV[(API 供应商配置\nproviders.cjs + 数据目录)]
   ACC[官方账号管理\naccounts.cjs]
   AUTH[(账号副本\nbridgeHome/accounts/<id>/auth.json)]
   RPC[独立 Codex app-server\n每个账号一次独立进程]
@@ -117,6 +117,8 @@ flowchart LR
 `src/diagnostics/event-log.cjs` 集中处理脱敏、同步追加和日志轮换。切换任务记录开始、客户端快照、逐步骤耗时与终态；服务只在窗口关联状态改变时记录心跳事件；官方登录、准备及额度读取记录各自的错误类型。进程链取自同一次扫描的 `inventory.ancestry`，最多八级，不记录完整命令行、环境变量、配置正文或对话正文。
 
 日志保存在数据目录的 `logs/switcher.log`，超过 2 MiB 后于下一次写入时轮换，最多保留三份。`exportDiagnostics` 读取实时环境头与最近 2000 行，页面通过 Blob 下载；不会上传日志。公共 `pid` 是写入进程，`companion.state.editorPid` 是编辑器宿主，避免两者混淆。`switch.end.reload` 如实保存任务结束时已经观测到的窗口状态，不将仍在等待的重载写成完成。
+
+0.1.6 测试版将 Windows 默认数据放到 `%LOCALAPPDATA%/CodexSwitcher`。启动先复制本安装 `private/`，监听就绪后才低优先级扫描固定盘（深度最多 9，跳过系统、依赖、Git、临时目录和链接），只读合并其他旧副本的账号与 API。账号按 ID 选择刷新较新的凭据；不同内容的同 ID API 改名保留。设置、当前来源和备份只取本安装副本，旧文件保持原样；`migrated.json` 避免重复扫描。诊断头部包含脱敏后的安装目录、数据目录与迁移摘要，`data.migrate` 只记路径和统计，不记凭据。自定义 `BRIDGE_HOME` 及 Mac 路径不变；旧更新器传入本安装 `private/` 时仍视为默认迁移。
 
 ## 运行开销与请求调度（0.1.3）
 

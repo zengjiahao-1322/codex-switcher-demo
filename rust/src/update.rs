@@ -874,7 +874,16 @@ async fn healthy(job: &Job) -> io::Result<()> {
         .build()
         .map_err(io::Error::other)?;
     while Instant::now() < deadline {
-        let running = config_store::read_json(&job.bridge_home.join("running.json"))?;
+        let data = if cfg!(windows) && crate::migration::legacy_home(&job.bridge_home, &job.target)
+        {
+            env::var_os("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| crate::platform::user_home().join("AppData/Local"))
+                .join("CodexSwitcher")
+        } else {
+            job.bridge_home.clone()
+        };
+        let running = config_store::read_json(&data.join("running.json"))?;
         if running["build"]["id"] == job.build
             && let Some((base, token)) = running["url"].as_str().and_then(|s| s.split_once("/#"))
         {

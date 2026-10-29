@@ -10,8 +10,10 @@ const { createServer } = require('./server.cjs'),
 const { log: logEvent } = require('../diagnostics/event-log.cjs');
 const { writeJson } = require('../accounts/accounts.cjs');
 const platform = require('../platform/platform.cjs'),
-  codexHome = platform.codexHome(),
+  migration = require('../platform/data-migration.cjs'),
   bridgeHome = platform.dataHome();
+const copiedLocal = migration.prepare(PROJECT_ROOT, bridgeHome);
+const codexHome = platform.codexHome();
 // Hermes 只作为首次导入来源；不存在也不影响使用。
 const hermesHome =
   process.env.BRIDGE_HERMES_HOME ||
@@ -25,7 +27,9 @@ fs.mkdirSync(bridgeHome, { recursive: true });
 const runningPath = path.join(bridgeHome, 'running.json'),
   noOpen = process.argv.includes('--no-open');
 const discoveryDir =
-  !process.env.BRIDGE_HOME || process.env.BRIDGE_DISCOVERY_DIR
+  !process.env.BRIDGE_HOME ||
+  migration.usesDefault(PROJECT_ROOT) ||
+  process.env.BRIDGE_DISCOVERY_DIR
     ? process.env.BRIDGE_DISCOVERY_DIR || path.join(os.homedir(), '.codex-api-switcher')
     : null;
 let otherInstall = null;
@@ -327,6 +331,7 @@ async function existing() {
       });
     console.log('BRIDGE_READY http://127.0.0.1:' + port);
     openUrl(url);
+    setImmediate(() => migration.start(PROJECT_ROOT, bridgeHome, copiedLocal));
   };
   let handoverResult = null;
   const handleListenError = async (e) => {

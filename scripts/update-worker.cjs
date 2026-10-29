@@ -43,8 +43,13 @@ async function launch(target, job) {
   return child.pid;
 }
 async function healthy(job, timeoutMs = 30000) {
+  const data =
+    job.platform === 'win32' &&
+    path.resolve(job.bridgeHome).toLowerCase() === path.resolve(job.target, 'private').toLowerCase()
+      ? path.join(process.env.LOCALAPPDATA, 'CodexSwitcher')
+      : job.bridgeHome;
   const deadline = Date.now() + timeoutMs,
-    runningFile = path.join(job.bridgeHome, 'running.json');
+    runningFile = path.join(data, 'running.json');
   let detail = '未收到新后台的运行记录';
   while (Date.now() < deadline) {
     if (fs.existsSync(runningFile)) {

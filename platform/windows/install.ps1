@@ -41,7 +41,10 @@ try {
   $AppFiles += 'release-files.json'
 
   # 2. Stop a running instance before overwriting its files.
-  $running = Join-Path $InstallDir 'private\running.json'
+  $customData = $env:BRIDGE_HOME -and [IO.Path]::GetFullPath($env:BRIDGE_HOME).TrimEnd('\') -ine [IO.Path]::GetFullPath((Join-Path $InstallDir 'private')).TrimEnd('\')
+  $dataDir = if ($customData) { $env:BRIDGE_HOME } else { Join-Path $env:LOCALAPPDATA 'CodexSwitcher' }
+  $running = Join-Path $dataDir 'running.json'
+  if (-not (Test-Path -LiteralPath $running)) { $running = Join-Path $InstallDir 'private\running.json' }
   if (Test-Path $running) {
     $old = Get-Content $running -Raw | ConvertFrom-Json
     $oldProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($old.pid)"

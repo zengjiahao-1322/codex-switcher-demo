@@ -111,6 +111,14 @@ async function startBackend(t, options = {}) {
     ...options.environment,
   };
   if (options.setup) await options.setup({ root, home, bridge, environment, fake });
+  const legacyDefault =
+    process.platform === 'win32' &&
+    environment.BRIDGE_HOME &&
+    path.resolve(environment.BRIDGE_HOME).toLowerCase() ===
+      path.resolve(environment.SWITCHER_BLACKBOX_PROJECT || project, 'private').toLowerCase();
+  const activeBridge =
+    (legacyDefault ? null : environment.BRIDGE_HOME) ||
+    path.join(environment.LOCALAPPDATA, 'CodexSwitcher');
   const child = launchBackend(environment);
   const closed = once(child, 'close');
   const dependents = [];
@@ -173,7 +181,7 @@ async function startBackend(t, options = {}) {
         }
       } else if (output.includes('BRIDGE_READY')) {
         clearTimeout(timeout);
-        resolve(JSON.parse(fs.readFileSync(path.join(bridge, 'running.json'), 'utf8')));
+        resolve(JSON.parse(fs.readFileSync(path.join(activeBridge, 'running.json'), 'utf8')));
       }
     });
   });

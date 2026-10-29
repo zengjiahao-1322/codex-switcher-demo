@@ -159,6 +159,9 @@ pub fn export(app: &crate::server::App) -> io::Result<Value> {
         },
         "proxySource":crate::platform::proxy_source(),
         "codexHome":app.codex_home(),
+        "installDir":crate::instance::project_root(),
+        "dataDir":app.bridge,
+        "migrated":crate::accounts::read(&app.bridge.join("migrated.json"),Value::Null)?,
         "dataDirProtection":{
             "ok":app.protection.ok
         },
@@ -298,6 +301,13 @@ pub async fn algorithm(args: &[String]) -> io::Result<()> {
             input["current"].as_u64().unwrap_or(0)
         )),
         Some("windowsProxyEnv") => json!(crate::platform::windows_proxy_env(&input["value"])),
+        Some("migrationScan") => {
+            crate::migration::scan_fixture(
+                Path::new(input["install"].as_str().unwrap()),
+                Path::new(input["bridge"].as_str().unwrap()),
+            )
+            .await?
+        }
         Some("proxySource") => {
             let env =
                 crate::platform::codex_env(std::path::Path::new(input["home"].as_str().unwrap()));
