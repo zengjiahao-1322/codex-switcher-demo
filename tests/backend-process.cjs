@@ -134,7 +134,19 @@ async function startBackend(t, options = {}) {
   });
   const ready = await new Promise((resolve, reject) => {
     let output = '';
-    const timeout = setTimeout(() => reject(Error('Backend startup timed out: ' + stderr)), 10000);
+    const timeout = setTimeout(() => {
+      const log = path.join(bridge, 'logs/switcher.log');
+      reject(
+        Error(
+          'Backend startup timed out: ' +
+            stderr +
+            ' stdout: ' +
+            output +
+            ' log: ' +
+            (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').slice(-4000) : 'missing'),
+        ),
+      );
+    }, options.startupTimeout || 10000);
     const fail = (error) => {
       clearTimeout(timeout);
       reject(error);

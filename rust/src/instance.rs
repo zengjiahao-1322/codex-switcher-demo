@@ -492,6 +492,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap()
         .extend(handover.as_object().unwrap().clone());
     crate::diagnostics::log(&app.bridge, "startup", startup)?;
+    let stop_signal = crate::lifecycle::stop_signal()?;
+    tokio::pin!(stop_signal);
     println!(
         "{}",
         json!({"event":"ready","listenMs":started.elapsed().as_secs_f64()*1000.0,"port":app.port,"url":format!("http://127.0.0.1:{}/#{}",app.port,app.token)})
@@ -531,7 +533,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, _) = tokio::select! {
+            connection = listener.accept() => connection?,
+            _ = &mut stop_signal => {
+                crate::lifecycle::clean_records(&app)?;
+                return Ok(());
+            }
+        };
         let app = app.clone();
         tokio::spawn(async move {
             if let Err(error) = http1::Builder::new()

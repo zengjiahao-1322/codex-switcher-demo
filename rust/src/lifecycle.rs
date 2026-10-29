@@ -153,7 +153,7 @@ fn check(app: &App) -> io::Result<()> {
     Ok(())
 }
 
-fn clean_records(app: &App) -> io::Result<()> {
+pub fn clean_records(app: &App) -> io::Result<()> {
     let discovery = env::var_os("BRIDGE_DISCOVERY_DIR")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
@@ -174,6 +174,24 @@ fn clean_records(app: &App) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+pub fn stop_signal() -> io::Result<impl std::future::Future<Output = ()>> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let mut terminate = signal(SignalKind::terminate())?;
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    Ok(async move {
+        tokio::select! {
+            _ = terminate.recv() => {},
+            _ = interrupt.recv() => {},
+        }
+    })
+}
+
+#[cfg(windows)]
+pub fn stop_signal() -> io::Result<impl std::future::Future<Output = ()>> {
+    Ok(std::future::pending())
 }
 
 pub fn quit(app: Arc<App>) -> io::Result<Value> {

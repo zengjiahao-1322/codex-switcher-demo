@@ -10,7 +10,7 @@ name = "upgrade-bridge"
 path = "src/bin/upgrade-bridge.rs"
 
 [dependencies]
-tokio = { version = "=1.43.0", features = ["net", "rt", "macros", "time", "process", "io-util", "sync"] }
+tokio = { version = "=1.43.0", features = ["net", "rt", "macros", "time", "process", "io-util", "sync", "signal"] }
 hyper = { version = "=1.6.0", features = ["server", "client", "http1"] }
 hyper-util = { version = "=0.1.10", features = ["tokio"] }
 http-body-util = "0.1"

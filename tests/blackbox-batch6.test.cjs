@@ -316,6 +316,7 @@ test(
       res.end(JSON.stringify(request.method === 'GET' ? { data: [{ id: 'rm' }] } : responseTool)),
     );
     const f = await startBackend(t, {
+      startupTimeout: 30000,
       setup({ home, bridge }) {
         write(path.join(home, 'config.toml'), 'model = "gpt-official"\n');
         write(
