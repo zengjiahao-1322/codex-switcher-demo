@@ -23,7 +23,7 @@ export function renderUpdate(u) {
     available: ['有新版本可用', target + notes],
     downloading: ['正在下载更新…', '下载并校验完成后会自动安装，期间可以继续使用。'],
     installing: ['正在安装更新', '切换器会自动重启并打开新页面，这个页面随后可以关闭。'],
-    error: ['更新失败：' + u.error, u.error],
+    error: ['更新失败', u.error],
   };
   // 开发目录用 git 更新，不提示安装；检查失败但没有可装的新版本时，只在设置里说明，不占用首屏。
   const shown =

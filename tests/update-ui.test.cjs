@@ -73,7 +73,7 @@ test('安装失败时提示原因并可重试', async () => {
     }),
   });
   await page.byId('update-install').onclick();
-  assert.equal(page.byId('update-title').textContent, '更新失败：' + update.error);
+  assert.equal(page.byId('update-title').textContent, '更新失败');
   assert.equal(page.byId('update-detail').textContent, '更新校验和不匹配，未修改任何文件。');
   assert.equal(page.byId('update-install').textContent, '重试');
 });
@@ -111,7 +111,7 @@ test('安装失败后重启即在顶部显示原因，没有latest元数据也�
   };
   const page = await runPage({ update, respond: backend(() => update) });
   assert.equal(page.byId('update-banner').hidden, false);
-  assert.equal(page.byId('update-title').textContent, '更新失败：' + update.error);
+  assert.equal(page.byId('update-title').textContent, '更新失败');
   assert.equal(page.byId('update-install').hidden, false);
   assert.equal(page.byId('update-install').textContent, '重试');
 });

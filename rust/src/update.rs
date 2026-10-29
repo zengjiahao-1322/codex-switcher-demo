@@ -49,24 +49,7 @@ fn initial(app: &App) -> State {
     let dev = instance::project_root().join(".git").exists();
     let previous =
         config_store::read_json(&app.bridge.join("updates/result.json")).unwrap_or(Value::Null);
-    let install_error = previous["error"].as_str().map(str::to_owned).or_else(|| {
-        previous
-            .is_null()
-            .then(|| {
-                diagnostics::recent(&app.bridge, 2000)
-                    .ok()
-                    .and_then(|rows| {
-                        rows.into_iter()
-                            .rev()
-                            .find(|row| {
-                                ["update.install", "update.rollback"]
-                                    .contains(&row["event"].as_str().unwrap_or(""))
-                            })
-                            .and_then(|row| row["error"].as_str().map(str::to_owned))
-                    })
-            })
-            .flatten()
-    });
+    let install_error = previous["error"].as_str().map(str::to_owned);
     let mut value = json!({"current":{"version":build["version"],"build":build["id"],"sequence":if dev{Value::Null}else{build["sequence"].clone()}},"dev":dev,"latest":null,"checkedAt":null,"status":if install_error.is_some(){"error"}else{"idle"}});
     if let Some(error) = &install_error {
         value["error"] = json!(error);
