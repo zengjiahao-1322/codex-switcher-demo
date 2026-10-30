@@ -207,12 +207,6 @@ function activate(context) {
   const remoteRestartKey = 'codexSwitcher.remoteRestarts';
   async function planRemoteRestart() {
     if (!sshRemote()) return null;
-    if (!remoteAgent || remoteAgent.protocol < 4)
-      return {
-        method: 'reloadWindow',
-        reason: 'agentUpgrade',
-        notice: '服务器代理已更新，请在该服务器窗口执行一次重载窗口',
-      };
     const now = Date.now(),
       recent = (context.workspaceState.get(remoteRestartKey) || []).filter(
         (at) => now - at < 5 * 60 * 1000,
@@ -239,7 +233,7 @@ function activate(context) {
       return;
     }
     if (reload?.method === 'reloadWindow') {
-      await vscode.window.showInformationMessage(reload.notice || '请在该服务器窗口执行一次重载窗口');
+      void vscode.window.showInformationMessage(reload.notice || '正在重载窗口以启用新代理');
       await context.workspaceState.update('codexSwitcher.lastReload', commandId);
       setTimeout(async () => {
         try {
@@ -333,7 +327,14 @@ function activate(context) {
       fs.rmSync(file, { force: true });
     }
     remoteCheckedAt = 0;
-    const reload = await planRemoteRestart();
+    const reload =
+      !remoteAgent || remoteAgent.protocol < 4
+        ? {
+            method: 'reloadWindow',
+            reason: 'agentUpgrade',
+            notice: '正在重载窗口以启用新代理',
+          }
+        : await planRemoteRestart();
     await ack(c, data, command.id, 'completed', {
       ackResult: { installed: true, reload },
     });

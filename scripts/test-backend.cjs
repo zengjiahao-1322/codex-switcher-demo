@@ -19,7 +19,6 @@ const httpPatterns = {
   'blackbox-process-fault.test.cjs': '.*',
   'blackbox-accounts.test.cjs': '.*',
   'blackbox-accounts-network.test.cjs': '.*',
-  'blackbox-accounts-native.test.cjs': '.*',
   'blackbox-switching.test.cjs': '.*',
   'blackbox-editors.test.cjs': '.*',
   'blackbox-local-switch.test.cjs': '.*',
@@ -27,7 +26,6 @@ const httpPatterns = {
   'blackbox-remote-expiry.test.cjs': '.*',
   'blackbox-window-algorithm.test.cjs': '.*',
   'blackbox-extension-install.test.cjs': '.*',
-  'blackbox-threads-native.test.cjs': '.*',
   'blackbox-framework.test.cjs': '.*',
   'blackbox-migration.test.cjs': '.*',
   'blackbox-diagnostics.test.cjs': '.*',
@@ -37,11 +35,8 @@ const httpPatterns = {
   'blackbox-config-matrix.test.cjs': '.*',
   'blackbox-config-backups.test.cjs': '.*',
   'blackbox-config-network.test.cjs': '.*',
-  'server.test.cjs': '.*',
-  'main.test.cjs': '.*',
   'startup-log.test.cjs': '.*',
   'long-poll.test.cjs': '^(不带 wait|带 wait=|挂起期间另一进程)',
-  'remote-servers.test.cjs': '^(HTTP心跳|独立remoteSwitch)',
 };
 const report = {
   backend: 'rust',

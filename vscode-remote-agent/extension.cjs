@@ -103,20 +103,12 @@ function stopDirectChildren() {
   process.kill(process.pid, 'SIGTERM');
 }
 
-function createAgent({ home, version, extensionPath }) {
+function createAgent({ home, extensionPath }) {
   const startedAt = new Date().toISOString();
   const file = (name) => path.join(home, name);
-  const extensionDir = extensionPath || __dirname,
-    packageFile = path.join(extensionDir, 'package.json'),
-    versionOverride = !extensionPath && version != null;
-  const runtimeVersion = () => {
-    if (versionOverride) return version;
-    try {
-      return JSON.parse(fs.readFileSync(packageFile, 'utf8')).version;
-    } catch {
-      return version;
-    }
-  };
+  const extensionDir = extensionPath,
+    packageFile = path.join(extensionDir, 'package.json');
+  const runtimeVersion = () => JSON.parse(fs.readFileSync(packageFile, 'utf8')).version;
   const content = (name) => (fs.existsSync(file(name)) ? fs.readFileSync(file(name), 'utf8') : '');
   const snapshot = (name) => {
     const text = content(name);
@@ -148,30 +140,12 @@ function createAgent({ home, version, extensionPath }) {
     read: () => snapshot(CONFIG),
     readAuth: () => snapshot(AUTH),
     update(input) {
-      const keys = Object.keys(input || {});
-      if (
-        keys.some(
-          (key) =>
-            !['extensionCjs', 'packageJson', 'extensionSha256', 'packageSha256'].includes(key),
-        ) ||
-        keys.length !== 4 ||
-        typeof input.extensionCjs !== 'string' ||
-        typeof input.packageJson !== 'string' ||
-        typeof input.extensionSha256 !== 'string' ||
-        typeof input.packageSha256 !== 'string'
-      )
-        throw Error('远端代理更新参数无效。');
       if (sha256(input.extensionCjs) !== input.extensionSha256)
         throw Error('远端代理 extension.cjs 校验失败。');
       if (sha256(input.packageJson) !== input.packageSha256)
         throw Error('远端代理 package.json 校验失败。');
-      let packageData;
-      try {
-        packageData = JSON.parse(input.packageJson);
-      } catch {
-        throw Error('远端代理 package.json 无法解析。');
-      }
-      if (packageData.name !== 'codex-switcher-remote' || typeof packageData.version !== 'string')
+      const packageData = JSON.parse(input.packageJson);
+      if (packageData.name !== 'codex-switcher-remote')
         throw Error('远端代理 package.json 内容无效。');
       writeAtomic(path.join(extensionDir, 'extension.cjs'), input.extensionCjs);
       writeAtomic(packageFile, input.packageJson);

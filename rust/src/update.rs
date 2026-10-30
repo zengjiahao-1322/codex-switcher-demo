@@ -1164,8 +1164,7 @@ async fn perform(job: &Job) -> io::Result<()> {
         healthy(job).await?;
         instance::write_json(&result, &json!({"build":job.build,"status":"done"}))?;
         replacement.as_ref().unwrap().complete()?;
-        remove_tree(&previous)?;
-        remove_tree(&job.bridge_home.join("updates/staging"))?;
+        remove_installed(&job.bridge_home.join("updates/staging"))?;
         instance::write_json(
             &job.bridge_home.join("updates/installed-at.json"),
             &json!({"build":job.build,"at":crate::diagnostics::now()}),

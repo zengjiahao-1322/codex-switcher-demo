@@ -22,8 +22,14 @@ const original = [
 const sha = (text) => crypto.createHash('sha256').update(text).digest('hex');
 function setup(text = original) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-remote-agent-'));
+  const extensionPath = path.join(path.dirname(home), path.basename(home) + '-extension-0.1.3');
+  fs.mkdirSync(extensionPath);
+  fs.writeFileSync(
+    path.join(extensionPath, 'package.json'),
+    JSON.stringify({ name: 'codex-switcher-remote', version: '0.1.3' }),
+  );
   if (text !== null) fs.writeFileSync(path.join(home, 'config.toml'), text);
-  return { home, agent: createAgent({ home, version: '0.1.3' }) };
+  return { home, extensionPath, agent: createAgent({ home, extensionPath }) };
 }
 
 test('状态只给模型、provider 和 API 地址，不含密钥', () => {
@@ -44,7 +50,7 @@ test('状态只给模型、provider 和 API 地址，不含密钥', () => {
 test('protocol 4 原地更新只接受两份代理文件，校验后原子写入并退出', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-remote-update-')),
     home = path.join(root, 'home'),
-    extensionPath = path.join(root, 'extension');
+    extensionPath = path.join(root, 'codex-switcher-remote-0.1.6-rc.2');
   fs.mkdirSync(home);
   fs.mkdirSync(extensionPath);
   fs.writeFileSync(
@@ -69,14 +75,23 @@ test('protocol 4 原地更新只接受两份代理文件，校验后原子写入
   assert.equal(agent.status().agentVersion, '0.1.6-rc.3');
   assert.equal(fs.readFileSync(path.join(extensionPath, 'extension.cjs'), 'utf8'), extensionCjs);
   assert.equal(fs.readFileSync(path.join(extensionPath, 'package.json'), 'utf8'), packageJson);
+  assert.equal(path.basename(extensionPath), 'codex-switcher-remote-0.1.6-rc.2');
   t.mock.timers.tick(300);
   assert.throws(
     () => agent.update({ extensionCjs, packageJson, extensionSha256: 'bad', packageSha256: sha(packageJson) }),
     /extension\.cjs 校验失败/,
   );
   assert.throws(
-    () => agent.update({ extensionCjs, packageJson, extensionSha256: sha(extensionCjs), packageSha256: sha(packageJson), path: '../x' }),
-    /参数无效/,
+    () => {
+      const invalid = JSON.stringify({ name: 'other-extension', version: '0.1.6-rc.3' });
+      agent.update({
+        extensionCjs,
+        packageJson: invalid,
+        extensionSha256: sha(extensionCjs),
+        packageSha256: sha(invalid),
+      });
+    },
+    /内容无效/,
   );
 });
 
@@ -300,7 +315,13 @@ test('登录参数也只接受约定字段；配置和登录都没有时拒绝',
 test('服务器上还没有 ~/.codex 时创建目录后写入，不产生备份', () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-remote-agent-'));
   const home = path.join(parent, '.codex'),
-    agent = createAgent({ home, version: '0.1.3' });
+    extensionPath = path.join(parent, 'codex-switcher-remote-0.1.3');
+  fs.mkdirSync(extensionPath);
+  fs.writeFileSync(
+    path.join(extensionPath, 'package.json'),
+    JSON.stringify({ name: 'codex-switcher-remote', version: '0.1.3' }),
+  );
+  const agent = createAgent({ home, extensionPath });
   agent.write({ text: 'model = "m"\n', expectedSha256: sha(''), catalog: null });
   assert.equal(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), 'model = "m"\n');
   assert.equal(fs.existsSync(path.join(home, 'config.toml.switcher-backup')), false);

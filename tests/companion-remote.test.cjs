@@ -45,10 +45,16 @@ async function runCompanion({
   fs.mkdirSync(home);
   fs.writeFileSync(path.join(home, 'config.toml'), original);
   if (authText) fs.writeFileSync(path.join(home, 'auth.json'), authText);
-  const agent = createAgent({
-    home,
-    version: agentVersion ?? require('../vscode-companion/package.json').version,
-  });
+  const extensionPath = path.join(root, 'codex-switcher-remote-extension');
+  fs.mkdirSync(extensionPath);
+  fs.writeFileSync(
+    path.join(extensionPath, 'package.json'),
+    JSON.stringify({
+      name: 'codex-switcher-remote',
+      version: agentVersion ?? require('../vscode-remote-agent/package.json').version,
+    }),
+  );
+  const agent = createAgent({ home, extensionPath });
   const requests = [],
     executed = [],
     installed = [];
@@ -482,6 +488,9 @@ test('远端重启后加快状态查询直到startedAt变化，再恢复长轮�
 
 test('安装失败时回执 failed，临时文件同样删除', async () => {
   const vsix = Buffer.from('x').toString('base64');
+  const before = new Set(
+    fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('codex-switcher-remote-')),
+  );
   const { requests } = await runCompanion({
     installFails: true,
     commandsFor: (reqs) =>
@@ -493,7 +502,8 @@ test('安装失败时回执 failed，临时文件同样删除', async () => {
   assert.equal(done.ackError, 'install failed');
   const leftovers = fs
     .readdirSync(os.tmpdir())
-    .filter((name) => name.startsWith('codex-switcher-remote-'));
+    .filter((name) => name.startsWith('codex-switcher-remote-'))
+    .filter((name) => !before.has(name));
   assert.deepEqual(leftovers, []);
 });
 
@@ -617,7 +627,7 @@ test('协议2旧代理升级提示重载窗口并调用reloadWindow，不调用�
   });
   assert.deepEqual(requests.find((r) => r.ack === 'old-agent-install').ackResult.reload, {
     method: 'reloadWindow',
-    notice: '服务器代理已更新，请在该服务器窗口执行一次重载窗口',
+    notice: '正在重载窗口以启用新代理',
     reason: 'agentUpgrade',
   });
   assert.equal(executed.includes('codexSwitcherRemote.restart'), false);
