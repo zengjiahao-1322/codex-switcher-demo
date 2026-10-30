@@ -15,6 +15,30 @@
     "onCommand:codexSwitcherRemote.write",
     "onCommand:codexSwitcherRemote.restart"
   ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codexSwitcherRemote.status",
+        "title": "Codex Switcher: Remote Status"
+      },
+      {
+        "command": "codexSwitcherRemote.read",
+        "title": "Codex Switcher: Remote Read"
+      },
+      {
+        "command": "codexSwitcherRemote.readAuth",
+        "title": "Codex Switcher: Remote Read Auth"
+      },
+      {
+        "command": "codexSwitcherRemote.write",
+        "title": "Codex Switcher: Remote Write"
+      },
+      {
+        "command": "codexSwitcherRemote.restart",
+        "title": "Codex Switcher: Remote Restart"
+      }
+    ]
+  },
   "extensionKind": [
     "workspace"
   ],
