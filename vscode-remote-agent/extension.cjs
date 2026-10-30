@@ -119,6 +119,7 @@ function createAgent({ home, version }) {
   return {
     status() {
       const exists = fs.existsSync(file(CONFIG));
+      const children = directChildren();
       return {
         agentVersion: version,
         startedAt,
@@ -130,6 +131,7 @@ function createAgent({ home, version }) {
         configExists: exists,
         current: exists ? summarize(content(CONFIG)) : null,
         account: fs.existsSync(file(AUTH)) ? account(content(AUTH)) : null,
+        appServer: { running: children.length > 0, pids: children },
       };
     },
     read: () => snapshot(CONFIG),

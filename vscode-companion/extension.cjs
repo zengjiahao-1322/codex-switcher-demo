@@ -97,6 +97,10 @@ function activate(context) {
             plan: s.account.plan,
             lastRefresh: s.account.lastRefresh,
           },
+          appServer: s.appServer && {
+            running: s.appServer.running === true,
+            pids: s.appServer.pids || [],
+          },
         };
         remoteAgentError = null;
         remoteAgentState = 'connected';

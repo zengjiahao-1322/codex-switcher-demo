@@ -86,7 +86,7 @@ pub fn groups(bridge: &Path) -> io::Result<Vec<Value>> {
                 if account.is_object() && !known.contains(&account["id"]) {
                     account["id"] = Value::Null;
                 }
-                found.push(json!({"authority":row["authority"],"codexHome":agent["codexHome"],"host":agent["host"].as_str().unwrap_or(text(&row["authority"]).trim_start_matches("ssh-remote+")),"platform":agent["platform"],"arch":agent["arch"],"agentVersion":agent["agentVersion"],"agentProtocol":agent["protocol"].as_u64().unwrap_or(0),"current":agent["current"],"account":account,"windows":[]}));
+                found.push(json!({"authority":row["authority"],"codexHome":agent["codexHome"],"host":agent["host"].as_str().unwrap_or(text(&row["authority"]).trim_start_matches("ssh-remote+")),"platform":agent["platform"],"arch":agent["arch"],"agentVersion":agent["agentVersion"],"agentProtocol":agent["protocol"].as_u64().unwrap_or(0),"current":agent["current"],"account":account,"remoteAgentState":row["remoteAgentState"],"windows":[]}));
                 found.len() - 1
             }
         };
@@ -491,18 +491,49 @@ pub fn observe(app: Arc<App>, input: &Value) -> io::Result<()> {
     } else {
         "connected"
     };
-    let detail = json!({"authority":input["authority"],"codexHome":agent["codexHome"],"state":status,"agentVersion":agent["agentVersion"],"protocol":agent["protocol"],"companionVersion":input["companionVersion"],"account":agent["account"]["email"],"error":input["remoteAgentError"].as_str().map(|v|v.chars().take(300).collect::<String>())});
-    let key = format!(
-        "remote:{}:{}",
-        text(&input["authority"]),
-        text(&agent["codexHome"])
-    );
+    let authority = text(&input["authority"]);
+    let now = millis();
+    let key = format!("remote:{authority}");
+    let previous = app.editors.remote_states.lock().unwrap().get(&key).cloned();
+    let effective = if status == "unreachable"
+        && previous.as_ref().is_some_and(|v| {
+            v["state"] == "connected"
+                && now.saturating_sub(v["stateSince"].as_u64().unwrap_or(now)) < 30_000
+        }) {
+        "connected"
+    } else {
+        status
+    };
+    let since = if previous.as_ref().is_some_and(|v| v["state"] == effective) {
+        previous
+            .as_ref()
+            .and_then(|v| v["stateSince"].as_u64())
+            .unwrap_or(now)
+    } else {
+        now
+    };
+    let detail = json!({"authority":input["authority"],"codexHome":agent["codexHome"],"state":effective,"rawState":status,"stateSince":since,"durationMs":now.saturating_sub(since),"agentVersion":agent["agentVersion"],"protocol":agent["protocol"],"companionVersion":input["companionVersion"],"account":agent["account"]["email"],"error":input["remoteAgentError"].as_str().map(|v|v.chars().take(300).collect::<String>()),"codex":agent["current"],"appServer":agent["appServer"]});
     {
         let mut states = app.editors.remote_states.lock().unwrap();
-        if states.get(&key) != Some(&detail) {
+        if states
+            .get(&key)
+            .is_none_or(|v| v["state"] != detail["state"])
+        {
             log(&app.bridge, "remote.agent", detail.clone())?;
-            states.insert(key, detail);
         }
+        states.insert(key, detail);
+    }
+    let file = app
+        .bridge
+        .join("clients")
+        .join(format!("{}.json", text(&input["id"])));
+    let mut row = accounts::read(&file, Value::Null)?;
+    if row.is_object() {
+        row["remoteAgentState"] = json!(effective);
+        if effective == "connected" && agent.is_object() {
+            row["remoteAgent"] = agent.clone();
+        }
+        crate::instance::write_json(&file, &row)?;
     }
     if let Some(id) = agent["account"]["id"].as_str() {
         observe_id(app, id);

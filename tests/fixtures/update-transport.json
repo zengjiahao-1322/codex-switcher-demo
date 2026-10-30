@@ -10,13 +10,16 @@
       "10",
       "--max-time",
       "20",
-      "--ssl-revoke-best-effort",
+      "--ssl-no-revoke",
+      "--write-out",
+      "\n__SWITCHER_CURL_TIMES__:%{time_connect},%{time_appconnect},%{time_total}",
       "https://github.com/fixture/package.zip"
     ],
     "message": "连接 GitHub 失败：证书吊销检查无法完成（网络无法访问吊销服务器）。",
     "curl": {
       "code": 35,
-      "detail": "curl: (35) schannel: CRYPT_E_REVOCATION_OFFLINE"
+      "detail": "curl: (35) schannel: CRYPT_E_REVOCATION_OFFLINE",
+      "timings": null
     }
   },
   {
@@ -34,6 +37,8 @@
       "1",
       "--speed-time",
       "20",
+      "--write-out",
+      "\n__SWITCHER_CURL_TIMES__:%{time_connect},%{time_appconnect},%{time_total}",
       "--output",
       "fixture-output.zip",
       "https://github.com/fixture/package.zip"
@@ -41,7 +46,8 @@
     "message": "连接 GitHub 超时，请检查网络或代理后重试。",
     "curl": {
       "code": 28,
-      "detail": "curl: (28) Operation timed out"
+      "detail": "curl: (28) Operation timed out",
+      "timings": null
     }
   },
   {
@@ -59,7 +65,9 @@
       "1",
       "--speed-time",
       "20",
-      "--ssl-revoke-best-effort",
+      "--ssl-no-revoke",
+      "--write-out",
+      "\n__SWITCHER_CURL_TIMES__:%{time_connect},%{time_appconnect},%{time_total}",
       "--output",
       "fixture-output.zip",
       "https://github.com/fixture/package.zip"
@@ -67,7 +75,8 @@
     "message": "连接 GitHub 失败：服务器证书验证未通过。",
     "curl": {
       "code": 60,
-      "detail": "curl: (60) SSL certificate verify failed"
+      "detail": "curl: (60) SSL certificate verify failed",
+      "timings": null
     }
   },
   {
@@ -81,12 +90,15 @@
       "10",
       "--max-time",
       "20",
+      "--write-out",
+      "\n__SWITCHER_CURL_TIMES__:%{time_connect},%{time_appconnect},%{time_total}",
       "https://github.com/fixture/package.zip"
     ],
     "message": "连接 GitHub 失败（curl 退出码 7），请检查网络或代理。",
     "curl": {
       "code": 7,
-      "detail": "curl: (7) Failed to connect"
+      "detail": "curl: (7) Failed to connect",
+      "timings": null
     }
   }
 ]

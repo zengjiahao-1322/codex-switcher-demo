@@ -52,6 +52,19 @@ export async function refreshClients() {
         ? ready.length + ' 个编辑器窗口会随切换自动重载'
         : '没有会随切换自动重载的编辑器窗口') +
       (missing.length || unmatched.length || outdated.length ? '，有窗口需要处理。' : '。');
+    const disabledCompanion = (c.companion?.editors || []).some(
+      (e) => e.disabled?.disabled === true,
+    );
+    if (disabledCompanion) {
+      const message = '伴随扩展已被禁用，请在 VS Code 扩展面板启用后重载窗口。';
+      $('editor-reload-hint').textContent = message;
+      $('editor-summary').textContent = message;
+    } else if (c.companion?.editors?.length && !ready.length && !missing.length) {
+      const installed = c.companion.editors.some((e) => e.installed);
+      $('editor-reload-hint').textContent = installed
+        ? '伴随扩展已安装但没有运行，请在 VS Code 执行“重载窗口”并确认扩展未被禁用。'
+        : '未安装伴随扩展，请点击“接入 VS Code”安装。';
+    }
     $('clients-status').textContent =
       `本次切换目录：${c.home}\nCodex 程序：${c.runtime || '未找到，请安装官方扩展或填写下方路径'}\n检测到 ${c.clients.length} 个客户端 / 窗口，${c.connectedEditors} 个伴随扩展连接。`;
     if (document.activeElement !== $('config-home')) $('config-home').value = c.home;

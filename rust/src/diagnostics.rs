@@ -177,7 +177,39 @@ pub fn companion_snapshot(app: &crate::server::App) -> Value {
     let state = app.editors.heartbeat.lock().unwrap();
     let heartbeat = json!({"count":state.count,"lastAt":state.last_at,"windows":state.windows.values().collect::<Vec<_>>()});
     drop(state);
-    json!({"companion":companion_installations(),"discovery":discovery_status(app),"heartbeat":heartbeat})
+    json!({"companion":companion_installations(),"discovery":discovery_status(app),"heartbeat":heartbeat,"remote":crate::remote::groups(&app.bridge).unwrap_or_default(),"storage":storage_snapshot(app)})
+}
+fn directory_size(path: &Path) -> (u64, BTreeMap<String, u64>) {
+    fn walk(path: &Path, top: bool, total: &mut u64, first: &mut BTreeMap<String, u64>) {
+        let Ok(entries) = fs::read_dir(path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            let before = *total;
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                walk(&p, false, total, first);
+            } else {
+                *total = total.saturating_add(entry.metadata().map(|m| m.len()).unwrap_or(0));
+            }
+            if top {
+                first.insert(
+                    entry.file_name().to_string_lossy().into_owned(),
+                    total.saturating_sub(before),
+                );
+            }
+        }
+    }
+    let mut total = 0;
+    let mut first = BTreeMap::new();
+    walk(path, true, &mut total, &mut first);
+    (total, first)
+}
+fn storage_snapshot(app: &crate::server::App) -> Value {
+    let install = crate::instance::project_root();
+    let (install_size, install_first) = directory_size(&install);
+    let (data_size, data_first) = directory_size(&app.bridge);
+    json!({"install":{"path":install,"bytes":install_size,"firstLevel":install_first},"data":{"path":app.bridge,"bytes":data_size,"firstLevel":data_first}})
 }
 pub async fn companion_silent(app: std::sync::Arc<crate::server::App>) -> io::Result<()> {
     tokio::time::sleep(std::time::Duration::from_secs(60)).await;

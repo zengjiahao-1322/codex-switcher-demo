@@ -137,6 +137,30 @@ pub async fn install(app: &App, input: &Value) -> io::Result<Value> {
     if !matches!(result, Ok(Ok(output)) if output.status.success()) {
         return Err(io::Error::other("扩展安装失败，请下载 VSIX 手动安装。"));
     }
+    let installed = crate::diagnostics::companion_snapshot(app)["companion"]["editors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|e| e["extensions"].as_array().into_iter().flatten())
+        .any(|e| {
+            e["version"].as_str()
+                == Some(crate::instance::runtime()["version"].as_str().unwrap_or(""))
+        });
+    if !installed {
+        return Err(io::Error::other(
+            "编辑器未在默认扩展目录登记伴随扩展，未报告安装成功。",
+        ));
+    }
+    let disabled = crate::diagnostics::companion_snapshot(app)["companion"]["editors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|e| e["disabled"]["disabled"] == true);
+    if disabled {
+        return Err(io::Error::other(
+            "伴随扩展已被禁用，请在 VS Code 扩展面板启用后重载窗口。",
+        ));
+    }
     Ok(
         json!({"message":format!("已为 {} 安装伴随扩展。已有窗口可能需要先执行一次“重载窗口”才能启用新版本；打开 Codex 后，状态栏显示“Codex Switcher · 已接入”才表示后端已关联，可自动重载。",text(&editor["name"]))}),
     )

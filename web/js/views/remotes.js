@@ -64,7 +64,7 @@ const currentText = (r) =>
             : r.current.modelProvider) +
         (r.current.model ? ' · ' + r.current.model : '');
 const resultLabels = {
-  synced: '已写入，已请求重启服务器上的 Codex',
+  synced: '已写入，服务器扩展重启中（约 20 秒）',
   skipped: '未切换',
   failed: '失败',
 };
@@ -143,7 +143,7 @@ function serverCard(authority, rows) {
   card.append(head);
   for (const r of rows) {
     const line = document.createElement('small');
-    line.textContent = r.codexHome + (currentText(r) ? ' · ' + currentText(r) : '');
+    line.textContent = (r.codexHome || '') + (currentText(r) ? ' · ' + currentText(r) : '');
     card.append(line);
   }
   if (state === 'checking') {
@@ -181,7 +181,7 @@ function serverCard(authority, rows) {
       );
     card.append(install);
     if (rows.some((r) => r.windows.some((w) => w.installStatus === 'notActive')))
-      card.append(note('已安装，但服务器仍在运行旧版。请在该窗口运行‘开发人员: 重新加载窗口’。'));
+      card.append(note('已发送远端扩展更新，等待服务器扩展宿主自动重启。'));
     if (installs.has(authority)) card.append(note(installs.get(authority)));
   } else card.append(chooser(authority, host, rows));
   return card;
@@ -336,7 +336,12 @@ function detail(panel, authority, host, rows, o, draft) {
           r.results
             .map(
               (x) =>
-                x.codexHome + '：' + resultLabels[x.status] + (x.reason ? ' · ' + x.reason : ''),
+                (x.codexHome || '') +
+                '：' +
+                (x.status === 'synced'
+                  ? '已切换，服务器扩展已重启，Codex 加载中'
+                  : resultLabels[x.status]) +
+                (x.reason ? ' · ' + x.reason : ''),
             )
             .join('\n'),
         );

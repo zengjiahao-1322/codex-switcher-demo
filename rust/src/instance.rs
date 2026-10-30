@@ -10,7 +10,7 @@ use hyper_util::rt::TokioIo;
 use serde_json::{Value, json};
 use std::{
     env, fs, io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -506,6 +506,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .clone(),
     );
     crate::diagnostics::log(&app.bridge, "startup", startup)?;
+    cleanup_legacy_private(&app.bridge)?;
     let stop_signal = crate::lifecycle::stop_signal()?;
     tokio::pin!(stop_signal);
     println!(
@@ -574,4 +575,75 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
+}
+
+fn cleanup_legacy_private(bridge: &Path) -> io::Result<()> {
+    if bridge.join("updates/cleanup.json").exists() {
+        return Ok(());
+    }
+    let marker = bridge.join("updates/installed-at.json");
+    let marker_value = crate::accounts::read(&marker, Value::Null)?;
+    let Some(at) = marker_value["at"].as_str().map(str::to_owned) else {
+        return Ok(());
+    };
+    let Ok(stamp) =
+        time::OffsetDateTime::parse(&at, &time::format_description::well_known::Rfc3339)
+    else {
+        return Ok(());
+    };
+    if (time::OffsetDateTime::now_utc() - stamp).whole_days() < 7 {
+        return Ok(());
+    }
+    let private = project_root().join("private");
+    if crate::migration::legacy_home(bridge, &project_root()) || !private.is_dir() {
+        return Ok(());
+    }
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    for entry in fs::read_dir(&private)? {
+        let entry = entry?;
+        if entry.file_name() == "running.json" {
+            continue;
+        }
+        let size = if entry.file_type()?.is_dir() {
+            directory_size(&entry.path())
+        } else {
+            entry.metadata().map(|m| m.len()).unwrap_or(0)
+        };
+        if entry.file_type()?.is_dir() {
+            fs::remove_dir_all(entry.path())?;
+        } else {
+            fs::remove_file(entry.path())?;
+        }
+        files += 1;
+        bytes += size;
+    }
+    crate::diagnostics::log(
+        bridge,
+        "data.cleanup",
+        json!({"deletedEntries":files,"freedBytes":bytes,"afterDays":7}),
+    )?;
+    write_json(
+        &bridge.join("updates/cleanup.json"),
+        &json!({"at":crate::diagnostics::now(),"deletedEntries":files,"freedBytes":bytes}),
+    )?;
+    Ok(())
+}
+fn directory_size(path: &Path) -> u64 {
+    fs::read_dir(path)
+        .ok()
+        .into_iter()
+        .flatten()
+        .map(|e| {
+            let p = e.ok().map(|v| v.path());
+            p.map(|p| {
+                if p.is_dir() {
+                    directory_size(&p)
+                } else {
+                    fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+                }
+            })
+            .unwrap_or(0)
+        })
+        .sum()
 }

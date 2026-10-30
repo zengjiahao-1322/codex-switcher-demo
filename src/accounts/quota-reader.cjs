@@ -27,7 +27,8 @@ async function readSubscription(
   let status = 'failed',
     httpCode = null,
     curlCode = null,
-    hasDate = false;
+    hasDate = false,
+    timings = null;
   try {
     const auth = JSON.parse(require('node:fs').readFileSync(authFile, 'utf8')),
       home = path.dirname(authFile),
@@ -62,9 +63,9 @@ async function readSubscription(
         '--max-time',
         '20',
         '--write-out',
-        '\n__SWITCHER_HTTP_STATUS__:%{http_code}',
+        '\n__SWITCHER_HTTP_STATUS__:%{http_code}\n__SWITCHER_CURL_TIMES__:%{time_connect},%{time_appconnect},%{time_total}',
       ];
-      if (process.platform === 'win32') args.push('--ssl-revoke-best-effort');
+      if (process.platform === 'win32') args.push('--ssl-no-revoke');
       if (caFile) args.push('--cacert', caFile);
       const child = require('node:child_process').execFile(
         process.platform === 'win32' ? 'curl.exe' : '/usr/bin/curl',
@@ -73,8 +74,23 @@ async function readSubscription(
         (error, stdout) => {
           const marker = '\n__SWITCHER_HTTP_STATUS__:',
             at = stdout.lastIndexOf(marker),
-            code = at >= 0 ? Number(stdout.slice(at + marker.length).trim()) : null,
+            tail = at >= 0 ? stdout.slice(at + marker.length) : '',
+            timeMarker = '\n__SWITCHER_CURL_TIMES__:',
+            timeAt = tail.lastIndexOf(timeMarker),
+            code = at >= 0 ? Number((timeAt >= 0 ? tail.slice(0, timeAt) : tail).trim()) : null,
+            rawTimes =
+              timeAt >= 0
+                ? tail
+                    .slice(timeAt + timeMarker.length)
+                    .trim()
+                    .split(',')
+                    .map(Number)
+                : null,
             text = at >= 0 ? stdout.slice(0, at) : stdout;
+          timings =
+            rawTimes?.length === 3 && rawTimes.every(Number.isFinite)
+              ? { timeConnect: rawTimes[0], timeAppconnect: rawTimes[1], timeTotal: rawTimes[2] }
+              : null;
           resolve({ error, code: Number.isFinite(code) && code > 0 ? code : null, text });
         },
       );
@@ -102,6 +118,7 @@ async function readSubscription(
         account,
         status,
         ...(httpCode !== null ? { httpCode } : { curlCode }),
+        ...(timings ? { timings } : {}),
         hasDate,
       });
   }

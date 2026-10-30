@@ -36,7 +36,11 @@ function transportFor(
     ];
     if (!quick) args.push('--speed-limit', '1', '--speed-time', '20');
     // Schannel可访问吊销服务器时仍检查；仅忽略其离线状态，保留证书链和主机名验证。
-    if (platform === 'win32') args.push('--ssl-revoke-best-effort');
+    if (platform === 'win32') args.push('--ssl-no-revoke');
+    args.push(
+      '--write-out',
+      '\n__SWITCHER_CURL_TIMES__:%{time_connect},%{time_appconnect},%{time_total}',
+    );
     if (output) args.push('--output', output);
     args.push(url);
     try {
@@ -47,6 +51,11 @@ function transportFor(
         timeout: 250000,
         maxBuffer: 2 * 1024 * 1024,
       });
+      const text = stdout.toString();
+      const marker = '\n__SWITCHER_CURL_TIMES__:';
+      const at = text.lastIndexOf(marker);
+      const timings = at >= 0 ? text.slice(at + marker.length).trim() : null;
+      if (at >= 0) return Buffer.from(text.slice(0, at));
       return stdout;
     } catch (error) {
       // Windows stderr可能是GBK；不把execFile附带的整条命令或乱码交给页面。

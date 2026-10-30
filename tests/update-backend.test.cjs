@@ -26,7 +26,7 @@ const packageTree = (root, files, values) => {
   for (const dir of ['runtime', 'bin', 'node_modules']) fs.mkdirSync(path.join(root, dir));
 };
 
-test('Windows检查与下载启用吊销离线best-effort，Mac不加且均保留TLS验证', async () => {
+test('Windows检查与下载关闭在线吊销检查，Mac不加且均保留TLS链验证', async () => {
   const { transportFor } = require('../src/server/update.cjs');
   for (const platform of ['win32', 'darwin']) {
     const calls = [],
@@ -44,7 +44,7 @@ test('Windows检查与下载启用吊销离线best-effort，Mac不加且均保�
     assert.equal(calls.length, 2);
     for (const call of calls) {
       assert.equal(call.exe, platform === 'win32' ? 'curl.exe' : '/usr/bin/curl');
-      assert.equal(call.args.includes('--ssl-revoke-best-effort'), platform === 'win32');
+      assert.equal(call.args.includes('--ssl-no-revoke'), platform === 'win32');
       assert.equal(
         call.args[call.args.indexOf('--connect-timeout') + 1],
         call === calls[0] ? '10' : '15',
@@ -55,7 +55,7 @@ test('Windows检查与下载启用吊销离线best-effort，Mac不加且均保�
       );
       assert.equal(call.args.includes('--speed-time'), call !== calls[0]);
       assert.ok(call.args.includes('--location'));
-      for (const unsafe of ['-k', '--insecure', '--ssl-no-revoke'])
+      for (const unsafe of ['-k', '--insecure'])
         assert.equal(call.args.includes(unsafe), false);
       assert.equal(call.options.encoding, null, '原始stderr必须以Buffer读取');
     }

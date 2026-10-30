@@ -147,6 +147,16 @@ mod windows {
             fs::create_dir_all(target)?;
             for entry in fs::read_dir(source)? {
                 let entry = entry?;
+                if matches!(
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .to_ascii_lowercase()
+                        .as_str(),
+                    "updates" | "logs" | "node_modules" | "previous" | "staging"
+                ) {
+                    continue;
+                }
                 copy_tree(&entry.path(), &target.join(entry.file_name()))?;
             }
         } else {

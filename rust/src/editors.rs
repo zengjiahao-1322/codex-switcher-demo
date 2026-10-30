@@ -404,7 +404,7 @@ pub fn agent_status(input: &Value) -> io::Result<Value> {
         Value::Null
     };
     Ok(
-        json!({"agentVersion":input["agentVersion"],"startedAt":input["startedAt"],"protocol":input["protocol"].as_u64().unwrap_or(0),"host":input["host"],"platform":platform,"arch":input["arch"],"codexHome":home,"configExists":input["configExists"]==true,"current":current,"account":account}),
+        json!({"agentVersion":input["agentVersion"],"startedAt":input["startedAt"],"protocol":input["protocol"].as_u64().unwrap_or(0),"host":input["host"],"platform":platform,"arch":input["arch"],"codexHome":home,"configExists":input["configExists"]==true,"current":current,"account":account,"appServer":input["appServer"]}),
     )
 }
 fn registry(app: &App, input: &Value, confirm: bool) -> io::Result<Value> {

@@ -429,6 +429,11 @@ pub(crate) async fn serve(
                         "quit" => crate::lifecycle::quit(app.clone()),
                         "uninstall" => crate::lifecycle::uninstall(app.clone(), &input).await,
                         "clients" => crate::editors::status(&app).await.map(|mut v| {
+                            let companion = crate::diagnostics::companion_snapshot(&app);
+                            v["companion"] = companion["companion"].clone();
+                            v["discovery"] = companion["discovery"].clone();
+                            v["heartbeat"] = companion["heartbeat"].clone();
+                            v["storage"] = companion["storage"].clone();
                             v["remotes"] =
                                 json!(crate::remote::groups(&app.bridge).unwrap_or_default());
                             v["runtime"] = json!(

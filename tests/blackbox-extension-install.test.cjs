@@ -15,6 +15,8 @@ test('扩展安装黑盒：仅调用TEMP编辑器官方CLI，带force并保留JS
       environment[process.platform === 'win32' ? 'USERPROFILE' : 'HOME'] = user;
       environment.LOCALAPPDATA = path.join(root, 'local');
       environment.ProgramFiles = path.join(root, 'programs');
+      environment.SWITCHER_TEST_EXTENSION_ROOT = path.join(user, '.vscode', 'extensions');
+      environment.SWITCHER_TEST_PACKAGE = path.resolve('package.json');
       const base =
         process.platform === 'win32'
           ? path.join(environment.LOCALAPPDATA, 'Programs', 'Microsoft VS Code')
@@ -34,7 +36,9 @@ test('扩展安装黑盒：仅调用TEMP编辑器官方CLI，带force并保留JS
       if (process.platform !== 'win32') fs.chmodSync(exe, 0o755);
       fs.writeFileSync(
         cli,
-        'require("fs").writeFileSync(' +
+        'const fs=require("fs"),path=require("path");' +
+          'if(process.argv.includes("--install-extension")){const d=path.join(process.env.SWITCHER_TEST_EXTENSION_ROOT,"codex-switcher-demo.codex-switcher-companion-"+require(process.env.SWITCHER_TEST_PACKAGE).version);fs.mkdirSync(d,{recursive:true});fs.writeFileSync(path.join(d,"package.json"),JSON.stringify(require(process.env.SWITCHER_TEST_PACKAGE)));fs.writeFileSync(path.join(process.env.SWITCHER_TEST_EXTENSION_ROOT,"extensions.json"),JSON.stringify([{identifier:{id:"codex-switcher-demo.codex-switcher-companion"},relativeLocation:path.basename(d)}]));}' +
+          'fs.writeFileSync(' +
           JSON.stringify(marker) +
           ', JSON.stringify({args:process.argv.slice(2),electron:process.env.ELECTRON_RUN_AS_NODE}));\n',
       );

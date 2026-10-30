@@ -150,13 +150,32 @@ async fn request(app: &App, name: &str, output: Option<&Path>) -> Result<Vec<u8>
             });
         }
     };
+    let (body, timings) = split_curl_times(&output.stdout);
     if output.status.success() {
-        return Ok(output.stdout);
+        return Ok(body);
     }
-    Err(curl_error(output.status.code(), &output.stderr))
+    Err(curl_error(output.status.code(), &output.stderr, timings))
 }
 
-fn curl_error(code: Option<i32>, stderr: &[u8]) -> TransportError {
+fn split_curl_times(stdout: &[u8]) -> (Vec<u8>, Option<Value>) {
+    let marker = b"\n__SWITCHER_CURL_TIMES__:";
+    let Some(at) = stdout.windows(marker.len()).rposition(|v| v == marker) else {
+        return (stdout.to_vec(), None);
+    };
+    let text = String::from_utf8_lossy(&stdout[at + marker.len()..]);
+    let values = text
+        .trim()
+        .split(',')
+        .filter_map(|v| v.parse::<f64>().ok())
+        .collect::<Vec<_>>();
+    (
+        stdout[..at].to_vec(),
+        (values.len() == 3).then(
+            || json!({"timeConnect":values[0],"timeAppconnect":values[1],"timeTotal":values[2]}),
+        ),
+    )
+}
+fn curl_error(code: Option<i32>, stderr: &[u8], timings: Option<Value>) -> TransportError {
     let stderr = String::from_utf8_lossy(stderr);
     let detail = regex::Regex::new(r"[\x20-\x7e]{5,}")
         .unwrap()
@@ -188,7 +207,7 @@ fn curl_error(code: Option<i32>, stderr: &[u8]) -> TransportError {
     };
     TransportError {
         message,
-        curl: Some(json!({"code":code,"detail":detail})),
+        curl: Some(json!({"code":code,"detail":detail,"timings":timings})),
     }
 }
 
@@ -210,8 +229,15 @@ fn curl_arguments(windows: bool, quick: bool, output: Option<&Path>, url: &str) 
         args.extend(["--speed-limit", "1", "--speed-time", "20"].map(str::to_owned));
     }
     if windows {
-        args.push("--ssl-revoke-best-effort".into());
+        args.push("--ssl-no-revoke".into());
     }
+    args.extend(
+        [
+            "--write-out",
+            "\n__SWITCHER_CURL_TIMES__:%{time_connect},%{time_appconnect},%{time_total}",
+        ]
+        .map(str::to_owned),
+    );
     if let Some(file) = output {
         args.push("--output".into());
         args.push(file.to_string_lossy().to_string());
@@ -234,7 +260,7 @@ pub fn transport_fixture(input: &Value) -> Value {
     let stderr = base64::engine::general_purpose::STANDARD
         .decode(input["stderr"].as_str().unwrap_or(""))
         .unwrap();
-    let error = curl_error(input["code"].as_i64().map(|n| n as i32), &stderr);
+    let error = curl_error(input["code"].as_i64().map(|n| n as i32), &stderr, None);
     json!({"exe":if windows{"curl.exe"}else{"/usr/bin/curl"},"args":args,"message":error.message,"curl":error.curl})
 }
 
@@ -1138,6 +1164,12 @@ async fn perform(job: &Job) -> io::Result<()> {
         healthy(job).await?;
         instance::write_json(&result, &json!({"build":job.build,"status":"done"}))?;
         replacement.as_ref().unwrap().complete()?;
+        remove_tree(&previous)?;
+        remove_tree(&job.bridge_home.join("updates/staging"))?;
+        instance::write_json(
+            &job.bridge_home.join("updates/installed-at.json"),
+            &json!({"build":job.build,"at":crate::diagnostics::now()}),
+        )?;
         diagnostics::log(
             &job.bridge_home,
             "update.install",
