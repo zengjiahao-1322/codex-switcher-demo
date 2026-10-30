@@ -78,6 +78,10 @@ pub fn other_action(old: u64, current: u64) -> &'static str {
         "stopped"
     }
 }
+fn legacy_bridge_handover(raw_bridge: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    let bridge = PathBuf::from(raw_bridge?);
+    crate::migration::legacy_home(&bridge, &project_root()).then(|| bridge.join("running.json"))
+}
 fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
     match (fs::canonicalize(a), fs::canonicalize(b)) {
         (Ok(a), Ok(b)) => {
@@ -271,6 +275,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     crate::update::cleanup_old(&project_root())?;
     let started = Instant::now();
+    let raw_bridge = env::var_os("BRIDGE_HOME").filter(|value| !value.is_empty());
     let explicit_bridge = crate::migration::configured_home();
     let bridge = crate::migration::data_home();
     let copied_local = crate::migration::prepare(&project_root(), &bridge)?;
@@ -466,6 +471,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     app.port = listener.local_addr()?.port();
     let connection = json!({"pid":std::process::id(),"url":format!("http://127.0.0.1:{}/#{}",app.port,app.token),"build":runtime()});
     write_json(&running_path, &connection)?;
+    if let Some(path) = legacy_bridge_handover(raw_bridge.as_deref()) {
+        write_json(&path, &connection)?;
+    }
     if let Some(directory) = &discovery {
         write_json(&directory.join("connection.json"), &connection)?;
     }

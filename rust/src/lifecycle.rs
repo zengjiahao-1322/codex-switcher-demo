@@ -153,9 +153,15 @@ pub fn clean_records(app: &App) -> io::Result<()> {
                 .is_none()
                 .then(|| crate::platform::user_home().join(".codex-api-switcher"))
         });
+    let legacy = env::var_os("BRIDGE_HOME")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .filter(|p| crate::migration::legacy_home(p, &crate::instance::project_root()))
+        .map(|p| p.join("running.json"));
     for file in [
         Some(app.bridge.join("running.json")),
         discovery.map(|p| p.join("connection.json")),
+        legacy,
     ]
     .into_iter()
     .flatten()
