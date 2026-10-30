@@ -101,6 +101,7 @@ fn main() -> io::Result<()> {
         "codex-switcher"
     }));
     command.args(args);
+    command.env("BRIDGE_LEGACY_HANDOVER", "1");
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

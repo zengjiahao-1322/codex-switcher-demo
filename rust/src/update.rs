@@ -994,6 +994,7 @@ async fn launch(job: &Job, adapter_port: Option<u16>) -> io::Result<u32> {
     command
         .env("BRIDGE_HOME", &job.bridge_home)
         .env("BRIDGE_CODEX_HOME", &job.codex_home)
+        .env("BRIDGE_LEGACY_HANDOVER", "1")
         .env("SWITCHER_WEB_ROOT", job.target.join("web"));
     if let Some(port) = adapter_port {
         command.env("BRIDGE_PORT", port.to_string());

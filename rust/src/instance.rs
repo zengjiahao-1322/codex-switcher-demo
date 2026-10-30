@@ -79,6 +79,9 @@ pub fn other_action(old: u64, current: u64) -> &'static str {
     }
 }
 fn legacy_bridge_handover(raw_bridge: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    if env::var("BRIDGE_LEGACY_HANDOVER").as_deref() != Ok("1") {
+        return None;
+    }
     let bridge = PathBuf::from(raw_bridge?);
     let looks_like_install_private = bridge
         .file_name()

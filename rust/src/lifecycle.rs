@@ -153,7 +153,9 @@ pub fn clean_records(app: &App) -> io::Result<()> {
                 .is_none()
                 .then(|| crate::platform::user_home().join(".codex-api-switcher"))
         });
-    let legacy = env::var_os("BRIDGE_HOME")
+    let legacy = (env::var("BRIDGE_LEGACY_HANDOVER").as_deref() == Ok("1"))
+        .then(|| env::var_os("BRIDGE_HOME"))
+        .flatten()
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
         .filter(|p| {
