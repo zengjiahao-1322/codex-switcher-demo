@@ -245,7 +245,10 @@ async fn call(app: &Arc<crate::server::App>, name: &str, args: Value) -> Result<
                 rows.len(),
                 rows.iter().map(describe).collect::<Vec<_>>().join("\n")
             );
-            if state["adapter"]["ready"] != true {
+            let has_adapter_provider = rows
+                .iter()
+                .any(|provider| provider["access"]["mode"].as_str() == Some("adapter"));
+            if has_adapter_provider && state["adapter"]["ready"] != true {
                 text.push_str(
                     "\n\n提示：本机转换服务未运行，“经本机转换”的配置切换时会自动启动它。",
                 )
