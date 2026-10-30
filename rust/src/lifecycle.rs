@@ -156,7 +156,15 @@ pub fn clean_records(app: &App) -> io::Result<()> {
     let legacy = env::var_os("BRIDGE_HOME")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
-        .filter(|p| crate::migration::legacy_home(p, &crate::instance::project_root()))
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("private"))
+                && p.parent().is_some_and(|parent| {
+                    !crate::platform::display_path(parent).eq_ignore_ascii_case(
+                        &crate::platform::display_path(&crate::instance::project_root()),
+                    )
+                })
+        })
         .map(|p| p.join("running.json"));
     for file in [
         Some(app.bridge.join("running.json")),

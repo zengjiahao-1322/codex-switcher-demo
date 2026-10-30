@@ -80,7 +80,13 @@ pub fn other_action(old: u64, current: u64) -> &'static str {
 }
 fn legacy_bridge_handover(raw_bridge: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
     let bridge = PathBuf::from(raw_bridge?);
-    crate::migration::legacy_home(&bridge, &project_root()).then(|| bridge.join("running.json"))
+    let looks_like_install_private = bridge
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("private"));
+    let belongs_to_this_install = bridge
+        .parent()
+        .is_some_and(|parent| same_path(parent, &project_root()));
+    (looks_like_install_private && !belongs_to_this_install).then(|| bridge.join("running.json"))
 }
 fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
     match (fs::canonicalize(a), fs::canonicalize(b)) {
