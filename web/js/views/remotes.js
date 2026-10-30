@@ -31,8 +31,8 @@ const agentState = (rows) =>
         ? ['未安装远端代理', 'changed']
         : rows.some(
               (r) =>
-                r.agentProtocol < 3 ||
-                r.windows.some((w) => w.agentProtocol < 3 || w.agentVersion !== w.companionVersion),
+                r.agentProtocol < 4 ||
+                r.windows.some((w) => w.agentProtocol < 4 || w.agentVersion !== w.companionVersion),
             )
           ? ['远端代理需更新', 'changed']
           : ['已接入', 'done'];
@@ -161,7 +161,7 @@ function serverCard(authority, rows) {
         async () => {
           if (
             !confirm(
-              (rows.some((r) => r.agentProtocol < 3)
+              (rows.some((r) => r.agentProtocol < 4)
                 ? '安装后会重启扩展宿主，SSH 会重连一次；'
                 : '会重启服务器上的扩展（SSH 不断开，约 20 秒后恢复）；') +
                 '服务器上正在运行的 Codex 任务会中断。继续安装/更新远端代理吗？',
@@ -170,8 +170,11 @@ function serverCard(authority, rows) {
             return;
           installs.set(authority, '正在服务器上安装远端代理…');
           renderRemotes(remotes);
-          await api('installRemoteAgent', { id: rows[0].windows[0].id });
-          installs.set(authority, '已安装。若仍显示未安装，请在该窗口里按提示重载。');
+          const result = await api('installRemoteAgent', { id: rows[0].windows[0].id });
+          installs.set(
+            authority,
+            result?.reload?.notice || '已安装。若仍显示未安装，请在该窗口里按提示重载。',
+          );
           renderRemotes(remotes);
         },
         (message) => {

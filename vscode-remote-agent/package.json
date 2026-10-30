@@ -13,6 +13,7 @@
     "onCommand:codexSwitcherRemote.read",
     "onCommand:codexSwitcherRemote.readAuth",
     "onCommand:codexSwitcherRemote.write",
+    "onCommand:codexSwitcherRemote.update",
     "onCommand:codexSwitcherRemote.restart"
   ],
   "extensionKind": [

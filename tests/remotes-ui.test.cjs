@@ -11,7 +11,7 @@ const group = (extra = {}) => ({
   platform: 'linux',
   arch: 'x64',
   agentVersion: '0.1.3',
-  agentProtocol: 3,
+  agentProtocol: 4,
   current: {
     model: 'gpt-5.5',
     modelProvider: 'hermes_bridge',
@@ -24,7 +24,7 @@ const group = (extra = {}) => ({
       name: 'VS Code',
       workspace: '/srv/app',
       agentVersion: '0.1.3',
-      agentProtocol: 3,
+      agentProtocol: 4,
       companionVersion: '0.1.3',
     },
   ],
@@ -234,7 +234,7 @@ test('选官方账号应用：确认写明登录写到服务器 auth.json，发 
     created(
       page,
       'p',
-      (n) => n.textContent === '/home/dev/.codex：已写入，已请求重启服务器上的 Codex',
+      (n) => n.textContent === '/home/dev/.codex：已切换，服务器扩展已重启，Codex 加载中',
     ).length,
   );
   assert.equal(page.calls('desktopSwitch').length + page.calls('accountSwitch').length, 0);
@@ -337,7 +337,7 @@ test('同一服务器多个配置目录合成一张卡片，一次应用，逐�
       'p',
       (n) =>
         n.textContent ===
-        '/home/dev/.codex：已写入，已请求重启服务器上的 Codex\n/opt/codex-b：失败 · 服务器上的配置在读取后被修改过',
+        '/home/dev/.codex：已切换，服务器扩展已重启，Codex 加载中\n/opt/codex-b：失败 · 服务器上的配置在读取后被修改过',
     ).length,
   );
 });

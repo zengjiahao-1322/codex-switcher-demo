@@ -100,6 +100,8 @@ fn window(bridge: &Path, group: &Value) -> io::Result<Option<Value>> {
             && r["remoteType"] == "ssh-remote"
             && r["remoteAgent"]["codexHome"] == group["codexHome"]
             && r["remoteAgent"]["agentVersion"] == r["companionVersion"]
+            // Protocol 3 already supports remote config/auth reads and reloads.
+            // Protocol 4 is required only for the in-place agent update command.
             && r["remoteAgent"]["protocol"].as_u64().unwrap_or(0) >= 3
     }))
 }
@@ -349,10 +351,26 @@ pub async fn install(app: Arc<App>, input: &Value) -> io::Result<Value> {
         .as_str()
         .unwrap_or(text(&row["authority"]));
     let version = crate::instance::runtime()["version"].clone();
+    let protocol = row["remoteAgent"]["protocol"].as_u64().unwrap_or(0);
     let result = async {
-        let archive = crate::server::extension_archive(&app, true)?;
-        let result = dispatch(app.clone(), id, json!({"type":"installRemoteAgent","base64":STANDARD.encode(archive),"reload":true}),60).await?;
-        if result["installed"] != true { return Err(io::Error::other("编辑器未确认远端代理安装成功")); }
+        let result = if protocol >= 4 {
+            let (extension_cjs, package_json) = crate::server::extension_sources(&app, true)?;
+            let extension_sha256 = digest(&extension_cjs);
+            let package_sha256 = digest(&package_json);
+            dispatch(app.clone(), id, json!({
+                "type":"remoteUpdate",
+                "extensionCjs":extension_cjs,
+                "packageJson":package_json,
+                "extensionSha256":extension_sha256,
+                "packageSha256":package_sha256
+            }),60).await?
+        } else {
+            let archive = crate::server::extension_archive(&app, true)?;
+            dispatch(app.clone(), id, json!({"type":"installRemoteAgent","base64":STANDARD.encode(archive),"reload":true}),60).await?
+        };
+        if (protocol >= 4 && result["updated"] != true)
+            || (protocol < 4 && result["installed"] != true)
+        { return Err(io::Error::other("编辑器未确认远端代理更新成功")); }
         mark_reload(app.clone(),id,json!({"kind":"install","host":host,"authority":row["authority"],"codexHome":row["remoteAgent"]["codexHome"],"from":row["remoteAgent"]["agentVersion"],"to":version,"companionVersion":version,"requestedAt":millis(),"method":result["reload"]["method"].as_str().unwrap_or("remoteHostExit"),"reason":result["reload"]["reason"]}))?;
         Ok::<_,io::Error>(result)
     }.await;
@@ -484,7 +502,7 @@ pub fn observe(app: Arc<App>, input: &Value) -> io::Result<()> {
         "unreachable"
     } else if agent.is_null() {
         "missing"
-    } else if agent["protocol"].as_u64().unwrap_or(0) < 3
+    } else if agent["protocol"].as_u64().unwrap_or(0) < 4
         || agent["agentVersion"] != input["companionVersion"]
     {
         "needsUpdate"

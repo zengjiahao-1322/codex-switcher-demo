@@ -207,8 +207,12 @@ function activate(context) {
   const remoteRestartKey = 'codexSwitcher.remoteRestarts';
   async function planRemoteRestart() {
     if (!sshRemote()) return null;
-    if (!remoteAgent || remoteAgent.protocol < 3)
-      return { method: 'restartExtensionHost', reason: 'agentUpgrade' };
+    if (!remoteAgent || remoteAgent.protocol < 4)
+      return {
+        method: 'reloadWindow',
+        reason: 'agentUpgrade',
+        notice: '服务器代理已更新，请在该服务器窗口执行一次重载窗口',
+      };
     const now = Date.now(),
       recent = (context.workspaceState.get(remoteRestartKey) || []).filter(
         (at) => now - at < 5 * 60 * 1000,
@@ -232,6 +236,20 @@ function activate(context) {
         remoteRestart = null;
         await ack(c, data, commandId, 'reload_failed', { ackError: error.message }).catch(() => {});
       }
+      return;
+    }
+    if (reload?.method === 'reloadWindow') {
+      await vscode.window.showInformationMessage(reload.notice || '请在该服务器窗口执行一次重载窗口');
+      await context.workspaceState.update('codexSwitcher.lastReload', commandId);
+      setTimeout(async () => {
+        try {
+          await vscode.commands.executeCommand('workbench.action.reloadWindow');
+        } catch (error) {
+          await context.workspaceState.update('codexSwitcher.pendingReload', undefined);
+          await vscode.window.showWarningMessage('服务器代理已更新，请关闭该窗口后重新连接：' + error.message);
+          await ack(c, data, commandId, 'reload_failed', { ackError: error.message }).catch(() => {});
+        }
+      }, 200);
       return;
     }
     await context.workspaceState.update('codexSwitcher.lastReload', commandId);
@@ -280,6 +298,24 @@ function activate(context) {
       ackResult: reload ? { ...result, reload } : result,
     });
     if (reload) await reloadWindow(c, data, command.id, reload);
+  }
+  async function remoteUpdate(c, data, command) {
+    let result;
+    remoteRestart = { startedAt: remoteAgent?.startedAt, until: Date.now() + 120000 };
+    remoteCheckedAt = Date.now();
+    try {
+      result = await vscode.commands.executeCommand('codexSwitcherRemote.update', {
+        extensionCjs: command.extensionCjs,
+        packageJson: command.packageJson,
+        extensionSha256: command.extensionSha256,
+        packageSha256: command.packageSha256,
+      });
+    } catch (error) {
+      remoteRestart = null;
+      await ack(c, data, command.id, 'failed', { ackError: error.message });
+      return;
+    }
+    await ack(c, data, command.id, 'completed', { ackResult: result });
   }
   // 远端代理随切换器发行；在这个 SSH 窗口里安装，workspace 扩展会装到服务器一侧。
   async function installRemoteAgent(c, data, command) {
@@ -354,7 +390,7 @@ function activate(context) {
               ? '服务器连接中'
               : !remoteAgent
                 ? '服务器未装远端代理'
-                : remoteAgent.protocol < 3 || remoteAgent.agentVersion !== data.companionVersion
+                : remoteAgent.protocol < 4 || remoteAgent.agentVersion !== data.companionVersion
                   ? '远端代理需更新'
                   : '服务器已接入');
         status.tooltip = remoteAgent
@@ -383,6 +419,7 @@ function activate(context) {
         await ack(c, data, r.command.id, 'completed', { ackResult: { reload } });
         await reloadWindow(c, data, r.command.id, reload);
       } else if (r.command?.type === 'remoteApply') await remoteApply(c, data, r.command);
+      else if (r.command?.type === 'remoteUpdate') await remoteUpdate(c, data, r.command);
       else if (r.command?.type === 'installRemoteAgent')
         await installRemoteAgent(c, data, r.command);
     } catch (error) {
@@ -444,7 +481,7 @@ function activate(context) {
     }
     const open = () => vscode.env.openExternal(vscode.Uri.parse(c.url));
     const remote = sshRemote();
-    if (remote && (!remoteAgent || remoteAgent.protocol < 3)) {
+    if (remote && (!remoteAgent || remoteAgent.protocol < 4)) {
       const choice = await vscode.window.showWarningMessage(
         '这台服务器还没有接入可用的远端代理，请先在切换器的“远程服务器”页安装或更新。',
         '打开切换器',

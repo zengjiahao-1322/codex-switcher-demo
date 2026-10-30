@@ -188,6 +188,7 @@ test('SSH 窗口心跳附带远端代理状态（约定字段、不含密钥）�
   assert.deepEqual(Object.keys(first.remoteAgent).sort(), [
     'account',
     'agentVersion',
+    'appServer',
     'arch',
     'codexHome',
     'configExists',
@@ -198,7 +199,7 @@ test('SSH 窗口心跳附带远端代理状态（约定字段、不含密钥）�
     'startedAt',
   ]);
   assert.equal(first.remoteAgent.account, null);
-  assert.equal(first.remoteAgent.protocol, 3);
+  assert.equal(first.remoteAgent.protocol, 4);
   assert.deepEqual(first.remoteAgent.current, {
     model: 'gpt-5.5',
     modelProvider: 'hermes_bridge',
@@ -601,7 +602,7 @@ test('本机窗口快捷切换：列出全部 API，确认后按默认模型切�
   assert.equal(calls.find((c) => c.route === 'state').method, 'GET');
 });
 
-test('协议2旧代理升级用一次整宿主重启，不调用尚未注册的restart', async () => {
+test('协议2旧代理升级提示重载窗口并调用reloadWindow，不调用尚未注册的restart', async () => {
   const { requests, executed } = await runCompanion({
     agentProtocol: 2,
     commandsFor: (reqs) =>
@@ -615,11 +616,12 @@ test('协议2旧代理升级用一次整宿主重启，不调用尚未注册的r
     until: (reqs) => reqs.some((r) => r.ack === 'old-agent-install') && reqs.length > 3,
   });
   assert.deepEqual(requests.find((r) => r.ack === 'old-agent-install').ackResult.reload, {
-    method: 'restartExtensionHost',
+    method: 'reloadWindow',
+    notice: '服务器代理已更新，请在该服务器窗口执行一次重载窗口',
     reason: 'agentUpgrade',
   });
   assert.equal(executed.includes('codexSwitcherRemote.restart'), false);
-  assert.equal(executed.includes('workbench.action.restartExtensionHost'), true);
+  assert.equal(executed.includes('workbench.action.reloadWindow'), true);
 });
 
 test('同组额外SSH窗口收到remoteReload后也走远端自退出', async () => {

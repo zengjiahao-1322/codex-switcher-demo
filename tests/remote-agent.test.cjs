@@ -41,6 +41,45 @@ test('状态只给模型、provider 和 API 地址，不含密钥', () => {
   assert.equal(JSON.stringify(status).includes(SECRET), false);
 });
 
+test('protocol 4 原地更新只接受两份代理文件，校验后原子写入并退出', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-remote-update-')),
+    home = path.join(root, 'home'),
+    extensionPath = path.join(root, 'extension');
+  fs.mkdirSync(home);
+  fs.mkdirSync(extensionPath);
+  fs.writeFileSync(
+    path.join(extensionPath, 'package.json'),
+    JSON.stringify({ name: 'codex-switcher-remote', version: '0.1.6-rc.2' }),
+  );
+  fs.writeFileSync(path.join(extensionPath, 'extension.cjs'), 'old extension');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(require('node:child_process'), 'execFileSync', () => '');
+  t.mock.method(process, 'kill', () => {});
+  const agent = createAgent({ home, extensionPath, version: 'ignored' }),
+    extensionCjs = 'new extension',
+    packageJson = JSON.stringify({ name: 'codex-switcher-remote', version: '0.1.6-rc.3' }),
+    result = agent.update({
+      extensionCjs,
+      packageJson,
+      extensionSha256: sha(extensionCjs),
+      packageSha256: sha(packageJson),
+    });
+  assert.equal(result.updated, true);
+  assert.equal(result.reload.method, 'remoteHostExit');
+  assert.equal(agent.status().agentVersion, '0.1.6-rc.3');
+  assert.equal(fs.readFileSync(path.join(extensionPath, 'extension.cjs'), 'utf8'), extensionCjs);
+  assert.equal(fs.readFileSync(path.join(extensionPath, 'package.json'), 'utf8'), packageJson);
+  t.mock.timers.tick(300);
+  assert.throws(
+    () => agent.update({ extensionCjs, packageJson, extensionSha256: 'bad', packageSha256: sha(packageJson) }),
+    /extension\.cjs 校验失败/,
+  );
+  assert.throws(
+    () => agent.update({ extensionCjs, packageJson, extensionSha256: sha(extensionCjs), packageSha256: sha(packageJson), path: '../x' }),
+    /参数无效/,
+  );
+});
+
 test('restart先返回确认，再结束直接子进程和当前扩展宿主', async (t) => {
   const killed = [];
   t.mock.timers.enable({ apis: ['setTimeout'] });

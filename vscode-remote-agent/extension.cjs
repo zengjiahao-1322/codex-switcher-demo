@@ -11,8 +11,8 @@ const CONFIG = 'config.toml',
   AUTH = 'auth.json',
   BACKUP = '.switcher-backup';
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
-// 协议号：同一版本号重新发布时，靠它认出缺少登录读写的旧代理（2 = 带 readAuth 和登录写入）。
-const PROTOCOL = 3;
+// 协议号：同一版本号重新发布时，靠它认出缺少登录读写的旧代理（2 = 带 readAuth 和登录写入，4 = 原地更新）。
+const PROTOCOL = 4;
 
 const claims = (token) => JSON.parse(Buffer.from(token.split('.')[1], 'base64url'));
 // 只取账号身份、邮箱、套餐和登录刷新时间，令牌本身不读出。
@@ -103,9 +103,20 @@ function stopDirectChildren() {
   process.kill(process.pid, 'SIGTERM');
 }
 
-function createAgent({ home, version }) {
+function createAgent({ home, version, extensionPath }) {
   const startedAt = new Date().toISOString();
   const file = (name) => path.join(home, name);
+  const extensionDir = extensionPath || __dirname,
+    packageFile = path.join(extensionDir, 'package.json'),
+    versionOverride = !extensionPath && version != null;
+  const runtimeVersion = () => {
+    if (versionOverride) return version;
+    try {
+      return JSON.parse(fs.readFileSync(packageFile, 'utf8')).version;
+    } catch {
+      return version;
+    }
+  };
   const content = (name) => (fs.existsSync(file(name)) ? fs.readFileSync(file(name), 'utf8') : '');
   const snapshot = (name) => {
     const text = content(name);
@@ -121,7 +132,7 @@ function createAgent({ home, version }) {
       const exists = fs.existsSync(file(CONFIG));
       const children = directChildren();
       return {
-        agentVersion: version,
+        agentVersion: runtimeVersion(),
         startedAt,
         protocol: PROTOCOL,
         host: os.hostname(),
@@ -136,6 +147,37 @@ function createAgent({ home, version }) {
     },
     read: () => snapshot(CONFIG),
     readAuth: () => snapshot(AUTH),
+    update(input) {
+      const keys = Object.keys(input || {});
+      if (
+        keys.some(
+          (key) =>
+            !['extensionCjs', 'packageJson', 'extensionSha256', 'packageSha256'].includes(key),
+        ) ||
+        keys.length !== 4 ||
+        typeof input.extensionCjs !== 'string' ||
+        typeof input.packageJson !== 'string' ||
+        typeof input.extensionSha256 !== 'string' ||
+        typeof input.packageSha256 !== 'string'
+      )
+        throw Error('远端代理更新参数无效。');
+      if (sha256(input.extensionCjs) !== input.extensionSha256)
+        throw Error('远端代理 extension.cjs 校验失败。');
+      if (sha256(input.packageJson) !== input.packageSha256)
+        throw Error('远端代理 package.json 校验失败。');
+      let packageData;
+      try {
+        packageData = JSON.parse(input.packageJson);
+      } catch {
+        throw Error('远端代理 package.json 无法解析。');
+      }
+      if (packageData.name !== 'codex-switcher-remote' || typeof packageData.version !== 'string')
+        throw Error('远端代理 package.json 内容无效。');
+      writeAtomic(path.join(extensionDir, 'extension.cjs'), input.extensionCjs);
+      writeAtomic(packageFile, input.packageJson);
+      const restarted = this.restart();
+      return { updated: true, agentVersion: packageData.version, reload: { method: 'remoteHostExit' }, ...restarted };
+    },
     // text 为 null 时只写登录（同步较新的登录），auth 缺省时只写配置。
     write(input) {
       const keys = Object.keys(input || {});
@@ -190,9 +232,9 @@ function activate(context) {
   const vscode = require('vscode');
   const agent = createAgent({
     home: path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex')),
-    version: require('./package.json').version,
+    extensionPath: context.extensionPath || __dirname,
   });
-  for (const name of ['status', 'read', 'readAuth', 'write', 'restart'])
+  for (const name of ['status', 'read', 'readAuth', 'write', 'update', 'restart'])
     context.subscriptions.push(
       vscode.commands.registerCommand('codexSwitcherRemote.' + name, (input) => agent[name](input)),
     );

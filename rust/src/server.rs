@@ -113,6 +113,16 @@ pub fn extension_archive(app: &App, remote: bool) -> io::Result<Vec<u8>> {
     bytes.extend_from_slice(&0u16.to_le_bytes());
     Ok(bytes)
 }
+pub fn extension_sources(app: &App, remote: bool) -> io::Result<(String, String)> {
+    let source = app.web.parent().unwrap().join(if remote {
+        "vscode-remote-agent"
+    } else {
+        "vscode-companion"
+    });
+    let package = fs::read_to_string(source.join("package.json"))?;
+    let extension = fs::read_to_string(source.join("extension.cjs"))?;
+    Ok((extension, package))
+}
 const ACTIONS: &[&str] = &[
     "quit",
     "uninstall",
