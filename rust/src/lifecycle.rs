@@ -159,11 +159,7 @@ pub fn clean_records(app: &App) -> io::Result<()> {
         .filter(|p| {
             p.file_name()
                 .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("private"))
-                && p.parent().is_some_and(|parent| {
-                    !crate::platform::display_path(parent).eq_ignore_ascii_case(
-                        &crate::platform::display_path(&crate::instance::project_root()),
-                    )
-                })
+                && crate::migration::configured_home().is_none()
         })
         .map(|p| p.join("running.json"));
     for file in [
