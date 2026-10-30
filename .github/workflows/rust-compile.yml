@@ -1,12 +1,7 @@
 name: Rust compile and backend parity
 on:
   push:
-    branches: [main]
-    paths:
-      ['rust/**', 'tests/**', 'scripts/**', 'platform/**', '.github/workflows/rust-compile.yml']
-  pull_request:
-    paths:
-      ['rust/**', 'tests/**', 'scripts/**', 'platform/**', '.github/workflows/rust-compile.yml']
+    tags: ['v*']
   workflow_dispatch:
 permissions:
   contents: read
