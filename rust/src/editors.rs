@@ -61,6 +61,7 @@ pub struct Runtime {
     connection: Mutex<HashMap<String, (String, Instant, Value)>>,
     states: Mutex<HashMap<String, Value>>,
     pub remote_states: Mutex<HashMap<String, Value>>,
+    pub heartbeat: Mutex<crate::diagnostics::Heartbeat>,
     watching: Mutex<Option<Watch>>,
 }
 struct Watch {
@@ -652,6 +653,7 @@ fn subscribe(
 pub async fn heartbeat(app: Arc<App>, input: &Value) -> io::Result<Value> {
     let mut result = registry(&app, input, false)?;
     let mut conn = connection(&app, input).await?;
+    crate::diagnostics::heartbeat_window(&app, input, text(&conn["state"]));
     let remote_confirmed = if input["remoteType"] == "ssh-remote" {
         crate::remote::confirm(&app, input)?
     } else {
@@ -706,6 +708,7 @@ pub async fn heartbeat(app: Arc<App>, input: &Value) -> io::Result<Value> {
         conn = connection(&app, input).await?;
     }
     result["connection"] = conn;
+    crate::diagnostics::heartbeat_window(&app, input, text(&result["connection"]["state"]));
     result["longPoll"] = json!(true);
     Ok(result)
 }

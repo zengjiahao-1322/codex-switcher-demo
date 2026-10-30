@@ -2,11 +2,221 @@
 use regex::{Regex, RegexBuilder};
 use serde_json::{Value, json};
 use std::{
+    collections::BTreeMap,
     env, fs, io,
     io::Write,
     path::{Path, PathBuf},
     sync::OnceLock,
 };
+
+#[derive(Default)]
+pub struct Heartbeat {
+    pub count: u64,
+    pub last_at: Option<String>,
+    pub windows: BTreeMap<String, Value>,
+}
+pub fn heartbeat_received(app: &crate::server::App) {
+    let mut state = app.editors.heartbeat.lock().unwrap();
+    state.count += 1;
+    state.last_at = Some(now());
+}
+pub fn heartbeat_window(app: &crate::server::App, input: &Value, state: &str) {
+    if let Some(id) = input["id"].as_str() {
+        app.editors.heartbeat.lock().unwrap().windows.insert(
+            id.to_owned(),
+            json!({"id":id,"version":input["companionVersion"].as_str(),"state":state}),
+        );
+    }
+}
+const COMPANION_ID: &str = "codex-switcher-demo.codex-switcher-companion";
+
+fn disabled_extensions(user: &Path) -> Value {
+    // VS Code stores this one key in SQLite. Database::open uses SQLITE_OPEN_READONLY.
+    let file = user.join("globalStorage/state.vscdb");
+    let result = (|| -> io::Result<bool> {
+        let db = crate::sqlite::Database::open(&file)?;
+        let rows = db.query(
+            "SELECT CAST(value AS TEXT) AS value FROM ItemTable WHERE key = ?",
+            &[json!("extensionsIdentifiers/disabled")],
+        )?;
+        let disabled: Value = rows
+            .first()
+            .map(|row| serde_json::from_str(row["value"].as_str().unwrap_or("[]")))
+            .transpose()
+            .map_err(io::Error::other)?
+            .unwrap_or(json!([]));
+        Ok(disabled.as_array().is_some_and(|items| {
+            items.iter().any(|entry| {
+                entry
+                    .as_str()
+                    .or_else(|| entry["id"].as_str())
+                    .is_some_and(|id| id.eq_ignore_ascii_case(COMPANION_ID))
+            })
+        }))
+    })();
+    match result {
+        Ok(disabled) => json!({"path":file,"scope":"global","disabled":disabled}),
+        Err(error) => {
+            json!({"path":file,"scope":"global","disabled":null,"reason":error.to_string()})
+        }
+    }
+}
+fn companion_installations() -> Value {
+    let home = crate::platform::user_home();
+    let config = if cfg!(windows) {
+        env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("AppData/Roaming"))
+    } else if cfg!(target_os = "macos") {
+        home.join("Library/Application Support")
+    } else {
+        home.join(".config")
+    };
+    let mut editors = Vec::new();
+    for (folder, product) in [
+        (".vscode", "Code"),
+        (".vscode-insiders", "Code - Insiders"),
+        (".cursor", "Cursor"),
+        (".windsurf", "Windsurf"),
+    ] {
+        let directory = home.join(folder).join("extensions");
+        let registry = directory.join("extensions.json");
+        let registration = fs::read_to_string(&registry)
+            .and_then(|s| serde_json::from_str::<Value>(&s).map_err(io::Error::other));
+        let mut row = json!({"editor":product,"extensionsDir":directory,"extensions":[],"disabled":disabled_extensions(&config.join(product).join("User"))});
+        match fs::read_dir(&directory) {
+            Ok(entries) => {
+                for entry in entries {
+                    let entry = match entry {
+                        Ok(e) => e,
+                        Err(e) => {
+                            row["scanError"] = json!(e.to_string());
+                            continue;
+                        }
+                    };
+                    let folder = entry.file_name().to_string_lossy().to_string();
+                    if !folder
+                        .to_lowercase()
+                        .starts_with(&format!("{COMPANION_ID}-"))
+                    {
+                        continue;
+                    }
+                    let mut extension = json!({"folder":folder});
+                    match fs::read_to_string(entry.path().join("package.json"))
+                        .and_then(|s| serde_json::from_str::<Value>(&s).map_err(io::Error::other))
+                    {
+                        Ok(package) => extension["version"] = package["version"].clone(),
+                        Err(error) => extension["versionError"] = json!(error.to_string()),
+                    }
+                    match &registration {
+                        Ok(value) => {
+                            extension["registered"] =
+                                json!(value.as_array().is_some_and(|items| items.iter().any(
+                                    |item| {
+                                        let location = item["relativeLocation"]
+                                            .as_str()
+                                            .or_else(|| item["location"]["path"].as_str());
+                                        item["identifier"]["id"]
+                                            .as_str()
+                                            .is_some_and(|id| id.eq_ignore_ascii_case(COMPANION_ID))
+                                            && location.is_none_or(|s| {
+                                                s.trim_end_matches(['/', '\\'])
+                                                    .rsplit(['/', '\\'])
+                                                    .next()
+                                                    == Some(folder.as_str())
+                                            })
+                                    }
+                                )))
+                        }
+                        Err(error) => {
+                            extension["registered"] = Value::Null;
+                            extension["registrationError"] = json!(error.to_string());
+                        }
+                    }
+                    row["extensions"].as_array_mut().unwrap().push(extension);
+                }
+            }
+            Err(error) => row["scanError"] = json!(error.to_string()),
+        }
+        row["installed"] = json!(!row["extensions"].as_array().unwrap().is_empty());
+        editors.push(row);
+    }
+    json!({"editors":editors})
+}
+fn discovery_status(app: &crate::server::App) -> Value {
+    let directory = env::var_os("BRIDGE_DISCOVERY_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| crate::platform::user_home().join(".codex-api-switcher"));
+    let file = directory.join("connection.json");
+    let mut row = json!({"path":file,"modifiedAt":null,"pid":null,"port":null,"matchesSelf":false});
+    let result = (|| -> io::Result<()> {
+        row["modifiedAt"] = json!(
+            time::OffsetDateTime::from(fs::metadata(&file)?.modified()?)
+                .format(&time::format_description::well_known::Rfc3339)
+                .map_err(io::Error::other)?
+        );
+        let value: Value = serde_json::from_slice(&fs::read(&file)?).map_err(io::Error::other)?;
+        row["pid"] = json!(value["pid"].as_u64());
+        let port = value["url"]
+            .as_str()
+            .and_then(|s| reqwest::Url::parse(s).ok())
+            .and_then(|u| u.port_or_known_default());
+        row["port"] = json!(port);
+        row["matchesSelf"] = json!(
+            value["pid"].as_u64() == Some(std::process::id() as u64) && port == Some(app.port)
+        );
+        Ok(())
+    })();
+    if let Err(error) = result {
+        row["reason"] = json!(error.to_string());
+    }
+    row
+}
+pub fn companion_snapshot(app: &crate::server::App) -> Value {
+    let state = app.editors.heartbeat.lock().unwrap();
+    let heartbeat = json!({"count":state.count,"lastAt":state.last_at,"windows":state.windows.values().collect::<Vec<_>>()});
+    drop(state);
+    json!({"companion":companion_installations(),"discovery":discovery_status(app),"heartbeat":heartbeat})
+}
+pub async fn companion_silent(app: std::sync::Arc<crate::server::App>) -> io::Result<()> {
+    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    if app.editors.heartbeat.lock().unwrap().count != 0 {
+        return Ok(());
+    }
+    let inventory = crate::platform::scan()?;
+    let editors = inventory["ancestry"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| {
+            let name = row["name"].as_str().unwrap_or("").to_lowercase();
+            matches!(
+                name.as_str(),
+                "code.exe"
+                    | "code - insiders.exe"
+                    | "cursor.exe"
+                    | "windsurf.exe"
+                    | "code"
+                    | "code - insiders"
+                    | "cursor"
+                    | "windsurf"
+            ) || (name == "electron"
+                && row["exe"].as_str().is_some_and(|s| {
+                    s.contains("Visual Studio Code")
+                        || s.contains("Cursor.app/")
+                        || s.contains("Windsurf.app/")
+                }))
+        })
+        .map(|row| json!({"pid":row["pid"],"name":row["name"]}))
+        .collect::<Vec<_>>();
+    if !editors.is_empty() && app.editors.heartbeat.lock().unwrap().count == 0 {
+        let mut fields = companion_snapshot(&app);
+        fields["editors"] = json!(editors);
+        log(&app.bridge, "companion.silent", fields)?;
+    }
+    Ok(())
+}
 
 pub fn now() -> String {
     time::OffsetDateTime::now_utc()
@@ -139,7 +349,7 @@ pub fn export(app: &crate::server::App) -> io::Result<Value> {
         })
         .unwrap_or((Value::Null, false));
     let clients = crate::platform::client_status(&app.codex_home())?;
-    let header = redact(&json!({
+    let mut header = json!({
         "build":crate::instance::runtime(),
         "platform":if cfg!(windows){
             "win32"
@@ -168,7 +378,12 @@ pub fn export(app: &crate::server::App) -> io::Result<Value> {
         "current":app.state()?["current"],
         "clients":clients["clients"],
         "remotes":remote_snapshot(&app.bridge)?
-    }));
+    });
+    header
+        .as_object_mut()
+        .unwrap()
+        .extend(companion_snapshot(app).as_object().unwrap().clone());
+    let header = redact(&header);
     let lines = recent(&app.bridge, 2000)?
         .iter()
         .map(|row| row.to_string())

@@ -180,6 +180,7 @@ fn error(status: u16, message: &str) -> Response<Body> {
     )
 }
 fn companion_reject(app: &App, reason: &str, input: &Value) {
+    crate::diagnostics::heartbeat_window(app, input, "rejected");
     if let Err(error) = crate::diagnostics::log(
         &app.bridge,
         "companion.reject",
@@ -317,6 +318,9 @@ pub(crate) async fn serve(
                 401,
                 "本机会话已过期，请从桌面快捷方式重新打开切换器。",
             ));
+        }
+        if action == "clientHeartbeat" && req.method() == "POST" {
+            crate::diagnostics::heartbeat_received(&app);
         }
         let value = match (req.method().as_str(), route.as_str()) {
             ("GET", "/api/runtime") => Ok(crate::instance::runtime()),

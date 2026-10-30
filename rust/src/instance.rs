@@ -499,6 +499,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .as_object_mut()
         .unwrap()
         .extend(handover.as_object().unwrap().clone());
+    startup.as_object_mut().unwrap().extend(
+        crate::diagnostics::companion_snapshot(&app)
+            .as_object()
+            .unwrap()
+            .clone(),
+    );
     crate::diagnostics::log(&app.bridge, "startup", startup)?;
     let stop_signal = crate::lifecycle::stop_signal()?;
     tokio::pin!(stop_signal);
@@ -508,6 +514,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
     open_url(connection["url"].as_str().unwrap())?;
     let app = Arc::new(app);
+    let companion_app = app.clone();
+    tokio::spawn(async move {
+        if let Err(error) = crate::diagnostics::companion_silent(companion_app).await {
+            eprintln!("Companion silence diagnostic failed: {error}");
+        }
+    });
     crate::migration::start(app.clone(), copied_local);
     if let (Some(directory), Some(sequence)) =
         (discovery, runtime()["sequence"].as_u64().filter(|n| *n > 0))
