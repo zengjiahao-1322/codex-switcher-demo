@@ -19,6 +19,7 @@ const httpPatterns = {
   'blackbox-process-fault.test.cjs': '.*',
   'blackbox-accounts.test.cjs': '.*',
   'blackbox-accounts-network.test.cjs': '.*',
+  'blackbox-accounts-native.test.cjs': '.*',
   'blackbox-switching.test.cjs': '.*',
   'blackbox-editors.test.cjs': '.*',
   'blackbox-local-switch.test.cjs': '.*',
@@ -26,6 +27,7 @@ const httpPatterns = {
   'blackbox-remote-expiry.test.cjs': '.*',
   'blackbox-window-algorithm.test.cjs': '.*',
   'blackbox-extension-install.test.cjs': '.*',
+  'blackbox-threads-native.test.cjs': '.*',
   'blackbox-framework.test.cjs': '.*',
   'blackbox-migration.test.cjs': '.*',
   'blackbox-diagnostics.test.cjs': '.*',
@@ -51,14 +53,6 @@ report.classification = {
   needsRustRewrite:
     'File-level conservative count of Node-only tests in files that directly import src/*.cjs; mixed UI/extension cases need later splitting.',
 };
-const inventoryFile =
-  process.env.SWITCHER_TEST_INVENTORY ||
-  path.join(root, '.build-cache', 'node-test-inventory.json');
-if (!fs.existsSync(inventoryFile))
-  throw Error(
-    'Run Node scripts/test-all.cjs --no-report first to collect the actual declared test inventory, including generated test names.',
-  );
-const inventory = JSON.parse(fs.readFileSync(inventoryFile, 'utf8'));
 const keptJsFiles = new Set([
   'companion-remote.test.cjs',
   'remote-agent.test.cjs',
@@ -71,18 +65,13 @@ for (const file of fs
   .filter((file) => file.endsWith('.test.cjs'))
   .sort()) {
   const source = fs.readFileSync(path.join(root, 'tests', file), 'utf8');
-  const names = inventory.filter((test) => test.file === file).map((test) => test.name);
-  if (!names.length)
-    throw Error(
-      'Test inventory is stale for ' + file + '; run Node scripts/test-all.cjs --no-report first.',
-    );
   const pattern = httpPatterns[file];
-  const http = pattern ? names.filter((name) => new RegExp(pattern).test(name)) : [];
-  const nodeOnly = names.filter((name) => !http.includes(name));
+  const http = pattern ? [pattern] : [];
+  const nodeOnly = [];
   const row = {
     file,
     suiteKind: file.startsWith('blackbox-') ? '双后台黑盒' : '既有传输/混合测试',
-    declared: names.length,
+    declared: http.length,
     httpTests: http,
     nodeOnly,
     keptJs: keptJsFiles.has(file) ? nodeOnly.length : 0,

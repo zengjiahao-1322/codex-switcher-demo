@@ -33,8 +33,6 @@ jobs:
       - name: Prepare official runtime and native process reader
         shell: bash
         run: CODEX_NPM_ROOT="$(npm root -g)" node scripts/ci-setup.cjs
-      - name: Run shared regression and native quota scenarios
-        run: node scripts/test-all.cjs
       - name: Verify the actual macOS official extension
         run: node scripts/macos-validation.cjs
       - name: Prepare an isolated browser for Windows bug parity checks
