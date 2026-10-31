@@ -184,7 +184,7 @@ function serverCard(authority, rows) {
       );
     card.append(install);
     if (rows.some((r) => r.windows.some((w) => w.installStatus === 'notActive')))
-      card.append(note('已发送远端扩展更新，等待服务器扩展宿主自动重启。'));
+      card.append(note('新代理还没生效，请在这个 VS Code 窗口执行一次“重载窗口”。'));
     if (installs.has(authority)) card.append(note(installs.get(authority)));
   } else card.append(chooser(authority, host, rows));
   return card;
