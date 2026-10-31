@@ -862,20 +862,19 @@ function createService({
             { timeout: 60000 },
           );
         if (result?.installed !== true) throw Error('编辑器未确认远端代理安装成功');
-        if (result?.reload?.method !== 'promptReconnect')
-          remote.markReload(bridgeHome, id, {
-            kind: 'install',
-            host,
-            authority: window.authority,
-            codexHome: window.remoteAgent?.codexHome || null,
-            from,
-            to,
-            companionVersion: to,
-            agentVersion: window.remoteAgent?.agentVersion || null,
-            requestedAt: Date.now(),
-            method: result?.reload?.method || 'remoteHostExit',
-            reason: result?.reload?.reason || null,
-          });
+        remote.markReload(bridgeHome, id, {
+          kind: 'install',
+          host,
+          authority: window.authority,
+          codexHome: window.remoteAgent?.codexHome || null,
+          from,
+          to,
+          companionVersion: to,
+          agentVersion: window.remoteAgent?.agentVersion || null,
+          requestedAt: Date.now(),
+          method: result?.reload?.method || 'remoteHostExit',
+          reason: result?.reload?.reason || null,
+        });
         eventLog.log(bridgeHome, 'remote.install', { host, from, to, status: 'installed' });
         return result;
       } catch (error) {

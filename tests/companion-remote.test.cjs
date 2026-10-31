@@ -612,7 +612,7 @@ test('本机窗口快捷切换：列出全部 API，确认后按默认模型切�
   assert.equal(calls.find((c) => c.route === 'state').method, 'GET');
 });
 
-test('协议2旧代理升级提示关闭窗口重连，不调用重载命令', async () => {
+test('协议2旧代理升级提示重载窗口并调用reloadWindow，不调用尚未注册的restart', async () => {
   const { requests, executed } = await runCompanion({
     agentProtocol: 2,
     commandsFor: (reqs) =>
@@ -626,12 +626,12 @@ test('协议2旧代理升级提示关闭窗口重连，不调用重载命令', a
     until: (reqs) => reqs.some((r) => r.ack === 'old-agent-install') && reqs.length > 3,
   });
   assert.deepEqual(requests.find((r) => r.ack === 'old-agent-install').ackResult.reload, {
-    method: 'promptReconnect',
-    notice: '服务器代理已更新，请关闭此窗口后重新连接',
+    method: 'reloadWindow',
+    notice: '正在重载窗口以启用新代理',
     reason: 'agentUpgrade',
   });
   assert.equal(executed.includes('codexSwitcherRemote.restart'), false);
-  assert.equal(executed.includes('workbench.action.reloadWindow'), false);
+  assert.equal(executed.includes('workbench.action.reloadWindow'), true);
 });
 
 test('同组额外SSH窗口收到remoteReload后也走远端自退出', async () => {

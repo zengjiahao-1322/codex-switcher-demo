@@ -232,10 +232,18 @@ function activate(context) {
       }
       return;
     }
-    if (reload?.method === 'promptReconnect') {
-      void vscode.window.showInformationMessage(
-        reload.notice || '服务器代理已更新，请关闭此窗口后重新连接',
-      );
+    if (reload?.method === 'reloadWindow') {
+      void vscode.window.showInformationMessage(reload.notice || '正在重载窗口以启用新代理');
+      await context.workspaceState.update('codexSwitcher.lastReload', commandId);
+      setTimeout(async () => {
+        try {
+          await vscode.commands.executeCommand('workbench.action.reloadWindow');
+        } catch (error) {
+          await context.workspaceState.update('codexSwitcher.pendingReload', undefined);
+          await vscode.window.showWarningMessage('服务器代理已更新，请关闭该窗口后重新连接：' + error.message);
+          await ack(c, data, commandId, 'reload_failed', { ackError: error.message }).catch(() => {});
+        }
+      }, 200);
       return;
     }
     await context.workspaceState.update('codexSwitcher.lastReload', commandId);
@@ -322,9 +330,9 @@ function activate(context) {
     const reload =
       !remoteAgent || remoteAgent.protocol < 4
         ? {
-            method: 'promptReconnect',
+            method: 'reloadWindow',
             reason: 'agentUpgrade',
-            notice: '服务器代理已更新，请关闭此窗口后重新连接',
+            notice: '正在重载窗口以启用新代理',
           }
         : await planRemoteRestart();
     await ack(c, data, command.id, 'completed', {

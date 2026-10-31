@@ -371,9 +371,7 @@ pub async fn install(app: Arc<App>, input: &Value) -> io::Result<Value> {
         if (protocol >= 4 && result["updated"] != true)
             || (protocol < 4 && result["installed"] != true)
         { return Err(io::Error::other("编辑器未确认远端代理更新成功")); }
-        if result["reload"]["method"] != "promptReconnect" {
-            mark_reload(app.clone(),id,json!({"kind":"install","host":host,"authority":row["authority"],"codexHome":row["remoteAgent"]["codexHome"],"from":row["remoteAgent"]["agentVersion"],"to":version,"companionVersion":version,"requestedAt":millis(),"method":result["reload"]["method"].as_str().unwrap_or("remoteHostExit"),"reason":result["reload"]["reason"]}))?;
-        }
+        mark_reload(app.clone(),id,json!({"kind":"install","host":host,"authority":row["authority"],"codexHome":row["remoteAgent"]["codexHome"],"from":row["remoteAgent"]["agentVersion"],"to":version,"companionVersion":version,"requestedAt":millis(),"method":result["reload"]["method"].as_str().unwrap_or("remoteHostExit"),"reason":result["reload"]["reason"]}))?;
         Ok::<_,io::Error>(result)
     }.await;
     log(
