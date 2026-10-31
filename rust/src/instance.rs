@@ -581,10 +581,24 @@ fn cleanup_legacy_private(bridge: &Path) -> io::Result<()> {
     if bridge.join("updates/cleanup.json").exists() {
         return Ok(());
     }
+    let private = project_root().join("private");
+    let migrated = crate::accounts::read(&bridge.join("migrated.json"), Value::Null)?;
+    let merged = migrated["completed"] == true
+        && migrated["sources"]
+            .as_array()
+            .is_some_and(|rows| rows.iter().all(|row| row["failed"] != true));
+    if !merged || crate::migration::legacy_home(bridge, &project_root()) || !private.is_dir() {
+        return Ok(());
+    }
     let marker = bridge.join("updates/installed-at.json");
     let marker_value = crate::accounts::read(&marker, Value::Null)?;
     let Some(at) = marker_value["at"].as_str().map(str::to_owned) else {
-        return Ok(());
+        write_json(&marker, &json!({"at":crate::diagnostics::now()}))?;
+        return crate::diagnostics::log(
+            bridge,
+            "data.cleanup",
+            json!({"status":"scheduled","afterDays":7}),
+        );
     };
     let Ok(stamp) =
         time::OffsetDateTime::parse(&at, &time::format_description::well_known::Rfc3339)
@@ -592,10 +606,6 @@ fn cleanup_legacy_private(bridge: &Path) -> io::Result<()> {
         return Ok(());
     };
     if (time::OffsetDateTime::now_utc() - stamp).whole_days() < 7 {
-        return Ok(());
-    }
-    let private = project_root().join("private");
-    if crate::migration::legacy_home(bridge, &project_root()) || !private.is_dir() {
         return Ok(());
     }
     let mut files = 0u64;

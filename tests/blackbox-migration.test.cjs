@@ -233,3 +233,130 @@ test(
     assert.equal(fs.existsSync(path.join(f.root, 'local/CodexSwitcher')), false);
   },
 );
+
+test(
+  '迁移成功、没有 installed-at.json：启动后安排七天清理',
+  { skip: process.platform !== 'win32', timeout: 40000 },
+  async (t) => {
+    const f = await startBackend(t, {
+      setup(input) {
+        setup(input);
+        fs.writeFileSync(path.join(input.root, 'volumes/one/private/old.txt'), 'old');
+        write(path.join(input.root, 'volumes/one/private/running.json'), { running: true });
+      },
+    });
+    const data = path.join(f.root, 'local/CodexSwitcher');
+    await completed(path.join(data, 'migrated.json'));
+    f.child.kill();
+    await f.closed;
+    const second = launchBackend(f.environment);
+    f.track(second);
+    let output = '';
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(Error('Second startup timed out: ' + output)), 12000);
+      second.stdout.on('data', (chunk) => {
+        output += chunk;
+        if (output.includes('BRIDGE_READY') || output.includes('"event":"ready"')) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+    });
+    const marker = path.join(data, 'updates/installed-at.json');
+    assert.equal(fs.existsSync(marker), true);
+    assert.equal(fs.existsSync(path.join(f.root, 'volumes/one/private/old.txt')), true);
+    const cleanup = fs
+      .readFileSync(path.join(data, 'logs/switcher.log'), 'utf8')
+      .split('\n')
+      .filter((line) => line.includes('"event":"data.cleanup"'))
+      .map((line) => JSON.parse(line))
+      .at(-1);
+    assert.equal(cleanup.status, 'scheduled');
+  },
+);
+
+test(
+  '迁移成功、installed-at.json 已超过七天：启动后清理旧 private',
+  { skip: process.platform !== 'win32', timeout: 40000 },
+  async (t) => {
+    const f = await startBackend(t, {
+      setup(input) {
+        setup(input);
+        fs.writeFileSync(path.join(input.root, 'volumes/one/private/old.txt'), 'old');
+        write(path.join(input.root, 'volumes/one/private/running.json'), { running: true });
+      },
+    });
+    const data = path.join(f.root, 'local/CodexSwitcher');
+    await completed(path.join(data, 'migrated.json'));
+    fs.mkdirSync(path.join(data, 'updates'), { recursive: true });
+    write(path.join(data, 'updates/installed-at.json'), {
+      at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    f.child.kill();
+    await f.closed;
+    const second = launchBackend(f.environment);
+    f.track(second);
+    let output = '';
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(Error('Second startup timed out: ' + output)), 12000);
+      second.stdout.on('data', (chunk) => {
+        output += chunk;
+        if (output.includes('BRIDGE_READY') || output.includes('"event":"ready"')) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+    });
+    assert.equal(fs.existsSync(path.join(f.root, 'volumes/one/private/old.txt')), false);
+    assert.equal(fs.existsSync(path.join(f.root, 'volumes/one/private/running.json')), true);
+    assert.equal(fs.existsSync(path.join(data, 'updates/cleanup.json')), true);
+    const cleanup = fs
+      .readFileSync(path.join(data, 'logs/switcher.log'), 'utf8')
+      .split('\n')
+      .filter((line) => line.includes('"event":"data.cleanup"'))
+      .map((line) => JSON.parse(line))
+      .at(-1);
+    assert.ok(cleanup.freedBytes > 0);
+  },
+);
+
+test(
+  '迁移部分失败、installed-at.json 已超过七天：保留旧 private',
+  { skip: process.platform !== 'win32', timeout: 40000 },
+  async (t) => {
+    const f = await startBackend(t, {
+      setup(input) {
+        setup(input);
+        const bad = path.join(input.root, 'volumes/z-bad');
+        oldCopy(bad, ['bad'], '03', 'bad');
+        write(path.join(bad, 'private/accounts/index.json'), [{ id: '../invalid' }]);
+        fs.writeFileSync(path.join(input.root, 'volumes/one/private/old.txt'), 'old');
+        write(path.join(input.root, 'volumes/one/private/running.json'), { running: true });
+      },
+    });
+    const data = path.join(f.root, 'local/CodexSwitcher');
+    const migrated = await completed(path.join(data, 'migrated.json'));
+    assert.equal(migrated.sources.some((source) => source.failed === true), true);
+    fs.mkdirSync(path.join(data, 'updates'), { recursive: true });
+    write(path.join(data, 'updates/installed-at.json'), {
+      at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    f.child.kill();
+    await f.closed;
+    const second = launchBackend(f.environment);
+    f.track(second);
+    let output = '';
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(Error('Second startup timed out: ' + output)), 12000);
+      second.stdout.on('data', (chunk) => {
+        output += chunk;
+        if (output.includes('BRIDGE_READY') || output.includes('"event":"ready"')) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+    });
+    assert.equal(fs.existsSync(path.join(f.root, 'volumes/one/private/old.txt')), true);
+    assert.equal(fs.existsSync(path.join(data, 'updates/cleanup.json')), false);
+  },
+);
