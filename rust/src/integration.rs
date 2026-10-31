@@ -429,9 +429,7 @@ pub fn desktop(discovery: &Path, sequence: u64) -> io::Result<()> {
                 return Ok(());
             }
         }
-        if link.exists() || prior["created"] != true {
-            windows::shortcut(&link, &exe, "")?;
-        }
+        windows::shortcut(&link, &exe, "")?;
         windows::register(&exe)?;
         crate::instance::write_json(
             &marker,

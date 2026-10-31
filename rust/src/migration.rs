@@ -11,43 +11,46 @@ pub fn configured_home() -> Option<PathBuf> {
     let configured = env::var_os("BRIDGE_HOME")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)?;
-    if cfg!(windows) && legacy_home(&configured, &crate::instance::project_root()) {
+    if (cfg!(windows) && legacy_home(&configured, &crate::instance::project_root()))
+        || normal_path(&configured) == normal_path(&default_home())
+    {
         None
     } else {
         Some(configured)
     }
 }
-pub fn legacy_home(home: &Path, install: &Path) -> bool {
-    let normal = |p: &Path| {
-        let mut normalized = PathBuf::new();
-        for part in std::path::absolute(p).unwrap().components() {
-            match part {
-                std::path::Component::ParentDir => {
-                    normalized.pop();
-                }
-                std::path::Component::CurDir => {}
-                _ => normalized.push(part),
+fn normal_path(path: &Path) -> String {
+    let mut normalized = PathBuf::new();
+    for part in std::path::absolute(path).unwrap().components() {
+        match part {
+            std::path::Component::ParentDir => {
+                normalized.pop();
             }
+            std::path::Component::CurDir => {}
+            _ => normalized.push(part),
         }
-        normalized
-            .to_string_lossy()
-            .replace('\\', "/")
-            .trim_end_matches('/')
-            .to_lowercase()
-    };
-    normal(home) == normal(&install.join("private"))
+    }
+    normalized
+        .to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase()
+}
+pub fn legacy_home(home: &Path, install: &Path) -> bool {
+    normal_path(home) == normal_path(&install.join("private"))
+}
+fn default_home() -> PathBuf {
+    if cfg!(windows) {
+        env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| crate::platform::user_home().join("AppData/Local"))
+            .join("CodexSwitcher")
+    } else {
+        crate::platform::user_home().join("Library/Application Support/CodexApiSwitcher")
+    }
 }
 pub fn data_home() -> PathBuf {
-    configured_home().unwrap_or_else(|| {
-        if cfg!(windows) {
-            env::var_os("LOCALAPPDATA")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| crate::platform::user_home().join("AppData/Local"))
-                .join("CodexSwitcher")
-        } else {
-            crate::platform::user_home().join("Library/Application Support/CodexApiSwitcher")
-        }
-    })
+    configured_home().unwrap_or_else(default_home)
 }
 pub fn summary(bridge: &Path) -> io::Result<Value> {
     let value = crate::accounts::read(&bridge.join("migrated.json"), Value::Null)?;

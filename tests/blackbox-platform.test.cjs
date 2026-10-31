@@ -80,6 +80,68 @@ function installation(sequence, discovery) {
   };
 }
 
+test('双后台黑盒：BRIDGE_HOME等于默认数据目录时仍写默认发现文件', async (t) => {
+  const f = await startBackend(t, {
+    setup(input) {
+      const { root, environment } = input;
+      installation(2)(input);
+      const user = path.join(root, 'user');
+      const discovery = path.join(user, '.codex-api-switcher');
+      fs.mkdirSync(user);
+      environment.USERPROFILE = user;
+      environment.LOCALAPPDATA = path.join(user, 'AppData', 'Local');
+      environment.BRIDGE_HOME = path.join(environment.LOCALAPPDATA, 'CodexSwitcher');
+      environment.SWITCHER_TEST_SHELL_ROOT = path.join(root, 'shell');
+      delete environment.BRIDGE_DISCOVERY_DIR;
+      fs.mkdirSync(environment.BRIDGE_HOME, { recursive: true });
+      fs.writeFileSync(
+        path.join(environment.BRIDGE_HOME, 'migrated.json'),
+        JSON.stringify({ completed: true, sources: [] }),
+      );
+      fs.mkdirSync(discovery, { recursive: true });
+      fs.writeFileSync(
+        path.join(discovery, 'shortcut.json'),
+        JSON.stringify({ created: true, sequence: 1000 }),
+      );
+    },
+  });
+  const connection = path.join(f.environment.USERPROFILE, '.codex-api-switcher', 'connection.json');
+  assert.equal(JSON.parse(fs.readFileSync(connection, 'utf8')).pid, f.child.pid);
+});
+
+test(
+  '双后台黑盒：新序号且缺快捷方式时创建隔离桌面快捷方式',
+  { skip: process.platform !== 'win32' },
+  async (t) => {
+    const f = await startBackend(t, {
+      setup(input) {
+        installation(2)(input);
+        const user = path.join(input.root, 'user');
+        fs.mkdirSync(user);
+        input.environment.USERPROFILE = user;
+        input.environment.LOCALAPPDATA = path.join(user, 'AppData', 'Local');
+        input.environment.SWITCHER_TEST_SHELL_ROOT = path.join(input.root, 'shell');
+        fs.mkdirSync(input.environment.SWITCHER_TEST_SHELL_ROOT, { recursive: true });
+        fs.writeFileSync(
+          path.join(input.environment.BRIDGE_DISCOVERY_DIR, 'shortcut.json'),
+          JSON.stringify({ created: true, sequence: 1 }),
+        );
+      },
+    });
+    const link = path.join(
+      path.dirname(f.environment.BRIDGE_DISCOVERY_DIR),
+      'shell',
+      'Desktop',
+      'Codex API Switcher.lnk',
+    );
+    const end = Date.now() + 5000;
+    while (!fs.existsSync(link) && Date.now() < end) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.equal(fs.existsSync(link), true);
+  },
+);
+
 test('双后台黑盒：仅从临时可信安装查找Codex，扩展版本按数字排序', async (t) => {
   let expected;
   const f = await startBackend(t, {

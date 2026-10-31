@@ -222,15 +222,18 @@ const subscriptionPast = (a) =>
   !!a.subscriptionUntil && Date.parse(a.subscriptionUntil) < Date.now();
 const liveUntil = (a) => a.quota?.subscriptionUntil;
 const willRenew = (a) => a.quota?.subscriptionWillRenew === true;
+const discountUntil = (a) => a.quota?.subscriptionDiscountUntil;
+const discountLabel = (a) => (a.quota?.subscriptionDiscountFree === true ? '免费至' : '优惠至');
 export const membershipExpired = (a) =>
   liveUntil(a)
     ? Date.parse(liveUntil(a)) < Date.now()
     : subscriptionPast(a) && accountPlan(a) === 'free';
 const renewed = (a) => subscriptionPast(a) && !!livePlan(a) && livePlan(a) !== 'free';
 export function membership(a) {
-  if (liveUntil(a)) return (willRenew(a) ? '下次续费 ' : '会员到期 ') + day(liveUntil(a));
+  if (discountUntil(a)) return discountLabel(a) + ' ' + day(discountUntil(a));
+  if (liveUntil(a)) return (willRenew(a) ? '下次账单 ' : '会员到期 ') + day(liveUntil(a));
   if (!a.subscriptionUntil) return '';
-  if (willRenew(a)) return '下次续费 ' + day(a.subscriptionUntil);
+  if (willRenew(a)) return '下次账单 ' + day(a.subscriptionUntil);
   if (renewed(a)) return '已续期，新日期待官方更新';
   if (subscriptionPast(a) && !membershipExpired(a)) return '会员日期待官方更新';
   return membershipExpired(a)
@@ -249,9 +252,10 @@ export function accountFacts(a) {
     facts.append(dt, dd);
   };
   fact('套餐', accountPlan(a));
+  if (discountUntil(a)) fact(discountLabel(a), day(discountUntil(a)));
   if (liveUntil(a) || a.subscriptionUntil)
     fact(
-      willRenew(a) ? '下次续费' : '会员到期',
+      willRenew(a) ? '下次账单' : '会员到期',
       willRenew(a)
         ? day(liveUntil(a) || a.subscriptionUntil)
         : liveUntil(a)

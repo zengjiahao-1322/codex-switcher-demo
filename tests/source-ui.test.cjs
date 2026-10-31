@@ -247,7 +247,7 @@ test('会员已到期的账号标出到期，详情显示套餐、到期、读�
   assert.match(facts[3][0], /（2 小时前）$/);
 });
 
-test('自动续费账号显示下次续费且不标记为到期', async () => {
+test('自动续费账号显示下次账单且不标记为到期', async () => {
   const renewal = new Date(Date.now() + 12 * 86400000).toISOString();
   const page = await runPage({
     respond: backend({
@@ -270,7 +270,7 @@ test('自动续费账号显示下次续费且不标记为到期', async () => {
   const card = page.created.find(
     (c) => c.tag === 'small' && c.node.textContent.startsWith('ChatGPT plus'),
   );
-  assert.match(card.node.textContent, /^ChatGPT plus · 下次续费 /);
+  assert.match(card.node.textContent, /^ChatGPT plus · 下次账单 /);
   const mark = page.created.length;
   page.created
     .find((c) => c.tag === 'button' && c.node.className === 'source-card')
@@ -282,6 +282,32 @@ test('自动续费账号显示下次续费且不标记为到期', async () => {
     new Date(renewal).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }),
   );
   assert.equal(facts[1].node.className, '');
+});
+
+test('优惠账号显示免费至', async () => {
+  const renewal = new Date(Date.now() + 12 * 86400000).toISOString();
+  const page = await runPage({
+    respond: backend({
+      accounts: [
+        {
+          id: 'discount',
+          label: 'discount@example.com',
+          email: 'discount@example.com',
+          plan: 'plus',
+          current: true,
+          quota: {
+            ...quota(80),
+            subscriptionDiscountUntil: renewal,
+            subscriptionDiscountFree: true,
+          },
+        },
+      ],
+    }),
+  });
+  const card = page.created.find(
+    (c) => c.tag === 'small' && c.node.textContent.startsWith('ChatGPT plus'),
+  );
+  assert.match(card.node.textContent, /^ChatGPT plus · 免费至 /);
 });
 
 // 读取额度时官方续期了令牌（plus 到期变 free），刷新后页面要显示新套餐和时间，不必重开页面。

@@ -54,6 +54,7 @@ foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFo
   Remove-Item (Join-Path $dir 'Codex API Switcher.lnk') -Force -ErrorAction SilentlyContinue
 }
 & (Join-Path $InstallDir 'platform\windows\desktop-integration.ps1') -InstallDir $InstallDir -RemoveRegistration
+Remove-Item (Join-Path $env:USERPROFILE '.codex-api-switcher\shortcut.json') -Force -ErrorAction SilentlyContinue
 # Autostart shortcut (normally removed by "cli.cjs cleanup"): any Startup shortcut pointing at this install's launcher.
 $startup = [Environment]::GetFolderPath('Startup'); $shell = New-Object -ComObject WScript.Shell
 Get-ChildItem $startup -Filter '*.lnk' -ErrorAction SilentlyContinue | ForEach-Object { if ($shell.CreateShortcut($_.FullName).Arguments -like "*$InstallDir*launch-hidden.vbs*") { Remove-Item $_.FullName -Force } }

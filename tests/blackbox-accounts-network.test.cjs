@@ -122,6 +122,14 @@ test('会员HTTPS对照：本地TLS真请求校验证书、账号请求头及日
   result = await run();
   assert.equal(result.until, '2031-01-01T00:00:00Z');
   assert.equal(result.willRenew, true);
+  body.accounts['workspace-alice'].entitlement.discount = {
+    discount_type: 'percentage',
+    amount: 100,
+    discount_expires_at: '2031-03-01T00:00:00Z',
+  };
+  result = await run();
+  assert.equal(result.discountUntil, '2031-03-01T00:00:00Z');
+  assert.equal(result.discountFree, true);
   for (const pair of [
     [401, 'PRIVATE ' + value.tokens.access_token],
     [200, 'not json SECRET'],

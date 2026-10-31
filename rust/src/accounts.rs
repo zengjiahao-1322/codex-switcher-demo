@@ -850,11 +850,17 @@ pub async fn read_subscription(
     } else {
         expires_at.or(renews_at)
     };
+    let discount = &account["entitlement"]["discount"];
+    let discount_until = discount
+        .get("discount_expires_at")
+        .filter(|value| timestamp(value) != 0);
+    let discount_free =
+        discount["discount_type"] == "percentage" && discount["amount"].as_f64() == Some(100.0);
     let result = if code.is_some_and(|c| (200..300).contains(&c))
         && date.is_some_and(|value| timestamp(value) != 0)
     {
         Some(
-            json!({"until":date,"checkedAt":now(),"willRenew":account["last_active_subscription"]["will_renew"]}),
+            json!({"until":date,"checkedAt":now(),"willRenew":account["last_active_subscription"]["will_renew"],"discountUntil":discount_until,"discountFree":discount_free}),
         )
     } else {
         None
@@ -870,10 +876,37 @@ pub async fn read_subscription(
             "expiresAt":account["entitlement"]["expires_at"],
             "renewsAt":account["entitlement"]["renews_at"],
             "willRenew":account["last_active_subscription"]["will_renew"],
-            "plan":account.get("plan").cloned().or_else(|| account["last_active_subscription"].get("plan").cloned()).unwrap_or(Value::Null),
+            "plan":account["entitlement"]["subscription_plan"],
+            "accountKeys":object_keys(account),
+            "entitlementKeys":object_keys(&account["entitlement"]),
+            "subscriptionKeys":object_keys(&account["last_active_subscription"]),
+            "offerFields":offer_fields(account),
         }),
     );
     result
+}
+fn object_keys(value: &Value) -> Value {
+    json!(
+        value
+            .as_object()
+            .map(|o| o.keys().collect::<Vec<_>>())
+            .unwrap_or_default()
+    )
+}
+fn offer_fields(account: &Value) -> Value {
+    let mut fields = serde_json::Map::new();
+    for section in ["entitlement", "last_active_subscription"] {
+        for (key, value) in account[section].as_object().into_iter().flatten() {
+            let name = key.to_ascii_lowercase();
+            if ["discount", "promo", "trial", "coupon", "offer"]
+                .iter()
+                .any(|word| name.contains(word))
+            {
+                fields.insert(format!("{section}.{key}"), value.clone());
+            }
+        }
+    }
+    Value::Object(fields)
 }
 fn buckets(result: &Value) -> Vec<Value> {
     let all = result["rateLimitsByLimitId"]
@@ -988,6 +1021,8 @@ async fn read_quota(app: &App, id: &str) -> io::Result<Value> {
             result["subscriptionUntil"] = subscription["until"].clone();
             result["subscriptionCheckedAt"] = subscription["checkedAt"].clone();
             result["subscriptionWillRenew"] = subscription["willRenew"].clone();
+            result["subscriptionDiscountUntil"] = subscription["discountUntil"].clone();
+            result["subscriptionDiscountFree"] = subscription["discountFree"].clone();
         }
         Ok(result)
     }

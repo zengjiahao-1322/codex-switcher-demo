@@ -1,7 +1,30 @@
 'use strict';
 const fs = require('node:fs'),
-  path = require('node:path');
+  path = require('node:path'),
+  cp = require('node:child_process');
 const project = path.resolve(__dirname, '..');
+// The Windows toolchain has no resource compiler, so the icon is written after linking.
+function stamped(binaryDir, native) {
+  const file = path.join(project, '.build-cache/stamped', native);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.copyFileSync(path.join(binaryDir, native), file);
+  cp.execFileSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      path.join(project, 'scripts/stamp-windows-icon.ps1'),
+      '-Exe',
+      file,
+      '-Icon',
+      path.join(project, 'platform/windows/app.ico'),
+    ],
+    { stdio: 'inherit' },
+  );
+  return file;
+}
 // The two small legacy markers/directories are required by the published seq136
 // updater. Its own Node VM reads build-info.cjs, then launches our native bridge.
 function entries(prefix, sequence, target, arch, binaryDir) {
@@ -42,7 +65,11 @@ function entries(prefix, sequence, target, arch, binaryDir) {
   return names
     .map((name) => ({ name: prefix + name, file: path.join(project, name) }))
     .concat([
-      { name: prefix + native, file: path.join(binaryDir, native), mode: 0o100755 },
+      {
+        name: prefix + native,
+        file: target === 'win32' ? stamped(binaryDir, native) : path.join(binaryDir, native),
+        mode: 0o100755,
+      },
       {
         name: prefix + 'main.cjs',
         data: '// Native release. The seq136 updater uses runtime/node to launch codex-switcher.\n',
