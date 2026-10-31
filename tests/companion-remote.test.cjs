@@ -613,7 +613,7 @@ test('本机窗口快捷切换：列出全部 API，确认后按默认模型切�
 });
 
 test('协议2旧代理升级提示重载窗口并调用reloadWindow，不调用尚未注册的restart', async () => {
-  const { requests, executed } = await runCompanion({
+  const { requests, executed, state } = await runCompanion({
     agentProtocol: 2,
     commandsFor: (reqs) =>
       reqs.length === 2
@@ -630,6 +630,7 @@ test('协议2旧代理升级提示重载窗口并调用reloadWindow，不调用�
     notice: '正在重载窗口以启用新代理',
     reason: 'agentUpgrade',
   });
+  assert.equal(state.get('codexSwitcher.pendingReload').commandId, 'old-agent-install');
   assert.equal(executed.includes('codexSwitcherRemote.restart'), false);
   assert.equal(executed.includes('workbench.action.reloadWindow'), true);
 });

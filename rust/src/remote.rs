@@ -234,7 +234,7 @@ pub fn confirm(app: &App, input: &Value) -> io::Result<bool> {
         && completed["commandId"] == registered["lastAck"]["id"]
         && matches!(
             text(&registered["lastAck"]["status"]),
-            "reload_requested" | "reloaded"
+            "reload_requested" | "reloaded" | "completed"
         );
     let matched = input["authority"] == target["authority"]
         && (target["codexHome"].is_null()

@@ -235,6 +235,11 @@ function activate(context) {
     if (reload?.method === 'reloadWindow') {
       void vscode.window.showInformationMessage(reload.notice || '正在重载窗口以启用新代理');
       await context.workspaceState.update('codexSwitcher.lastReload', commandId);
+      await context.workspaceState.update('codexSwitcher.pendingReload', {
+        clientId: id,
+        commandId,
+        requestedAt: Date.now(),
+      });
       setTimeout(async () => {
         try {
           await vscode.commands.executeCommand('workbench.action.reloadWindow');
