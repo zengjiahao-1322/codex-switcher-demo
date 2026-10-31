@@ -1,7 +1,5 @@
 name: Rust compile and backend parity
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
 permissions:
   contents: read
