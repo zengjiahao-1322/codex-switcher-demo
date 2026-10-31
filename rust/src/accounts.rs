@@ -850,17 +850,11 @@ pub async fn read_subscription(
     } else {
         expires_at.or(renews_at)
     };
-    let discount = &account["entitlement"]["discount"];
-    let discount_until = discount
-        .get("discount_expires_at")
-        .filter(|value| timestamp(value) != 0);
-    let discount_free =
-        discount["discount_type"] == "percentage" && discount["amount"].as_f64() == Some(100.0);
     let result = if code.is_some_and(|c| (200..300).contains(&c))
         && date.is_some_and(|value| timestamp(value) != 0)
     {
         Some(
-            json!({"until":date,"checkedAt":now(),"willRenew":account["last_active_subscription"]["will_renew"],"discountUntil":discount_until,"discountFree":discount_free}),
+            json!({"until":date,"checkedAt":now(),"willRenew":account["last_active_subscription"]["will_renew"],"status":membership_status(account)}),
         )
     } else {
         None
@@ -884,6 +878,45 @@ pub async fn read_subscription(
         }),
     );
     result
+}
+// Follows the official billing status order: payment problems and scheduled plan
+// changes win, and discount dates only count while the plan renews.
+fn membership_status(account: &Value) -> Value {
+    let entitlement = &account["entitlement"];
+    let present = |name: &str| entitlement.get(name).filter(|value| !value.is_null());
+    let renews_at = present("renews_at");
+    let expires_at = present("expires_at");
+    let cancels_at = present("cancels_at");
+    if entitlement["is_delinquent"] == true {
+        return json!({"kind":"delinquent"});
+    }
+    let change = &entitlement["scheduled_plan_change"];
+    if change.is_object() {
+        return json!({"kind":"planChange","plan":change["plan_type"],"date":change["changes_at"]});
+    }
+    if account["last_active_subscription"]["will_renew"] == true {
+        let discount = &entitlement["discount"];
+        let trial = &entitlement["trial"];
+        let waiting = discount["discount_start_in_num_periods"]
+            .as_u64()
+            .unwrap_or(0);
+        if waiting > 0 {
+            return json!({"kind":"renewal","date":renews_at,"discountAfter":waiting});
+        }
+        if timestamp(&discount["discount_expires_at"]) != 0 {
+            let free = discount["discount_type"] == "percentage"
+                && discount["amount"].as_f64() == Some(100.0);
+            return json!({"kind":if free{"free"}else{"discounted"},"date":discount["discount_expires_at"],"nextBill":renews_at});
+        }
+        if trial["is_trialing"] == true && timestamp(&trial["trial_ends_at"]) != 0 {
+            return json!({"kind":"trial","date":trial["trial_ends_at"],"nextBill":renews_at});
+        }
+        return json!({"kind":"renewal","date":renews_at});
+    }
+    if renews_at.is_some() || (expires_at.is_none() && cancels_at.is_some()) {
+        return json!({"kind":"canceled","date":renews_at.or(cancels_at)});
+    }
+    json!({"kind":"expires","date":expires_at})
 }
 fn object_keys(value: &Value) -> Value {
     json!(
@@ -1021,8 +1054,7 @@ async fn read_quota(app: &App, id: &str) -> io::Result<Value> {
             result["subscriptionUntil"] = subscription["until"].clone();
             result["subscriptionCheckedAt"] = subscription["checkedAt"].clone();
             result["subscriptionWillRenew"] = subscription["willRenew"].clone();
-            result["subscriptionDiscountUntil"] = subscription["discountUntil"].clone();
-            result["subscriptionDiscountFree"] = subscription["discountFree"].clone();
+            result["subscriptionStatus"] = subscription["status"].clone();
         }
         Ok(result)
     }

@@ -222,15 +222,39 @@ const subscriptionPast = (a) =>
   !!a.subscriptionUntil && Date.parse(a.subscriptionUntil) < Date.now();
 const liveUntil = (a) => a.quota?.subscriptionUntil;
 const willRenew = (a) => a.quota?.subscriptionWillRenew === true;
-const discountUntil = (a) => a.quota?.subscriptionDiscountUntil;
-const discountLabel = (a) => (a.quota?.subscriptionDiscountFree === true ? '免费至' : '优惠至');
+const PLAN_NAMES = {
+  free: 'Free',
+  go: 'Go',
+  plus: 'Plus',
+  prolite: 'Pro 100',
+  pro: 'Pro 200',
+  promax: 'Pro 500',
+};
+const STATUS_LABELS = {
+  free: '免费至',
+  discounted: '优惠至',
+  trial: '试用至',
+  renewal: '下次账单',
+  canceled: '已取消，可用至',
+  expires: '会员到期',
+};
+const liveStatus = (a) => {
+  const status = a.quota?.subscriptionStatus;
+  return status?.date || status?.kind === 'delinquent' ? status : null;
+};
+const statusText = (status) =>
+  status.kind === 'delinquent'
+    ? '付款待确认'
+    : status.kind === 'planChange'
+      ? '变更为 ' + (PLAN_NAMES[status.plan] || status.plan) + ' ' + day(status.date)
+      : STATUS_LABELS[status.kind] + ' ' + day(status.date);
 export const membershipExpired = (a) =>
   liveUntil(a)
     ? Date.parse(liveUntil(a)) < Date.now()
     : subscriptionPast(a) && accountPlan(a) === 'free';
 const renewed = (a) => subscriptionPast(a) && !!livePlan(a) && livePlan(a) !== 'free';
 export function membership(a) {
-  if (discountUntil(a)) return discountLabel(a) + ' ' + day(discountUntil(a));
+  if (liveStatus(a)) return statusText(liveStatus(a));
   if (liveUntil(a)) return (willRenew(a) ? '下次账单 ' : '会员到期 ') + day(liveUntil(a));
   if (!a.subscriptionUntil) return '';
   if (willRenew(a)) return '下次账单 ' + day(a.subscriptionUntil);
@@ -252,8 +276,13 @@ export function accountFacts(a) {
     facts.append(dt, dd);
   };
   fact('套餐', accountPlan(a));
-  if (discountUntil(a)) fact(discountLabel(a), day(discountUntil(a)));
-  if (liveUntil(a) || a.subscriptionUntil)
+  const status = liveStatus(a);
+  if (status) {
+    fact('会员状态', statusText(status));
+    if (status.nextBill) fact('下次账单', day(status.nextBill));
+    if (status.discountAfter) fact('优惠', status.discountAfter + ' 个账单周期后开始');
+  }
+  if (!status && (liveUntil(a) || a.subscriptionUntil))
     fact(
       willRenew(a) ? '下次账单' : '会员到期',
       willRenew(a)

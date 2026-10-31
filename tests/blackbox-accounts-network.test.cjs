@@ -122,14 +122,47 @@ test('会员HTTPS对照：本地TLS真请求校验证书、账号请求头及日
   result = await run();
   assert.equal(result.until, '2031-01-01T00:00:00Z');
   assert.equal(result.willRenew, true);
-  body.accounts['workspace-alice'].entitlement.discount = {
+  const account = body.accounts['workspace-alice'];
+  const entitlement = {
+    expires_at: '2030-12-01T00:00:00Z',
+    renews_at: '2031-01-01T00:00:00Z',
+  };
+  const discount = {
     discount_type: 'percentage',
     amount: 100,
     discount_expires_at: '2031-03-01T00:00:00Z',
   };
-  result = await run();
-  assert.equal(result.discountUntil, '2031-03-01T00:00:00Z');
-  assert.equal(result.discountFree, true);
+  for (const [change, willRenew, expected] of [
+    [{ discount }, true, { kind: 'free', date: discount.discount_expires_at }],
+    [
+      { discount: { ...discount, amount: 50 } },
+      true,
+      { kind: 'discounted', date: discount.discount_expires_at },
+    ],
+    [
+      { discount: { ...discount, discount_start_in_num_periods: 2 } },
+      true,
+      { kind: 'renewal', date: entitlement.renews_at, discountAfter: 2 },
+    ],
+    [
+      { discount, scheduled_plan_change: { plan_type: 'plus', changes_at: '2031-01-01T00:00:00Z' } },
+      true,
+      { kind: 'planChange', plan: 'plus', date: '2031-01-01T00:00:00Z' },
+    ],
+    [{ discount, is_delinquent: true }, true, { kind: 'delinquent' }],
+    [{ discount }, false, { kind: 'canceled', date: entitlement.renews_at }],
+    [{ renews_at: null }, false, { kind: 'expires', date: entitlement.expires_at }],
+    [
+      { trial: { is_trialing: true, trial_ends_at: '2031-02-01T00:00:00Z' } },
+      true,
+      { kind: 'trial', date: '2031-02-01T00:00:00Z' },
+    ],
+  ]) {
+    account.entitlement = { ...entitlement, ...change };
+    account.last_active_subscription.will_renew = willRenew;
+    result = await run();
+    for (const [key, value] of Object.entries(expected)) assert.equal(result.status[key], value);
+  }
   for (const pair of [
     [401, 'PRIVATE ' + value.tokens.access_token],
     [200, 'not json SECRET'],
