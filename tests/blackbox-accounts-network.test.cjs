@@ -110,7 +110,10 @@ test('会员HTTPS对照：本地TLS真请求校验证书、账号请求头及日
   body = {
     accounts: {
       'workspace-alice': {
-        entitlement: { renews_at: '2031-01-01T00:00:00Z' },
+        entitlement: {
+          expires_at: '2030-12-01T00:00:00Z',
+          renews_at: '2031-01-01T00:00:00Z',
+        },
         last_active_subscription: { will_renew: true },
       },
       'wrong-workspace': { entitlement: { expires_at: '2099-01-01T00:00:00Z' } },

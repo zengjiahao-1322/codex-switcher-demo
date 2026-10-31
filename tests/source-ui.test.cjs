@@ -247,6 +247,43 @@ test('会员已到期的账号标出到期，详情显示套餐、到期、读�
   assert.match(facts[3][0], /（2 小时前）$/);
 });
 
+test('自动续费账号显示下次续费且不标记为到期', async () => {
+  const renewal = new Date(Date.now() + 12 * 86400000).toISOString();
+  const page = await runPage({
+    respond: backend({
+      accounts: [
+        {
+          id: 'renewal',
+          label: 'renewal@example.com',
+          email: 'renewal@example.com',
+          plan: 'plus',
+          current: true,
+          quota: {
+            ...quota(80),
+            subscriptionUntil: renewal,
+            subscriptionWillRenew: true,
+          },
+        },
+      ],
+    }),
+  });
+  const card = page.created.find(
+    (c) => c.tag === 'small' && c.node.textContent.startsWith('ChatGPT plus'),
+  );
+  assert.match(card.node.textContent, /^ChatGPT plus · 下次续费 /);
+  const mark = page.created.length;
+  page.created
+    .find((c) => c.tag === 'button' && c.node.className === 'source-card')
+    .node.onclick();
+  const facts = page.created.slice(mark).filter((c) => c.tag === 'dd');
+  assert.equal(facts.length > 0, true);
+  assert.equal(
+    facts[1].node.textContent,
+    new Date(renewal).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }),
+  );
+  assert.equal(facts[1].node.className, '');
+});
+
 // 读取额度时官方续期了令牌（plus 到期变 free），刷新后页面要显示新套餐和时间，不必重开页面。
 test('刷新额度后同步该账号的套餐、到期和登录刷新时间，不动其他账号', async () => {
   const hour = 3600000;

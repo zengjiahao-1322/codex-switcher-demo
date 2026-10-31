@@ -838,11 +838,21 @@ pub async fn read_subscription(
     };
     let account =
         &body.as_ref().unwrap_or(&Value::Null)["accounts"][text(&value["tokens"]["account_id"])];
-    let date = account["entitlement"]
+    let will_renew = account["last_active_subscription"]["will_renew"] == true;
+    let expires_at = account["entitlement"]
         .get("expires_at")
-        .filter(|v| !v.is_null())
-        .unwrap_or(&account["entitlement"]["renews_at"]);
-    let result = if code.is_some_and(|c| (200..300).contains(&c)) && timestamp(date) != 0 {
+        .filter(|v| !v.is_null());
+    let renews_at = account["entitlement"]
+        .get("renews_at")
+        .filter(|v| !v.is_null());
+    let date = if will_renew {
+        renews_at.or(expires_at)
+    } else {
+        expires_at.or(renews_at)
+    };
+    let result = if code.is_some_and(|c| (200..300).contains(&c))
+        && date.is_some_and(|value| timestamp(value) != 0)
+    {
         Some(
             json!({"until":date,"checkedAt":now(),"willRenew":account["last_active_subscription"]["will_renew"]}),
         )
@@ -852,7 +862,16 @@ pub async fn read_subscription(
     let _ = crate::diagnostics::log(
         bridge,
         "official.subscription",
-        json!({"account":identity(value).unwrap_or(Value::Null)["email"],"status":if code.is_some_and(|c|(200..300).contains(&c))&&body.is_some(){"ok"}else{"failed"},"httpCode":code,"hasDate":result.is_some()}),
+        json!({
+            "account":identity(value).unwrap_or(Value::Null)["email"],
+            "status":if code.is_some_and(|c|(200..300).contains(&c))&&body.is_some(){"ok"}else{"failed"},
+            "httpCode":code,
+            "hasDate":result.is_some(),
+            "expiresAt":account["entitlement"]["expires_at"],
+            "renewsAt":account["entitlement"]["renews_at"],
+            "willRenew":account["last_active_subscription"]["will_renew"],
+            "plan":account.get("plan").cloned().or_else(|| account["last_active_subscription"].get("plan").cloned()).unwrap_or(Value::Null),
+        }),
     );
     result
 }
