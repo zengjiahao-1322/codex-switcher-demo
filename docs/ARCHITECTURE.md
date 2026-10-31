@@ -2,7 +2,9 @@
 
 这份图按当前源码整理，重点说明“切换配置”和“官方账号/额度”两条路径如何汇合到本地 Codex。
 
-后端按职责存放在 `src/accounts/`、`src/config/`、`src/clients/`、`src/diagnostics/`、`src/server/` 和 `src/platform/`。`src/paths.cjs` 统一定位项目根目录；根目录 `main.cjs` 只转交启动，保证快捷方式和默认用户数据路径不随目录整理改变。
+后端是 `rust/` 下的单个原生程序，按职责分为账号、配置、编辑器、远程、切换、诊断、更新和平台模块。页面在 `web/`，两个 VS Code 扩展在 `vscode-companion/` 和 `vscode-remote-agent/`，它们仍是 JavaScript。发布包不含 Node 后台；包里的 `main.cjs`、`scripts/update-worker.cjs`、`src/platform/build-info.cjs` 是打包时生成的占位文件，`runtime/node.exe` 实际是 Rust 升级桥，都只为旧版一键升级保留。
+
+仓库里的 `src/`、根目录 `main.cjs`、`cli.cjs` 和 `mcp-server.cjs` 是已冻结的 Node 后台，只作行为对照和测试支撑，不再修改。
 
 ## Windows 与 Mac 共用的功能边界
 
@@ -14,30 +16,30 @@
 | 仅 Codex 桌面版                                                   | 使用桌面版自带的官方 app-server                    | 共用切换任务 | 重启目标桌面端并确认新进程                                       |
 | 桌面版与编辑器同时使用                                            | 优先用户指定或伴随扩展上报的运行程序，也可自动发现 | 共用切换任务 | 分别处理共用目录的桌面与插件，独立目录不跟随                     |
 
-`src/platform/runtime.cjs` 独立发现当前编辑器渠道安装的官方运行程序，不通过桌面应用启动才能登录。伴随扩展会从编辑器扩展清单识别 OpenAI 的 Codex/ChatGPT 扩展，不依赖单一扩展 ID；只负责窗口通信与重载，不承担账号登录或额度 RPC。是否参与切换由实际本机 Codex 后端的 PID 归属和配置目录决定，远程工作区或 WSL 设置只是窗口信息，不能否定已确认的本机后端；真正使用远端配置的后端不随本机切换。
+`rust/src/platform.rs` 独立发现当前编辑器渠道安装的官方运行程序，不通过桌面应用启动才能登录。伴随扩展会从编辑器扩展清单识别 OpenAI 的 Codex/ChatGPT 扩展，不依赖单一扩展 ID；只负责窗口通信与重载，不承担账号登录或额度 RPC。是否参与切换由实际本机 Codex 后端的 PID 归属和配置目录决定，远程工作区或 WSL 设置只是窗口信息，不能否定已确认的本机后端；真正使用远端配置的后端不随本机切换。
 
 心跳成功只代表连接到了切换器服务。`clientHeartbeat` 返回 `connection.state`（`ready`、`unmatched`、`separate`）、管理目录和关联后端 PID，伴随扩展据此显示“已接入”“后端未关联”或“独立配置”。`companionHost` 由扩展实际运行位置上报，窗口标签或使用 SSH 连接电脑的方式都不能代替进程归属证据。关联优先使用 PID/祖先链，其次使用唯一通信标识；实际运行于远端宿主的扩展还可按唯一配置目录关联。重载后必须等新的 Codex 后端关联到共用配置，才确认重载完成；这仍不代表已经通过真实模型请求验证了官方登录或上游额度。
 
-`src/clients/desktop-account.cjs` 的 `runSwitch()` 统一生成步骤及耗时，`web/js/` 模块负责渲染；没有按系统拆分的旧版切换页面。`src/platform/build-info.cjs` 为运行代码生成一次构建标识，新入口只复用同构建后台，避免新包连接旧后台继续显示旧页面。页面底部显示版本和构建标识，便于核对实际运行版本。
+`rust/src/switching.rs` 的切换任务统一生成步骤及耗时，`web/js/` 模块负责渲染；没有按系统拆分的旧版切换页面。`rust/src/instance.rs` 为运行程序生成构建标识，新入口只复用同构建后台，避免新包连接旧后台继续显示旧页面。页面底部显示版本和构建标识，便于核对实际运行版本。
 
 ```mermaid
 flowchart LR
   UI[浏览器界面\nindex.html + web/js 模块]
-  S[本地 HTTP 服务\nmain.cjs + server.cjs]
-  H[业务路由\nservice.cjs]
-  CORE[配置切换核心\ncore.cjs + switch-state.cjs]
+  S[本地 HTTP 服务\ninstance.rs + server.rs]
+  H[业务路由\nserver.rs]
+  CORE[配置切换核心\nconfig_ops.rs + switching.rs]
   STORE[(Codex home\nconfig.toml / auth.json)]
-  PROV[(API 供应商配置\nproviders.cjs + 数据目录)]
-  ACC[官方账号管理\naccounts.cjs]
+  PROV[(API 供应商配置\nconfig_store.rs + 数据目录)]
+  ACC[官方账号管理\naccounts.rs]
   AUTH[(账号副本\nbridgeHome/accounts/<id>/auth.json)]
   RPC[独立 Codex app-server\n每个账号一次独立进程]
   QUOTA[额度 RPC\naccount/read\naccount/rateLimits/read]
   DESK[Codex 桌面端\n官方配置消费者]
   IDE[VS Code / Cursor 等\n官方 Codex 扩展]
   EXT[伴随扩展\nvscode-companion]
-  CLIENT[客户端发现与重载\nclient-status.cjs]
-  THREAD[旧会话来源同步\nthread-routing.cjs]
-  DIAG[会话/凭证诊断\ndiagnostics.cjs]
+  CLIENT[客户端发现与重载\neditors.rs]
+  THREAD[旧会话来源同步\nthread_routing.rs]
+  DIAG[会话/凭证诊断\ndiagnostics.rs]
 
   UI -->|/api 请求| S --> H
   H -->|选择 API / 官方账号| CORE
@@ -62,21 +64,21 @@ flowchart LR
 
 ## 配置备份与编辑器快捷切换（0.1.5）
 
-`src/config/backups.cjs` 在配置写入边界保存 TOML 原文，内容与最新副本相同时跳过，按时间只保留最近 10 份。`backups` 接口仅返回时间、原因与来源摘要；`restoreBackup` 将选中的备份交给现有后台切换任务，在客户端释放前校验配置，恢复前再次保存当前配置。恢复跳过账号准备与登录同步，不改写 `auth.json`，仍复用旧对话同步和窗口重载。转换模式按已有 API 配置找回原上游，原配置不存在时明确回报。
+`rust/src/config_ops.rs` 在配置写入边界保存 TOML 原文，内容与最新副本相同时跳过，按时间只保留最近 10 份。`backups` 接口仅返回时间、原因与来源摘要；`restoreBackup` 将选中的备份交给现有后台切换任务，在客户端释放前校验配置，恢复前再次保存当前配置。恢复跳过账号准备与登录同步，不改写 `auth.json`，仍复用旧对话同步和窗口重载。转换模式按已有 API 配置找回原上游，原配置不存在时明确回报。
 
 伴随扩展的快捷列表按点击读取现有接口，没有新增常驻轮询。确认后调用与网页相同的 `accountSwitch`、`desktopSwitch` 或 `remoteSwitch`；日志用 `source` 区分 `web`、`vscode-local`、`vscode-ssh`。额度不足的一键换号同样由用户确认后发起。
 
 ## 一次官方账号切换
 
-1. 页面把账号 id 发给 `src/server/service.cjs`。
-2. `src/accounts/accounts.cjs` 准备账号登录；需要续期或验证时，通过 `src/accounts/official-session.cjs` 调用独立的 Codex `app-server` 做 `account/read(refreshToken=true)`，并检查编辑器重载通道。
-3. 关闭目标桌面端，并由 `src/clients/client-status.cjs` 停止共用配置的旧编辑器后端；停止前保留窗口身份，以便后端退出后仍能发送重载。
-4. 重新保存退出时更新的当前登录，再由 `src/accounts/accounts.cjs` 写入所选账号凭证、`src/config/core.cjs` 恢复官方配置，最后通过 `src/diagnostics/thread-routing.cjs` 同步并核对旧会话来源。
+1. 页面把账号 id 发给 `rust/src/server.rs`。
+2. `rust/src/accounts.rs` 准备账号登录；需要续期或验证时，通过 `rust/src/official_session.rs` 调用独立的 Codex `app-server` 做 `account/read(refreshToken=true)`，并检查编辑器重载通道。
+3. 关闭目标桌面端，并由 `rust/src/editors.rs` 停止共用配置的旧编辑器后端；停止前保留窗口身份，以便后端退出后仍能发送重载。
+4. 重新保存退出时更新的当前登录，再由 `rust/src/accounts.rs` 写入所选账号凭证、`rust/src/config_ops.rs` 恢复官方配置，最后通过 `rust/src/thread_routing.rs` 同步并核对旧会话来源。
 5. 重新打开目标桌面端，并向已连接的伴随扩展发送编辑器窗口重载请求。
 
-准备阶段并行执行账号/API 验证与编辑器归属检查，全部收尾且通过后才能关闭客户端和应用配置；任一检查失败都保留配置。Windows 使用随包构建的 C# 进程助手通过 Toolhelp32、QueryFullProcessImageNameW 和目标进程内存读取完成扫描，异步等待助手时不阻塞登录 RPC；开发源码安装会先构建该助手。关闭阶段复用该阶段新取得的进程树，按已确认进程的退出信号等待，共享两秒保存时限，强制停止后仍确认实际退出。后台切换进程在父进程完成锁交接、写入排队状态并通过 IPC 发出开始消息后执行，不再固定等待 1.5 秒。这些优化不依赖缩短账号校验或使用旧验证结果。
+准备阶段并行执行账号/API 验证与编辑器归属检查，全部收尾且通过后才能关闭客户端和应用配置；任一检查失败都保留配置。Windows 由 `rust/src/platform.rs` 直接调用 Toolhelp32、QueryFullProcessImageNameW 和目标进程内存读取完成扫描，等待期间不阻塞登录 RPC。关闭阶段复用该阶段新取得的进程树，按已确认进程的退出信号等待，共享两秒保存时限，强制停止后仍确认实际退出。后台切换进程在父进程完成锁交接、写入排队状态并通过 IPC 发出开始消息后执行，不再固定等待 1.5 秒。这些优化不依赖缩短账号校验或使用旧验证结果。
 
-两端的编辑器后端和 Mac 桌面使用 `src/platform/process-stop.cjs`：发送 SIGTERM 后最多等待 1.5 秒，仍未退出的已确认进程使用 SIGKILL，再等待真实退出。权限错误直接回报，不当作已经退出。客户端归属取最近的桌面或编辑器宿主，避免由 Codex 终端启动的编辑器被误归为桌面端。
+两端的编辑器后端和 Mac 桌面由 `rust/src/platform.rs` 停止：发送 SIGTERM 后最多等待 1.5 秒，仍未退出的已确认进程使用 SIGKILL，再等待真实退出。权限错误直接回报，不当作已经退出。客户端归属取最近的桌面或编辑器宿主，避免由 Codex 终端启动的编辑器被误归为桌面端。
 
 添加账号时，每次登录使用 `accounts/login/<随机标识>/` 独立目录。登录完成通知必须匹配本次 `loginId`；通知早于 start 响应时先暂存，收到响应后处理。成功状态先提交再关闭登录进程，旧通知不覆盖结果；失败时保留已写入的凭证和脱敏原因，方便恢复。
 
@@ -86,9 +88,9 @@ flowchart LR
 
 `vscode-companion` 固定运行在本机 UI 宿主，`vscode-remote-agent` 运行在 Remote-SSH 的 workspace 宿主。两者通过 VS Code 命令通道通信，切换器不建立 SSH 连接。远端代理注册 status、read、readAuth、write 命令，不主动联网；状态返回模型、provider、API 地址、配置目录、协议号 2 和无令牌的账号摘要。同版本替换发行时，后台和页面通过协议号识别旧代理。
 
-`src/clients/remote-servers.cjs` 根据心跳中的 authority 与 codexHome 分组。独立的 `remoteSwitch` 接受 `accountId` 或 `providerId` 二选一：API 必须已确认直连且有密钥；官方账号必须已保存，远端凭证存储不能是显式 keyring/ephemeral。每组选择版本一致且协议号为 2 的窗口，执行 read，再复用 `core.prepareConfig` 或 `core.prepareOfficialConfig`，最后 write。官方切换同时写 auth.json 与配置，保留旧 API 的 provider 定义供历史使用。模型目录数据在内存生成，路径按远端系统拼接；不进入本机切换 worker，没有自动跟随开关。同目录只写一次，其余窗口使用既有重载命令。
+`rust/src/remote.rs` 根据心跳中的 authority 与 codexHome 分组。独立的 `remoteSwitch` 接受 `accountId` 或 `providerId` 二选一：API 必须已确认直连且有密钥；官方账号必须已保存，远端凭证存储不能是显式 keyring/ephemeral。每组选择版本一致且协议号为 2 的窗口，执行 read，再复用本机的配置生成逻辑，最后 write。官方切换同时写 auth.json 与配置，保留旧 API 的 provider 定义供历史使用。模型目录数据在内存生成，路径按远端系统拼接；不进入本机切换 worker，没有自动跟随开关。同目录只写一次，其余窗口使用既有重载命令。
 
-`src/accounts/remote-credentials.cjs` 按与本机账号相同的身份哈希及 `last_refresh` 比较文件登录，回收较新的远端登录并同步到已使用该账号的本机和其他在线服务器。`readAuth` 和只含 auth 的 write 复用内存命令通道；只同步 auth.json，不改配置、不重载窗口。周期同步不是跨机器刷新锁，仍需实际续期验收。
+`rust/src/remote.rs` 按与本机账号相同的身份哈希及 `last_refresh` 比较文件登录，回收较新的远端登录并同步到已使用该账号的本机和其他在线服务器。`readAuth` 和只含 auth 的 write 复用内存命令通道；只同步 auth.json，不改配置、不重载窗口。周期同步不是跨机器刷新锁，仍需实际续期验收。
 
 远端命令与 ackResult 使用常驻服务内存通道，客户端文件只存公开状态与确认元数据。心跳长轮询同时检查该通道，配置回执请求上限为 1 MiB，其他 HTTP 动作仍为 16 KiB。读、写各等待最多 30 秒，不重试；各组独立返回 synced、skipped 或 failed。synced 代表写入已确认、重载已请求；新宿主带 completedReload，后台核对原命令、authority、目录与版本后才返回 reloadConfirmed，随后淘汰旧窗口登记。
 
@@ -97,13 +99,13 @@ flowchart LR
 ## 一次额度刷新
 
 1. 页面按账号 id 调用 `accountQuota`，不持有配置切换锁。
-2. `src/accounts/accounts.cjs` 为该账号启动独立的 Codex `app-server`，读取同一账号副本。
+2. `rust/src/accounts.rs` 为该账号启动独立的 Codex `app-server`，读取同一账号副本。
 3. 先读账号状态，再调用 `account/rateLimits/read`。
-4. `src/accounts/quota-reader.cjs` 统一限制最多同时处理两个账号，网页拆开的单账号请求和批量请求共用名额；同一账号的重复请求（包括排队中）仍会合并。
+4. `rust/src/accounts.rs` 统一限制最多同时处理两个账号，网页拆开的单账号请求和批量请求共用名额；同一账号的重复请求（包括排队中）仍会合并。
 5. 成功时写入该账号的 `quota.json`。
 6. 失败时保留上次成功时间，但界面不再显示旧额度数字，只显示失败原因和结构化错误类型。
 
-账号状态每次读取各账号已保存的 `auth.json`，由访问令牌声明解析套餐，由 ID 令牌声明解析订阅到期与最近检查时间，并返回 `last_refresh` 的时间。额度刷新后，页面通过既有账号接口合并该账号的最新显示字段，不下发令牌，也不覆盖其他账号或模型草稿。
+账号状态每次读取各账号已保存的 `auth.json`，由访问令牌声明解析套餐，由 ID 令牌声明解析订阅到期与最近检查时间，并返回 `last_refresh` 的时间。额度刷新时另读官方 `accounts/check`，`membership_status` 按官方账单页的优先级得出会员状态：付款异常、计划变更、优惠未开始、优惠或试用生效中、普通续费、已取消、到期。优惠结束日取自 `entitlement.discount.discount_expires_at`，软件不做日期计算。额度刷新后，页面通过既有账号接口合并该账号的最新显示字段，不下发令牌，也不覆盖其他账号或模型草稿。
 
 ## 凭证状态的判断边界
 
@@ -114,7 +116,7 @@ flowchart LR
 
 ## 本地诊断日志（0.1.3）
 
-`src/diagnostics/event-log.cjs` 集中处理脱敏、同步追加和日志轮换。切换任务记录开始、客户端快照、逐步骤耗时与终态；服务只在窗口关联状态改变时记录心跳事件；官方登录、准备及额度读取记录各自的错误类型。进程链取自同一次扫描的 `inventory.ancestry`，最多八级，不记录完整命令行、环境变量、配置正文或对话正文。
+`rust/src/diagnostics.rs` 集中处理脱敏、同步追加和日志轮换。切换任务记录开始、客户端快照、逐步骤耗时与终态；服务只在窗口关联状态改变时记录心跳事件；官方登录、准备及额度读取记录各自的错误类型。进程链取自同一次扫描的 `inventory.ancestry`，最多八级，不记录完整命令行、环境变量、配置正文或对话正文。
 
 日志保存在数据目录的 `logs/switcher.log`，超过 2 MiB 后于下一次写入时轮换，最多保留三份。`exportDiagnostics` 读取实时环境头与最近 2000 行，页面通过 Blob 下载；不会上传日志。公共 `pid` 是写入进程，`companion.state.editorPid` 是编辑器宿主，避免两者混淆。`switch.end.reload` 如实保存任务结束时已经观测到的窗口状态，不将仍在等待的重载写成完成。
 
@@ -134,26 +136,30 @@ Mac 的心跳与客户端列表通过异步 `ps` 枚举进程，再并行调用�
 
 ## 程序升级与页面模块（0.1.3）
 
-`src/server/update.cjs` 只处理固定仓库的发布查询、下载、SHA-256 校验与安装调度；下载使用官方会话相同的环境或系统代理。发布清单定义实际运行文件，构建号按文件名与统一换行后的内容计算，使 Windows、两种 Mac 包和 `release.json` 使用同一标识。
+`rust/src/update.rs` 只处理固定仓库的发布查询、下载、SHA-256 校验与安装调度；下载使用官方会话相同的环境或系统代理。发布清单定义实际运行文件，构建号按文件名与统一换行后的内容计算，使 Windows、两种 Mac 包和 `release.json` 使用同一标识。
 
-`src/platform/release-info.json` 在源码中保存 `sequence: null`，打包时写入本次工作流的 `GITHUB_RUN_NUMBER`，该文件参与构建号计算。发布元数据使用同一序号；开发目录不会提示安装，正式包仅在远端序号更大时允许升级，启动独立升级进程前还需确认包内序号和构建号与发布信息一致。工作流重跑保持原序号，旧标签回退不触发降级安装。
+打包时把本次工作流的 `GITHUB_RUN_NUMBER` 写入包内 `src/platform/release-info.json`，该序号参与构建号计算。发布元数据使用同一序号；开发目录不会提示安装，正式包仅在远端序号更大时允许升级，启动独立升级进程前还需确认包内序号和构建号与发布信息一致。工作流重跑保持原序号，旧标签回退不触发降级安装。
 
-校验完成后，从新包启动 `scripts/update-worker.cjs` 与对应 Node。独立进程就绪后旧后台退出，升级进程等待它结束，再备份并替换：Windows 按发行清单及运行时目录处理，保留 `private/`；Mac 通过应用包改名替换，账号数据仍留在 Application Support。健康检查在 30 秒内验证新后台的 `/api/runtime` 构建号，失败恢复旧版并重新启动。数据目录的 `updates/previous/` 只保留一份备份，诊断日志记录检查、下载、安装和回滚。
+校验完成后，把当前程序复制到暂存目录，以 `--update-worker` 启动独立更新进程。独立进程就绪后旧后台退出，升级进程等待它结束，再备份并替换：Windows 按发行清单及运行时目录处理；Mac 通过应用包改名替换，账号数据仍留在 Application Support。健康检查在 30 秒内验证新后台的 `/api/runtime` 构建号，失败恢复旧版并重新启动。新后台收到的 `BRIDGE_HOME` 若就是默认数据目录，仍按默认安装处理，继续刷新发现文件和桌面快捷方式。数据目录的 `updates/previous/` 只保留一份备份，诊断日志记录检查、下载、安装和回滚。
 
 页面由 `web/style.css` 与原生 `web/js/` ES 模块组成。`api.js` 处理会话，`store.js` 保存共享状态，各 `views/` 模块负责分区交互；`main.js` 编排首屏读取。服务仅提供 `.js`、`.css` 和主页，保持同源 CSP。升级状态通过轮询更新，旧后台退出后提示使用新打开的会话页面。
 
 ## 代码入口
 
-| 层       | 文件                                                                    | 责任                                                         |
-| -------- | ----------------------------------------------------------------------- | ------------------------------------------------------------ |
-| 启动     | `main.cjs`、`src/server/server.cjs`                                     | 启动本地服务、页面会话和 API 路由                            |
-| 业务     | `src/server/service.cjs`                                                | 把页面操作编排成切换、账号、额度、诊断任务                   |
-| 配置     | `src/config/core.cjs`、`src/config/switch-state.cjs`                    | 原子写入配置、快照、切换状态和恢复                           |
-| 官方账号 | `src/accounts/accounts.cjs`                                             | 登录副本、账号切换和对外账号接口                             |
-| 官方会话 | `src/accounts/official-session.cjs`                                     | 独立 app-server 生命周期、JSON-RPC 和错误分类                |
-| 额度读取 | `src/accounts/quota-reader.cjs`                                         | 额度 RPC、统一两个并发、账号级请求合并、额度缓存和结构化错误 |
-| 客户端   | `src/clients/client-status.cjs`、`vscode-companion/`                    | 发现窗口、确认配置归属、请求重载和记录结果                   |
-| 会话诊断 | `src/diagnostics/diagnostics.cjs`、`src/diagnostics/thread-routing.cjs` | 旧会话错误证据、来源同步和可见上下文导出                     |
-| 事件日志 | `src/diagnostics/event-log.cjs`                                         | 切换事件脱敏落盘、轮换和诊断导出读取                         |
-| 程序升级 | `src/server/update.cjs`、`scripts/update-worker.cjs`                    | 发布查询、校验下载、独立替换、健康检查和失败回滚             |
-| 页面     | `web/index.html`、`web/js/`                                             | 来源选择、账号列表、额度和客户端状态展示                     |
+| 层       | 文件                                                                     | 责任                                     |
+| -------- | ------------------------------------------------------------------------ | ---------------------------------------- |
+| 启动     | `rust/src/main.rs`、`rust/src/instance.rs`                               | 启动、实例复用、进程交接和发现文件       |
+| 服务     | `rust/src/server.rs`                                                     | 本地 HTTP 服务、页面会话和接口路由       |
+| 配置     | `rust/src/config*.rs`                                                    | 供应商存储、无损配置写入、备份和验证     |
+| 切换     | `rust/src/switching.rs`                                                  | 后台切换任务、步骤耗时和操作锁           |
+| 官方账号 | `rust/src/accounts.rs`、`rust/src/official_session.rs`                   | 登录、账号切换、额度、订阅状态和 app-server |
+| 编辑器   | `rust/src/editors.rs`、`rust/src/editor_integration.rs`、`vscode-companion/` | 窗口登记、归属确认、重载和扩展安装       |
+| 远程     | `rust/src/remote.rs`、`vscode-remote-agent/`                             | 远程切换、代理更新和登录同步             |
+| 旧对话   | `rust/src/thread_routing.rs`                                             | 切换后同步旧会话来源                     |
+| 诊断     | `rust/src/diagnostics.rs`                                                | 日志脱敏、轮换和诊断导出                 |
+| 更新     | `rust/src/update.rs`、`rust/src/bin/upgrade-bridge.rs`                   | 发布查询、校验替换、回滚和旧版升级桥     |
+| 迁移     | `rust/src/migration.rs`                                                  | 旧安装数据导入和默认数据目录             |
+| 平台     | `rust/src/platform.rs`、`rust/src/integration.rs`、`rust/src/lifecycle.rs` | 进程、权限、代理、快捷方式、自启和卸载   |
+| 接口     | `rust/src/mcp.rs`、`rust/src/adapter*.rs`                                | MCP 服务和 API 转换                      |
+| 页面     | `web/index.html`、`web/js/`                                              | 来源选择、账号列表、额度和客户端状态展示 |
+| 打包     | `scripts/build-release.cjs`、`scripts/rust-release.cjs`                  | 发布包、占位文件、VSIX 和 Windows 图标   |

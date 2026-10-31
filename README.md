@@ -2,21 +2,21 @@
 
 管理 Codex 官方账号、自定义 API 和 VS Code 窗口的本机工具，支持 Windows 与 macOS。
 
-**0.1.5 Demo · VS Code 快捷切换与配置备份**。从编辑器状态栏选择本机或 SSH 服务器的账号/API；配置改写前自动保留最近 10 份副本，可在设置中恢复。额度不足时可手动一键换到备用账号。远程功能仍需在具体服务器环境验证。
+**0.1.6 测试版**使用 Rust 原生后台。从编辑器状态栏选择本机或 SSH 服务器的账号/API；配置改写前自动保留最近 10 份副本，可在设置中恢复。额度不足时可手动一键换到备用账号。远程功能仍需在具体服务器环境验证。
 
-[发布说明与全部下载](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/tag/v0.1.5)
+[发布说明与全部下载](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest)
 
 ## 下载和安装
 
-需要 Codex 桌面版或 OpenAI 官方 Codex 编辑器扩展，任选一种。桌面包自带 Node.js 和依赖，无需另装开发环境。
+需要 Codex 桌面版或 OpenAI 官方 Codex 编辑器扩展，任选一种。发布包是原生程序，无需安装 Node.js 或开发环境。
 
 | 平台              | 下载                                                                                                                            | 启动                                                                               |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Windows x64       | [Windows 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-windows-x64.zip)    | 推荐运行 `install.cmd`；也可完整解压后双击 `Start.cmd`，首次启动会静默创建桌面图标 |
-| Mac Apple Silicon | [Mac M 系列包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-macos-arm64.zip)  | 运行 `Install.command`，或打开 `Codex Switcher.app`                                |
-| Mac Intel         | [Mac Intel 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-macos-x64.zip)    | 同上                                                                               |
-| 本机伴随扩展      | [Companion VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-companion.vsix) | 在本机编辑器安装并重载已有窗口                                                     |
-| 远端代理          | [Remote Agent VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/download/v0.1.5/codex-switcher-remote.vsix) | 通过远程页安装，或在 SSH 服务器侧安装                                              |
+| Windows x64       | [Windows 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest/download/codex-switcher-windows-x64.zip)    | 推荐运行 `install.cmd`；也可完整解压后双击 `Start.cmd`，首次启动会静默创建桌面图标 |
+| Mac Apple Silicon | [Mac M 系列包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest/download/codex-switcher-macos-arm64.zip)  | 运行 `Install.command`，或打开 `Codex Switcher.app`                                |
+| Mac Intel         | [Mac Intel 包](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest/download/codex-switcher-macos-x64.zip)    | 同上                                                                               |
+| 本机伴随扩展      | [Companion VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest/download/codex-switcher-companion.vsix) | 在本机编辑器安装并重载已有窗口                                                     |
+| 远端代理          | [Remote Agent VSIX](https://github.com/zengjiahao-1322/codex-switcher-demo/releases/latest/download/codex-switcher-remote.vsix) | 通过远程页安装，或在 SSH 服务器侧安装                                              |
 
 五个下载均附 SHA-256 校验文件。不要只取出启动脚本；运行时需保留完整目录。Mac 使用 ad-hoc 签名，首次打开可能需在“系统设置 → 隐私与安全性”允许，尚无 Apple Developer ID 签名或公证。
 
@@ -43,15 +43,15 @@
 
 同一官方账号以 `last_refresh` 最新的文件登录为准，同步到已使用该账号的本机和在线服务器；同步登录不重载窗口。仅支持文件凭证存储，服务器显式使用 `keyring` 或 `ephemeral` 时会拒绝应用。不同步经本机转换的 API 或远端聊天，不配置服务器网络。WSL、容器及 SSH 到一台本身运行切换器的机器的方式暂不支持。
 
-伴随扩展固定在本机 UI 宿主，代理在远端 workspace 宿主；两者需配套更新到 `0.1.5`，远端代理还需支持协议号 2。页面会提示更新旧代理。同窗口其他扩展也能调用代理命令，遵循 VS Code 扩展信任边界。
+伴随扩展固定在本机 UI 宿主，代理在远端 workspace 宿主；两者需配套更新到同一版本。页面会提示更新旧代理；协议 4 起代理可以原地自更新，旧代理首次升级时窗口会自动重载一次。同窗口其他扩展也能调用代理命令，遵循 VS Code 扩展信任边界。
 
 **远程功能尚待真实 Remote-SSH Linux 验收。** 自动化读写与安装检查不能代替服务器上的实际 API 请求和聊天恢复验证。
 
 ## 升级与数据
 
-**0.1.3 的更新地址固定在旧版本，需手动下载并安装 0.1.5 一次。** 0.1.4 起检查本仓库最新 Release；只接受更大的发行序号，同时校验 SHA-256、包内构建号与序号。保留旧版备份，启动检查失败恢复；开发目录通过 Git 更新。
+**0.1.3 的更新地址固定在旧版本，需手动下载并安装一次。** 0.1.4 起检查本仓库最新 Release；只接受更大的发行序号，同时校验 SHA-256、包内构建号与序号。保留旧版备份，启动检查失败恢复；开发目录通过 Git 更新。
 
-已安装 `0.1.4` 可通过页面“检查更新”升级到 `0.1.5`。若检查更新因网络或证书错误失败，可手动下载安装。升级后在“编辑器与诊断”点击“一键更新扩展”，再到“远程服务器”页更新远端代理；旧代理版本不同会提示需要更新。
+可通过页面“检查更新”升级。若检查更新因网络或证书错误失败，可手动下载安装。升级后在“编辑器与诊断”点击“一键更新扩展”，再到“远程服务器”页更新远端代理；旧代理版本不同会提示需要更新。
 
 更新时保留原数据目录，并同时更新伴随扩展及远端代理。0.1.6 测试版的 Windows 数据统一保存在 `%LOCALAPPDATA%/CodexSwitcher/`：首次启动复制本安装目录的 `private/`，随后在后台只读合并找到的旧副本账号与 API，不删除旧数据。Mac 使用 `Install.command`，自定义数据目录继续沿用原路径。
 
@@ -70,4 +70,4 @@
 
 重载可能中断任务，请先保存工作。已保存聊天文件保留，运行中任务和未保存状态不能保证恢复。“进程已启动”“已请求重载”均不表示实际模型请求已验证。切换耗时受账号网络、历史规模和客户端退出速度影响。
 
-源码按 `src/`、`web/`、`platform/`、`tests/`、`scripts/` 和两个 VS Code 扩展目录组织，见 [架构说明](docs/ARCHITECTURE.md)。安装 Node.js 22+ 后运行 `npm install --ignore-scripts`、`npm test`；Windows 测试会构建 C# 进程助手。
+产品代码在 `rust/`、`web/`、`platform/` 和两个 VS Code 扩展目录，见 [架构说明](docs/ARCHITECTURE.md)。`src/` 是已冻结的 Node 后台，只作对照和测试支撑。开发需要 Rust stable 和 Node.js 22+：运行 `cargo build --locked --release --manifest-path rust/Cargo.toml` 后，设置 `SWITCHER_BACKEND=rust` 再运行 `npm test`。

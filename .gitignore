@@ -39,7 +39,6 @@
 !/rust/Cargo.toml
 !/rust/Cargo.lock
 !/rust/build.rs
-!/rust/measure.ps1
 !/rust/src/
 !/rust/src/**
 /rust/target/

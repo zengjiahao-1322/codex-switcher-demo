@@ -72,23 +72,12 @@ jobs:
           if [[ "${{ runner.os }}" == "Windows" ]]; then platform=win32; arch=x64; elif [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then platform=darwin; arch=arm64; else platform=darwin; arch=x64; fi
           node scripts/build-release.cjs "$platform" --arch="$arch" --backend=rust
           node scripts/smoke-package.cjs "$platform"
-          SWITCHER_RELEASE_BACKEND=rust node scripts/create-release-json.cjs v0.1.5 dist dist/release.json
+          SWITCHER_RELEASE_BACKEND=rust node scripts/create-release-json.cjs "$GITHUB_REF_NAME" dist dist/release.json
       - name: Verify native macOS installation and launcher
         if: runner.os == 'macOS'
         run: |
           node scripts/verify-mac-installer.cjs
           node scripts/verify-mac-launcher.cjs
-      - name: Compare native and Node package performance
-        shell: pwsh
-        run: |
-          $platform = if ($IsWindows) {'win32'} else {'darwin'}
-          $arch = if ('${{ matrix.target }}' -eq 'aarch64-apple-darwin') {'arm64'} else {'x64'}
-          $suffix = if ($IsWindows) {'.exe'} else {''}
-          $nodeOutput = Join-Path $env:RUNNER_TEMP 'node-reference-package'
-          node scripts/build-release.cjs $platform $nodeOutput "--arch=$arch"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $asset = if ($IsWindows) {'codex-switcher-windows-x64.zip'} else {"codex-switcher-macos-$arch.zip"}
-          ./rust/measure.ps1 -Rounds 10 -IdleSeconds 60 -NodeExecutable (Get-Command node).Source -NativeExecutable "$PWD/rust/target/${{ matrix.target }}/release/codex-switcher$suffix" -NodeArchive (Join-Path $nodeOutput $asset) -NativeArchive (Join-Path "$PWD/dist" $asset) > dist/performance.json
       - uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.target }}
