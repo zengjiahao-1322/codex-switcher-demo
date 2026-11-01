@@ -5,34 +5,61 @@ use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
     fs,
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, BufRead, Read, Seek, SeekFrom},
     path::Path,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
 };
+fn setting(line: &[u8]) -> io::Result<Option<Value>> {
+    if !line.windows(23).any(|w| w == b"thread_settings_applied") {
+        return Ok(None);
+    }
+    let record: Value = serde_json::from_slice(line).map_err(io::Error::other)?;
+    Ok(
+        if record["type"] == "event_msg" && record["payload"]["type"] == "thread_settings_applied" {
+            record["payload"]["thread_settings"]
+                .get("service_tier")
+                .map(|v| json!({"tier":v}))
+        } else {
+            None
+        },
+    )
+}
+// Codex compresses older rollouts to .jsonl.zst and leaves the old path in its
+// state database. A thread with neither file simply has no recorded speed.
+fn compressed_service_tier(path: &Path) -> io::Result<Option<Value>> {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".zst");
+    let file = match fs::File::open(&name) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    // Long sessions decompress to hundreds of MiB, so only one line is held at a time.
+    let decoder = ruzstd::decoding::StreamingDecoder::new(file).map_err(io::Error::other)?;
+    let mut reader = io::BufReader::new(decoder);
+    let mut line = vec![];
+    let mut found = None;
+    while reader.read_until(b'\n', &mut line)? > 0 {
+        if let Some(value) = setting(&line)? {
+            found = Some(value);
+        }
+        line.clear();
+    }
+    Ok(found)
+}
 pub fn service_tier(path: &Path) -> io::Result<Option<Value>> {
-    let mut file = fs::File::open(path)?;
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return compressed_service_tier(path);
+        }
+        Err(error) => return Err(error),
+    };
     let mut position = file.metadata()?.len();
     let mut remainder = vec![];
-    fn setting(line: &[u8]) -> io::Result<Option<Value>> {
-        if !line.windows(23).any(|w| w == b"thread_settings_applied") {
-            return Ok(None);
-        }
-        let record: Value = serde_json::from_slice(line).map_err(io::Error::other)?;
-        Ok(
-            if record["type"] == "event_msg"
-                && record["payload"]["type"] == "thread_settings_applied"
-            {
-                record["payload"]["thread_settings"]
-                    .get("service_tier")
-                    .map(|v| json!({"tier":v}))
-            } else {
-                None
-            },
-        )
-    }
     while position > 0 {
         let size = position.min(65536) as usize;
         position -= size as u64;
@@ -97,7 +124,9 @@ fn progress(app: &App, completed: usize, total: usize, phase: &str) -> io::Resul
     Ok(())
 }
 async fn apply_row(session: &Session, provider: &str, row: &mut Value) -> io::Result<()> {
-    let speed = service_tier(Path::new(text(&row["rollout_path"])))?;
+    let speed = service_tier(Path::new(text(&row["rollout_path"]))).map_err(|error| {
+        io::Error::other(format!("旧对话 {} 读取失败：{error}", text(&row["id"])))
+    })?;
     let mut params = json!({"threadId":row["id"],"modelProvider":provider,"model":row["nextModel"],"excludeTurns":true});
     if let Some(speed) = &speed {
         params["serviceTier"] = speed["tier"].as_str().map_or(json!(""), |v| json!(v));
@@ -337,5 +366,39 @@ pub async fn synchronize(
                 json!(total.saturating_sub(counts["updated"].as_u64().unwrap_or(0) as usize));
             Err((error, counts))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LINE: &str = r#"{"type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"service_tier":"flex"}}}"#;
+
+    fn folder(name: &str) -> std::path::PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("switcher-rollout-{name}-{}", std::process::id()));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn reads_speed_from_compressed_rollout() {
+        let dir = folder("zst");
+        let compressed = ruzstd::encoding::compress_to_vec(
+            format!("{{\"type\":\"other\"}}\n{LINE}\n").as_bytes(),
+            ruzstd::encoding::CompressionLevel::Fastest,
+        );
+        fs::write(dir.join("rollout.jsonl.zst"), compressed).unwrap();
+        let speed = service_tier(&dir.join("rollout.jsonl")).unwrap().unwrap();
+        assert_eq!(speed["tier"], "flex");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rollout_missing_everywhere_has_no_speed() {
+        let dir = folder("none");
+        assert!(service_tier(&dir.join("rollout.jsonl")).unwrap().is_none());
+        fs::remove_dir_all(dir).unwrap();
     }
 }
