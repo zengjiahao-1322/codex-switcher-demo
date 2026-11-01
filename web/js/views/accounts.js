@@ -235,7 +235,7 @@ const STATUS_LABELS = {
   discounted: '优惠至',
   trial: '试用至',
   renewal: '下次账单',
-  canceled: '已取消，可用至',
+  canceled: '不续费，可用至',
   expires: '会员到期',
 };
 const liveStatus = (a) => {

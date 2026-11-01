@@ -333,7 +333,7 @@ test('计划变更优先于优惠日期', async () => {
   assert.match(card.node.textContent, /^ChatGPT plus · 变更为 Plus /);
 });
 
-test('已取消账号显示可用日期', async () => {
+test('不续费账号显示可用日期', async () => {
   const renewal = new Date(Date.now() + 12 * 86400000).toISOString();
   const page = await runPage({
     respond: backend({
@@ -352,7 +352,7 @@ test('已取消账号显示可用日期', async () => {
   const card = page.created.find(
     (c) => c.tag === 'small' && c.node.textContent.startsWith('ChatGPT plus'),
   );
-  assert.match(card.node.textContent, /^ChatGPT plus · 已取消，可用至 /);
+  assert.match(card.node.textContent, /^ChatGPT plus · 不续费，可用至 /);
 });
 
 // 读取额度时官方续期了令牌（plus 到期变 free），刷新后页面要显示新套餐和时间，不必重开页面。
