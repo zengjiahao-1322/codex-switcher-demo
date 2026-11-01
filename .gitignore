@@ -5,6 +5,7 @@
 !/.gitattributes
 !/.gitignore
 !/.prettierrc.json
+!/AGENTS.md
 !/package.json
 !/LICENSE
 !/README.md
