@@ -97,7 +97,7 @@ impl Drop for Lease {
         }
     }
 }
-pub fn records(bridge: &Path) -> io::Result<Vec<Value>> {
+pub fn all_records(bridge: &Path) -> io::Result<Vec<Value>> {
     let entries = match fs::read_dir(bridge.join("clients")) {
         Ok(v) => v,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
@@ -109,17 +109,21 @@ pub fn records(bridge: &Path) -> io::Result<Vec<Value>> {
         if file.extension().and_then(|s| s.to_str()) != Some("json") {
             continue;
         }
-        let row = read(&file, Value::Null)?;
-        let at = millis();
-        if row["seenAt"]
-            .as_u64()
-            .is_some_and(|v| at.saturating_sub(v) < 15000)
-            || row["waitUntil"].as_u64().is_some_and(|v| v > at)
-        {
-            rows.push(row);
-        }
+        rows.push(read(&file, Value::Null)?);
     }
     Ok(rows)
+}
+pub fn records(bridge: &Path) -> io::Result<Vec<Value>> {
+    let at = millis();
+    Ok(all_records(bridge)?
+        .into_iter()
+        .filter(|row| {
+            row["seenAt"]
+                .as_u64()
+                .is_some_and(|v| at.saturating_sub(v) < 15000)
+                || row["waitUntil"].as_u64().is_some_and(|v| v > at)
+        })
+        .collect())
 }
 fn desktop(exe: &str) -> bool {
     regex::Regex::new(r"(?i)([\\/]OpenAI\.Codex_[^\\/]+[\\/]app[\\/](Codex|ChatGPT)\.exe$|[\\/]Codex\.app[\\/]Contents[\\/]MacOS[\\/](Codex|ChatGPT)$)").unwrap().is_match(exe)

@@ -94,6 +94,30 @@ pub fn groups(bridge: &Path) -> io::Result<Vec<Value>> {
     }
     Ok(found)
 }
+// 断开的服务器上 Codex 可能还在运行，所以每台服务器取最后一次心跳记录的账号。
+pub fn server_accounts(bridge: &Path) -> io::Result<Vec<Value>> {
+    let mut latest = std::collections::HashMap::<String, Value>::new();
+    for row in editors::all_records(bridge)? {
+        if !row["authority"].is_string() || !row["remoteAgent"]["account"].is_object() {
+            continue;
+        }
+        let key = format!(
+            "{}|{}",
+            text(&row["authority"]),
+            text(&row["remoteAgent"]["codexHome"])
+        );
+        let newer = latest
+            .get(&key)
+            .is_none_or(|old| row["seenAt"].as_u64() > old["seenAt"].as_u64());
+        if newer {
+            latest.insert(key, row);
+        }
+    }
+    Ok(latest
+        .into_values()
+        .map(|row| row["remoteAgent"]["account"]["id"].clone())
+        .collect())
+}
 fn window(bridge: &Path, group: &Value) -> io::Result<Option<Value>> {
     Ok(editors::records(bridge)?.into_iter().find(|r| {
         r["authority"] == group["authority"]

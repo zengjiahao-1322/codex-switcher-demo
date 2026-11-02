@@ -689,6 +689,70 @@ test('官方账号状态返回续期状态并清理残留账号目录', { skip: 
   assert.equal(fs.existsSync(path.join(f.bridge, 'accounts', 'known')), true);
 });
 
+test('断开的SSH服务器仍阻止续期并在账号状态标记 remote', { skip: !rustBackend }, async (t) => {
+  const f = await officialFixture(t, { live: auth('owner') });
+  await accounts(f);
+  const id = accountId('stale-remote'),
+    value = auth('stale-remote', { exp: Math.floor(Date.now() / 1000) + 86400 });
+  fs.mkdirSync(path.join(f.bridge, 'accounts', id), { recursive: true });
+  fs.writeFileSync(path.join(f.bridge, 'accounts', id, 'auth.json'), JSON.stringify(value));
+  const rows = JSON.parse(fs.readFileSync(path.join(f.bridge, 'accounts', 'index.json')));
+  rows.push({ id, email: 'stale-remote@example.test', label: 'stale-remote', plan: 'plus', pendingLogin: false });
+  fs.writeFileSync(path.join(f.bridge, 'accounts', 'index.json'), JSON.stringify(rows));
+  fs.mkdirSync(path.join(f.bridge, 'clients'), { recursive: true });
+  fs.writeFileSync(path.join(f.bridge, 'clients', 'stale-remote.json'), JSON.stringify({
+    id: 'stale-remote-window', seenAt: Date.now() - 16000, authority: 'ssh-remote+fixture', remoteType: 'ssh-remote',
+    remoteAgent: { account: { id }, codexHome: '/srv/codex', host: 'fixture', platform: 'linux', arch: 'x64', protocol: 3, agentVersion: '0.1.6' },
+    companionVersion: '0.1.6', lastAck: {},
+  }));
+
+  assert.deepEqual(
+    algorithm(t, { op: 'accountStore', home: f.home, bridge: f.bridge, method: 'renewDue' }, f.environment),
+    { ok: true },
+  );
+  assert.equal(f.rpc().filter((call) => call.method === 'account/read').length, 0);
+  const status = await accounts(f);
+  assert.equal(status.items.find((row) => row.id === id).renewal.state, 'remote');
+});
+
+test('同一SSH服务器按最新记录排除B并允许续期旧记录A', { skip: !rustBackend }, async (t) => {
+  const f = await officialFixture(t, { live: auth('owner') });
+  await accounts(f);
+  const add = (user, refreshed) => {
+    const id = accountId(user),
+      value = auth(user, { exp: Math.floor(Date.now() / 1000) + 86400 });
+    fs.mkdirSync(path.join(f.bridge, 'accounts', id), { recursive: true });
+    fs.writeFileSync(path.join(f.bridge, 'accounts', id, 'auth.json'), JSON.stringify(value));
+    return { id, value, row: { id, email: user + '@example.test', label: user, plan: 'plus', pendingLogin: false }, refreshed };
+  };
+  const a = add('server-A', Date.now() - 32000),
+    b = add('server-B', Date.now() - 16000),
+    rows = JSON.parse(fs.readFileSync(path.join(f.bridge, 'accounts', 'index.json')));
+  rows.push(a.row, b.row);
+  fs.writeFileSync(path.join(f.bridge, 'accounts', 'index.json'), JSON.stringify(rows));
+  fs.mkdirSync(path.join(f.bridge, 'clients'), { recursive: true });
+  for (const [user, row] of [['server-A', a], ['server-B', b]])
+    fs.writeFileSync(path.join(f.bridge, 'clients', user + '.json'), JSON.stringify({
+      id: user, seenAt: row.refreshed, authority: 'ssh-remote+fixture', remoteType: 'ssh-remote',
+      remoteAgent: { account: { id: row.id }, codexHome: '/srv/codex', host: 'fixture', platform: 'linux', arch: 'x64', protocol: 3, agentVersion: '0.1.6' },
+      companionVersion: '0.1.6', lastAck: {},
+    }));
+  const fresh = auth('server-A', { exp: Math.floor(Date.now() / 1000) + 86400 * 30, refreshed: '2030-01-01T00:00:00Z' });
+  f.update((s) => {
+    s.methods['account/read'] = { result: { account: { type: 'chatgpt' } }, auth: fresh };
+  });
+
+  assert.deepEqual(
+    algorithm(t, { op: 'accountStore', home: f.home, bridge: f.bridge, method: 'renewDue' }, f.environment),
+    { ok: true },
+  );
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.bridge, 'accounts', a.id, 'auth.json'))), fresh);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.bridge, 'accounts', b.id, 'auth.json'))), b.value);
+  const calls = f.rpc().filter((call) => call.method === 'account/read');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].home, path.join(f.bridge, 'accounts', a.id));
+});
+
 test('官方诊断HTTP：过期令牌经真实session准备，按错误类型判断且不关闭客户端', async (t) => {
   const live = auth('alice', { exp: 1 }),
     f = await officialFixture(t, { live });

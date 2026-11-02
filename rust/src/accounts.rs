@@ -312,10 +312,7 @@ async fn status(app: &App) -> io::Result<Value> {
     capture(app)?;
     let current_id = identity(&current(app)?).unwrap_or(Value::Null)["id"].clone();
     let owner = owner_id(app)?;
-    let used = crate::remote::groups(&app.bridge)?
-        .into_iter()
-        .map(|group| group["account"]["id"].clone())
-        .collect::<Vec<_>>();
+    let used = crate::remote::server_accounts(&app.bridge)?;
     let mut items = rows(app)?;
     for row in &mut items {
         let id = text(&row["id"]);
@@ -1260,10 +1257,7 @@ async fn renew_due(app: &Arc<App>) -> io::Result<()> {
     let Ok(_operation) = crate::config_ops::operation(&app.bridge) else {
         return Ok(());
     };
-    let used = crate::remote::groups(&app.bridge)?
-        .into_iter()
-        .map(|group| group["account"]["id"].clone())
-        .collect::<Vec<_>>();
+    let used = crate::remote::server_accounts(&app.bridge)?;
     let ids = {
         let _guard = app.accounts.mutation.lock().await;
         capture(app)?;
@@ -1288,10 +1282,7 @@ async fn renew_action(app: Arc<App>, input: &Value) -> io::Result<Value> {
     }
     let _operation = crate::config_ops::operation(&app.bridge)?;
     let id = text(&input["id"]).to_owned();
-    let used = crate::remote::groups(&app.bridge)?
-        .into_iter()
-        .map(|group| group["account"]["id"].clone())
-        .collect::<Vec<_>>();
+    let used = crate::remote::server_accounts(&app.bridge)?;
     let state = {
         let _guard = app.accounts.mutation.lock().await;
         capture(&app)?;
