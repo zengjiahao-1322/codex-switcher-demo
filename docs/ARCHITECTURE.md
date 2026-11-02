@@ -90,7 +90,11 @@ flowchart LR
 
 `rust/src/remote.rs` 根据心跳中的 authority 与 codexHome 分组。独立的 `remoteSwitch` 接受 `accountId` 或 `providerId` 二选一：API 必须已确认直连且有密钥；官方账号必须已保存，远端凭证存储不能是显式 keyring/ephemeral。每组选择版本一致且协议号为 2 的窗口，执行 read，再复用本机的配置生成逻辑，最后 write。官方切换同时写 auth.json 与配置，保留旧 API 的 provider 定义供历史使用。模型目录数据在内存生成，路径按远端系统拼接；不进入本机切换 worker，没有自动跟随开关。同目录只写一次，其余窗口使用既有重载命令。
 
-`rust/src/remote.rs` 按与本机账号相同的身份哈希及 `last_refresh` 比较文件登录，回收较新的远端登录并同步到已使用该账号的本机和其他在线服务器。`readAuth` 和只含 auth 的 write 复用内存命令通道；只同步 auth.json，不改配置、不重载窗口。周期同步不是跨机器刷新锁，仍需实际续期验收。
+`rust/src/remote.rs` 按与本机账号相同的身份哈希及 `last_refresh` 比较文件登录，回收较新的远端登录并同步到已使用该账号的本机和其他在线服务器。`readAuth` 和只含 auth 的 write 复用内存命令通道；只同步 auth.json，不改配置、不重载窗口。
+
+刷新令牌只能用一次，所以同一账号同一时间只有一方负责续期。本机官方模式下，`auth.json` 里的账号归 Codex 自己续期。服务器最后一次心跳记录的账号归服务器，服务器断开后仍然如此，因为那边的 Codex 可能还在运行。其余账号由切换器续期：`accounts::keep_alive` 启动 60 秒后开始，每小时检查一次，访问令牌到期前 2 天内调用 `account/read(refreshToken=true)`；用户也可以点“立即续期”，规则相同。API 模式下 `auth.json` 里的账号没有 Codex 在用，同样由切换器续期，并写回 `auth.json`。需要重新登录的账号不再自动重试。同步在所有者之间传递新令牌，不是跨机器刷新锁，服务器同时刷新造成的冲突仍需实际续期验收。
+
+官方刷新失败的原因只在 Codex 的 stderr 里，`official_session.rs` 关闭进程后才读取，并按其中是否含 `sign in again` 区分“需要重新登录”和“可以重试”。
 
 远端命令与 ackResult 使用常驻服务内存通道，客户端文件只存公开状态与确认元数据。心跳长轮询同时检查该通道，配置回执请求上限为 1 MiB，其他 HTTP 动作仍为 16 KiB。读、写各等待最多 30 秒，不重试；各组独立返回 synced、skipped 或 failed。synced 代表写入已确认、重载已请求；新宿主带 completedReload，后台核对原命令、authority、目录与版本后才返回 reloadConfirmed，随后淘汰旧窗口登记。
 
