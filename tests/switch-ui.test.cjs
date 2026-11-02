@@ -8,7 +8,7 @@ const { runPage } = require('./fake-page.cjs');
 const { createService } = require('../src/server/service.cjs');
 
 // 页面读取的状态来自真实 service，只替换会启动或重启客户端的接口。
-function backend({ switchJob = null, desktopSwitch, clients = [] } = {}) {
+function backend({ switchJob = null, desktopSwitch, clients = [], accounts = [] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-switch-ui-'));
   fs.mkdirSync(path.join(root, 'codex'));
   fs.mkdirSync(path.join(root, 'bridge'));
@@ -19,7 +19,7 @@ function backend({ switchJob = null, desktopSwitch, clients = [] } = {}) {
   });
   return async (route, body) => {
     if (route === 'state') return { body: await service.state() };
-    if (route === 'accounts') return { body: { items: [], switchJob } };
+    if (route === 'accounts') return { body: { items: accounts, switchJob } };
     if (route === 'clients')
       return {
         body: { home: '', clients, auxiliary: [], editors: [], connectedEditors: 0, remotes: [] },
@@ -28,6 +28,49 @@ function backend({ switchJob = null, desktopSwitch, clients = [] } = {}) {
     return { body: { message: route + ' ok' } };
   };
 }
+
+test('官方额度失效时只显示重新登录按钮', async () => {
+  const page = await runPage({
+    respond: backend({
+      accounts: [
+        {
+          id: 'expired-account',
+          label: 'expired@example.test',
+          email: 'expired@example.test',
+          plan: 'plus',
+          quota: { status: 'error', errorKind: 'auth_invalid', error: '登录已失效' },
+        },
+      ],
+      desktopSwitch: () => ({ body: { message: 'ok' } }),
+    }),
+  });
+  const buttons = page.created
+    .filter((entry) => entry.tag === 'button')
+    .map((entry) => entry.node.textContent);
+  assert.ok(buttons.includes('重新登录'));
+  assert.ok(buttons.filter((text) => text === '重新登录').length > 0);
+  const other = await runPage({
+    respond: backend({
+      accounts: [
+        {
+          id: 'network-account',
+          label: 'network@example.test',
+          email: 'network@example.test',
+          plan: 'plus',
+          quota: { status: 'error', errorKind: 'network_error', error: '网络失败' },
+        },
+      ],
+      desktopSwitch: () => ({ body: { message: 'ok' } }),
+    }),
+  });
+  const otherButtons = other.created
+    .filter((entry) => entry.tag === 'button')
+    .map((entry) => entry.node.textContent);
+  assert.ok(
+    buttons.filter((text) => text === '重新登录').length >
+      otherButtons.filter((text) => text === '重新登录').length,
+  );
+});
 
 // 用户决定旧对话一律跟随：点击切换只发一次请求，不弹询问、不带 threadFollow，由后台默认处理。
 test('切换直接发出，不询问旧对话去向', async () => {

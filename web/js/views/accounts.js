@@ -315,6 +315,8 @@ export function renderSelectedQuota() {
   box.replaceChildren();
   if (a) {
     box.append(accountFacts(a), quotaNode(a.quota));
+    if (a.quota?.errorKind === 'auth_invalid')
+      box.append(rowButton('重新登录', () => beginLogin(a.id), accountStatus));
     const busy = quotaRefreshing.has(a.id),
       b = rowButton(busy ? '正在读取…' : '刷新此账号额度', () => refreshQuota(a.id), accountStatus);
     b.disabled = busy;

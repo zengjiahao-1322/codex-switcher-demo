@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, Command},
     sync::{Mutex as AsyncMutex, mpsc, oneshot},
 };
@@ -67,6 +67,8 @@ pub struct Session {
     input: AsyncMutex<Option<ChildStdin>>,
     pending: Pending,
     sequence: AtomicU64,
+    refresh_failure: Arc<Mutex<Option<String>>>,
+    refresh_reader: AsyncMutex<Option<tokio::task::JoinHandle<()>>>,
 }
 impl Session {
     pub fn open(
@@ -122,9 +124,10 @@ impl Session {
             .current_dir(home)
             .env_clear()
             .envs(env)
+            .env("RUST_LOG", "codex_login=error")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
         #[cfg(windows)]
         command.creation_flags(0x08000000);
@@ -138,7 +141,22 @@ impl Session {
         })?;
         let input = child.stdin.take();
         let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+        let refresh_failure = Arc::new(Mutex::new(None));
+        let refresh_failure_reader = refresh_failure.clone();
+        let refresh_reader = tokio::spawn(async move {
+            let mut bytes = vec![];
+            let _ = BufReader::new(stderr).read_to_end(&mut bytes).await;
+            let text = String::from_utf8_lossy(&bytes);
+            if let Some(reason) = text
+                .split("Failed to refresh token: ")
+                .nth(1)
+                .and_then(|value| value.lines().next())
+            {
+                *refresh_failure_reader.lock().unwrap() = Some(reason.chars().take(200).collect());
+            }
+        });
         let requests = pending.clone();
         let (tx, rx) = mpsc::unbounded_channel();
         tokio::spawn(async move {
@@ -171,9 +189,18 @@ impl Session {
                 input: AsyncMutex::new(input),
                 pending,
                 sequence: AtomicU64::new(0),
+                refresh_failure,
+                refresh_reader: AsyncMutex::new(Some(refresh_reader)),
             }),
             rx,
         ))
+    }
+    pub fn refresh_failure(&self) -> Option<String> {
+        self.refresh_failure.lock().unwrap().clone()
+    }
+    pub fn refresh_retryable(&self) -> bool {
+        self.refresh_failure()
+            .is_some_and(|reason| !reason.contains("sign in again"))
     }
     async fn write(&self, value: Value) -> Result<(), Failure> {
         let mut input = self.input.lock().await;
@@ -224,5 +251,8 @@ impl Session {
             let _ = child.start_kill();
         }
         let _ = child.wait().await;
+        if let Some(reader) = self.refresh_reader.lock().await.take() {
+            let _ = reader.await;
+        }
     }
 }

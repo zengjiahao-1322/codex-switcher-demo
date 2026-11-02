@@ -508,6 +508,16 @@ async fn start_login(app: Arc<App>, input: &Value) -> io::Result<Value> {
                     let pending = identity(&current(&app)?).is_some_and(|v| v["id"] == info["id"]);
                     let row = remember(&app, &value, pending)?;
                     fs::remove_file(home.join("auth.json"))?;
+                    match fs::remove_file(
+                        app.bridge
+                            .join("accounts")
+                            .join(text(&row["id"]))
+                            .join("quota.json"),
+                    ) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error),
+                    }
                     Ok(
                         json!({"status":"done","accountId":row["id"],"message":format!("已{} {}；在上方选择此账号并应用后使用。",if id.is_empty(){"添加"}else{"更新"},text(&row["label"]))}),
                     )
@@ -609,6 +619,7 @@ pub async fn action(app: Arc<App>, action: &str, input: &Value) -> io::Result<Va
         _ => unreachable!(),
     }
 }
+
 pub async fn prepare(app: &App, id: &str) -> Result<Value, crate::official_session::Failure> {
     use crate::official_session::Failure;
     let io_failure = |e: io::Error| Failure {
@@ -648,7 +659,11 @@ pub async fn prepare(app: &App, id: &str) -> Result<Value, crate::official_sessi
         if account["account"]["type"] != "chatgpt" {
             return Err(Failure {
                 message: "未读到 ChatGPT 登录".into(),
-                kind: "auth_invalid",
+                kind: if opened.refresh_retryable() {
+                    "network_error"
+                } else {
+                    "auth_invalid"
+                },
                 code: json!("AUTH_REQUIRED"),
             });
         }
@@ -660,6 +675,9 @@ pub async fn prepare(app: &App, id: &str) -> Result<Value, crate::official_sessi
         remember(app, &refreshed, row["pendingLogin"] == true).map_err(io_failure)
     }
     .await;
+    let refresh_error = session
+        .as_ref()
+        .and_then(|session| session.refresh_failure());
     if let Some(session) = session {
         session.close().await;
     }
@@ -667,7 +685,7 @@ pub async fn prepare(app: &App, id: &str) -> Result<Value, crate::official_sessi
         let _ = crate::diagnostics::log(
             &app.bridge,
             "official.error",
-            json!({"op":"prepare","account":identity(&value).unwrap_or(Value::Null)["email"],"kind":e.kind,"code":e.code,"message":e.message}),
+            json!({"op":"prepare","account":identity(&value).unwrap_or(Value::Null)["email"],"kind":e.kind,"code":e.code,"message":e.message,"refreshError":refresh_error}),
         );
     }
     result.map_err(|mut e| {
@@ -685,6 +703,17 @@ pub async fn prepare(app: &App, id: &str) -> Result<Value, crate::official_sessi
         };
         e
     })
+}
+
+async fn renewed(app: &App, id: &str) -> io::Result<Value> {
+    let refreshed = auth(app, id)?;
+    if identity(&refreshed).is_none_or(|v| v["id"] != id) {
+        return Err(io::Error::other("返回的账号与所选账号不一致"));
+    }
+    let _guard = app.accounts.mutation.lock().await;
+    remember(app, &refreshed, false)?;
+    sync_local_auth(app, &refreshed)?;
+    Ok(refreshed)
 }
 pub fn merge_auth(app: &App, value: &Value) -> io::Result<bool> {
     let info = identity(value).ok_or_else(|| io::Error::other("登录记录不完整"))?;
@@ -734,7 +763,7 @@ pub fn sync_local_auth(app: &App, value: &Value) -> io::Result<bool> {
 pub async fn fixture(input: &Value) -> io::Result<Value> {
     let home = std::path::PathBuf::from(text(&input["home"]));
     let bridge = std::path::PathBuf::from(text(&input["bridge"]));
-    let app = App {
+    let app = std::sync::Arc::new(App {
         home,
         bridge: bridge.clone(),
         web: std::path::PathBuf::new(),
@@ -751,7 +780,7 @@ pub async fn fixture(input: &Value) -> io::Result<Value> {
         accounts: Runtime::default(),
         editors: crate::editors::Runtime::default(),
         updates: crate::update::Runtime::default(),
-    };
+    });
     capture(&app)?;
     match text(&input["method"]) {
         "prepare" => match prepare(&app, text(&input["id"])).await {
@@ -760,6 +789,10 @@ pub async fn fixture(input: &Value) -> io::Result<Value> {
         },
         "merge" => Ok(json!({"changed":merge_auth(&app,&input["auth"])?})),
         "syncLocal" => Ok(json!({"changed":sync_local_auth(&app,&input["auth"])?})),
+        "renewDue" => {
+            renew_due(&app).await?;
+            Ok(json!({"ok":true}))
+        }
         _ => Err(io::Error::other("Unknown account fixture method")),
     }
 }
@@ -987,7 +1020,7 @@ fn buckets(result: &Value) -> Vec<Value> {
     }
     output
 }
-async fn read_quota(app: &App, id: &str) -> io::Result<Value> {
+async fn read_quota(app: &App, id: &str, renew: bool) -> io::Result<Value> {
     let (value, previous, selected, current_id) = {
         let _guard = app.accounts.mutation.lock().await;
         capture(app)?;
@@ -1028,18 +1061,33 @@ async fn read_quota(app: &App, id: &str) -> io::Result<Value> {
         session = Some(opened.clone());
         opened.ready().await?;
         let account = opened
-            .rpc("account/read", json!({"refreshToken":false}))
+            .rpc("account/read", json!({"refreshToken":renew}))
             .await?;
         if account["account"]["type"] != "chatgpt" {
             return Err(crate::official_session::Failure {
                 message: "未读到此账号的官方登录，请重新登录此账号。".into(),
-                kind: "auth_invalid",
+                kind: if opened.refresh_retryable() {
+                    "network_error"
+                } else {
+                    "auth_invalid"
+                },
                 code: json!("AUTH_REQUIRED"),
             });
         }
+        let subscription_value = if renew {
+            renewed(app, id)
+                .await
+                .map_err(|error| crate::official_session::Failure {
+                    message: error.to_string(),
+                    kind: "service_error",
+                    code: Value::Null,
+                })?
+        } else {
+            value.clone()
+        };
         let (limits, subscription) = tokio::join!(
             opened.rpc("account/rateLimits/read", json!({})),
-            subscription(app, &value)
+            subscription(app, &subscription_value)
         );
         let buckets = buckets(&limits?);
         if buckets.is_empty() {
@@ -1059,9 +1107,12 @@ async fn read_quota(app: &App, id: &str) -> io::Result<Value> {
         Ok(result)
     }
     .await;
-    if let Some(session) = session {
+    let refresh_error = if let Some(session) = session {
         session.close().await;
-    }
+        session.refresh_failure()
+    } else {
+        None
+    };
     let mut result = match query {
         Ok(v) => v,
         Err(e) => {
@@ -1094,7 +1145,7 @@ async fn read_quota(app: &App, id: &str) -> io::Result<Value> {
             crate::diagnostics::log(
                 &app.bridge,
                 "official.error",
-                json!({"op":"quota","account":selected["email"],"kind":kind,"code":e.code,"message":e.message}),
+                json!({"op":"quota","account":selected["email"],"kind":kind,"code":e.code,"message":e.message,"refreshError":refresh_error}),
             )?;
             let mut v = previous;
             v["status"] = json!("error");
@@ -1104,36 +1155,17 @@ async fn read_quota(app: &App, id: &str) -> io::Result<Value> {
             v
         }
     };
+    if renew {
+        let refreshed = auth(app, id)?;
+        crate::diagnostics::log(
+            &app.bridge,
+            "official.renew",
+            json!({"account":selected["email"],"status":if result["status"] == "ok" && timestamp(&refreshed["last_refresh"]) > timestamp(&value["last_refresh"]) {"ok"} else {"failed"},"refreshError":refresh_error}),
+        )?;
+    }
     write_json(&file, &result)?;
     result["id"] = json!(id);
     Ok(result)
-}
-async fn quota(app: Arc<App>, id: String) -> io::Result<Value> {
-    let mut tasks = app.accounts.quotas.lock().await;
-    let mut receiver = if let Some(receiver) = tasks.get(&id) {
-        receiver.clone()
-    } else {
-        let (tx, rx) = watch::channel(None);
-        tasks.insert(id.clone(), rx.clone());
-        let owned = app.clone();
-        tokio::spawn(async move {
-            let result = {
-                let _slot = owned.accounts.slots.acquire().await.unwrap();
-                read_quota(&owned, &id).await.map_err(|e| e.to_string())
-            };
-            let mut tasks = owned.accounts.quotas.lock().await;
-            let _ = tx.send(Some(result));
-            tasks.remove(&id);
-        });
-        rx
-    };
-    drop(tasks);
-    loop {
-        if let Some(result) = receiver.borrow().clone() {
-            return result.map_err(io::Error::other);
-        }
-        receiver.changed().await.map_err(io::Error::other)?;
-    }
 }
 async fn quota_action(app: Arc<App>, input: &Value) -> io::Result<Value> {
     let ids = {
@@ -1151,13 +1183,107 @@ async fn quota_action(app: Arc<App>, input: &Value) -> io::Result<Value> {
     let mut jobs = Vec::new();
     for id in ids {
         let app = app.clone();
-        jobs.push(tokio::spawn(async move { quota(app, id).await }));
+        jobs.push(tokio::spawn(async move { quota(app, id, false).await }));
     }
     let mut items = Vec::new();
     for job in jobs {
         items.push(job.await.map_err(io::Error::other)??);
     }
     Ok(json!({"items":items}))
+}
+
+fn due(app: &App, row: &Value, current_id: &Value, used: &[Value]) -> io::Result<bool> {
+    let id = text(&row["id"]);
+    if row["pendingLogin"] == true || row["id"] == *current_id || used.contains(&row["id"]) {
+        return Ok(false);
+    }
+    let value = auth(app, id)?;
+    let Some(exp) = claims(text(&value["tokens"]["access_token"]))["exp"].as_i64() else {
+        return Ok(false);
+    };
+    if exp > time::OffsetDateTime::now_utc().unix_timestamp() + 2 * 86400 {
+        return Ok(false);
+    }
+    let quota = read(
+        &app.bridge.join("accounts").join(id).join("quota.json"),
+        json!({}),
+    )?;
+    Ok(quota["errorKind"] != "auth_invalid")
+}
+
+async fn renew_due(app: &Arc<App>) -> io::Result<()> {
+    if login_active(app).await {
+        return Ok(());
+    }
+    let Ok(_operation) = crate::config_ops::operation(&app.bridge) else {
+        return Ok(());
+    };
+    let used = crate::remote::groups(&app.bridge)?
+        .into_iter()
+        .map(|group| group["account"]["id"].clone())
+        .collect::<Vec<_>>();
+    let ids = {
+        let _guard = app.accounts.mutation.lock().await;
+        capture(app)?;
+        let current_id = identity(&current(app)?).unwrap_or(Value::Null)["id"].clone();
+        let mut ids = vec![];
+        for row in rows(app)? {
+            if due(app, &row, &current_id, &used)? {
+                ids.push(text(&row["id"]).to_owned());
+            }
+        }
+        ids
+    };
+    for id in ids {
+        quota(app.clone(), id, true).await?;
+    }
+    Ok(())
+}
+
+async fn quota(app: Arc<App>, id: String, renew: bool) -> io::Result<Value> {
+    let mut tasks = app.accounts.quotas.lock().await;
+    let mut receiver = if let Some(receiver) = tasks.get(&id) {
+        receiver.clone()
+    } else {
+        let (tx, rx) = watch::channel(None);
+        tasks.insert(id.clone(), rx.clone());
+        let owned = app.clone();
+        tokio::spawn(async move {
+            let result = {
+                let _slot = owned.accounts.slots.acquire().await.unwrap();
+                read_quota(&owned, &id, renew)
+                    .await
+                    .map_err(|e| e.to_string())
+            };
+            let mut tasks = owned.accounts.quotas.lock().await;
+            let _ = tx.send(Some(result));
+            tasks.remove(&id);
+        });
+        rx
+    };
+    drop(tasks);
+    loop {
+        if let Some(result) = receiver.borrow().clone() {
+            return result.map_err(io::Error::other);
+        }
+        receiver.changed().await.map_err(io::Error::other)?;
+    }
+}
+
+pub async fn keep_alive(app: Arc<App>) {
+    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    loop {
+        if let Err(error) = renew_due(&app).await
+            && let Err(log_error) = crate::diagnostics::log(
+                &app.bridge,
+                "official.renew",
+                json!({"status":"failed","reason":error.to_string()}),
+            )
+        {
+            eprintln!("Renew failure log failed: {log_error}");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+    }
 }
 pub fn claims(token: &str) -> Value {
     let Some(payload) = token.split('.').nth(1) else {

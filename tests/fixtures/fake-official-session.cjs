@@ -64,6 +64,7 @@ input.on('line', async (line) => {
     emit({ id: request.id, error: { code: -32601, message: 'Fixture method unavailable' } });
     return;
   }
+  if (spec.stderr) process.stderr.write(String(spec.stderr) + '\n');
   if (spec.delayMs) await new Promise((r) => setTimeout(r, spec.delayMs));
   if (spec.waitFile)
     while (!fs.existsSync(path.join(config.root, spec.waitFile)))

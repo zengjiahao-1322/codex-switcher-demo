@@ -522,6 +522,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     crate::migration::start(app.clone(), copied_local);
+    tokio::spawn(crate::accounts::keep_alive(app.clone()));
     if let (Some(directory), Some(sequence)) =
         (discovery, runtime()["sequence"].as_u64().filter(|n| *n > 0))
     {
