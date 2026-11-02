@@ -43,6 +43,7 @@ pub const ACTIONS: &[&str] = &[
     "accountLogin",
     "accountLoginCancel",
     "accountQuota",
+    "accountRenew",
 ];
 pub fn read(file: &Path, fallback: Value) -> io::Result<Value> {
     match fs::read(file) {
@@ -219,6 +220,12 @@ fn current(app: &App) -> io::Result<Value> {
     }
     read(&app.codex_home().join("auth.json"), Value::Null)
 }
+fn owner_id(app: &App) -> io::Result<Value> {
+    if app.bridge.join("current.json").exists() {
+        return Ok(Value::Null);
+    }
+    Ok(identity(&current(app)?).unwrap_or(Value::Null)["id"].clone())
+}
 pub async fn sync_current(app: &App, force: bool) -> io::Result<()> {
     if !cfg!(target_os = "macos") {
         return Ok(());
@@ -304,6 +311,11 @@ pub fn capture(app: &App) -> io::Result<()> {
 async fn status(app: &App) -> io::Result<Value> {
     capture(app)?;
     let current_id = identity(&current(app)?).unwrap_or(Value::Null)["id"].clone();
+    let owner = owner_id(app)?;
+    let used = crate::remote::groups(&app.bridge)?
+        .into_iter()
+        .map(|group| group["account"]["id"].clone())
+        .collect::<Vec<_>>();
     let mut items = rows(app)?;
     for row in &mut items {
         let id = text(&row["id"]);
@@ -324,6 +336,7 @@ async fn status(app: &App) -> io::Result<Value> {
         row["refreshedAt"] = auth["last_refresh"].clone();
         row["current"] = json!(row["id"] == current_id);
         row["quota"] = quota;
+        row["renewal"] = renewal(app, row, &owner, &used)?;
     }
     let login = app
         .accounts
@@ -537,6 +550,9 @@ pub async fn action(app: Arc<App>, action: &str, input: &Value) -> io::Result<Va
     if action == "accountQuota" {
         return quota_action(app, input).await;
     }
+    if action == "accountRenew" {
+        return renew_action(app, input).await;
+    }
     let _operation = if action == "accounts" {
         None
     } else {
@@ -659,11 +675,7 @@ pub async fn prepare(app: &App, id: &str) -> Result<Value, crate::official_sessi
         if account["account"]["type"] != "chatgpt" {
             return Err(Failure {
                 message: "未读到 ChatGPT 登录".into(),
-                kind: if opened.refresh_retryable() {
-                    "network_error"
-                } else {
-                    "auth_invalid"
-                },
+                kind: "auth_invalid",
                 code: json!("AUTH_REQUIRED"),
             });
         }
@@ -675,12 +687,20 @@ pub async fn prepare(app: &App, id: &str) -> Result<Value, crate::official_sessi
         remember(app, &refreshed, row["pendingLogin"] == true).map_err(io_failure)
     }
     .await;
+    if let Some(session) = &session {
+        session.close().await;
+    }
     let refresh_error = session
         .as_ref()
         .and_then(|session| session.refresh_failure());
-    if let Some(session) = session {
-        session.close().await;
-    }
+    let result = result.map_err(|mut failure| {
+        if failure.kind == "auth_invalid"
+            && crate::official_session::Session::retryable(refresh_error.as_deref())
+        {
+            failure.kind = "network_error";
+        }
+        failure
+    });
     if let Err(e) = &result {
         let _ = crate::diagnostics::log(
             &app.bridge,
@@ -791,6 +811,10 @@ pub async fn fixture(input: &Value) -> io::Result<Value> {
         "syncLocal" => Ok(json!({"changed":sync_local_auth(&app,&input["auth"])?})),
         "renewDue" => {
             renew_due(&app).await?;
+            Ok(json!({"ok":true}))
+        }
+        "cleanAccounts" => {
+            clean_accounts(&app).await?;
             Ok(json!({"ok":true}))
         }
         _ => Err(io::Error::other("Unknown account fixture method")),
@@ -1041,7 +1065,8 @@ async fn read_quota(app: &App, id: &str, renew: bool) -> io::Result<Value> {
     let file = app.bridge.join("accounts").join(id).join("quota.json");
     let exp = claims(text(&value["tokens"]["access_token"]))["exp"].as_i64();
     let now_seconds = time::OffsetDateTime::now_utc().unix_timestamp();
-    if current_id == id
+    if !renew
+        && current_id == id
         && (exp.is_some_and(|v| v <= now_seconds + 300)
             || (exp.is_none()
                 && timestamp(&value["last_refresh"])
@@ -1066,11 +1091,7 @@ async fn read_quota(app: &App, id: &str, renew: bool) -> io::Result<Value> {
         if account["account"]["type"] != "chatgpt" {
             return Err(crate::official_session::Failure {
                 message: "未读到此账号的官方登录，请重新登录此账号。".into(),
-                kind: if opened.refresh_retryable() {
-                    "network_error"
-                } else {
-                    "auth_invalid"
-                },
+                kind: "auth_invalid",
                 code: json!("AUTH_REQUIRED"),
             });
         }
@@ -1107,12 +1128,20 @@ async fn read_quota(app: &App, id: &str, renew: bool) -> io::Result<Value> {
         Ok(result)
     }
     .await;
-    let refresh_error = if let Some(session) = session {
+    if let Some(session) = &session {
         session.close().await;
-        session.refresh_failure()
-    } else {
-        None
-    };
+    }
+    let refresh_error = session
+        .as_ref()
+        .and_then(|session| session.refresh_failure());
+    let query = query.map_err(|mut failure| {
+        if failure.kind == "auth_invalid"
+            && crate::official_session::Session::retryable(refresh_error.as_deref())
+        {
+            failure.kind = "network_error";
+        }
+        failure
+    });
     let mut result = match query {
         Ok(v) => v,
         Err(e) => {
@@ -1191,24 +1220,37 @@ async fn quota_action(app: Arc<App>, input: &Value) -> io::Result<Value> {
     }
     Ok(json!({"items":items}))
 }
-
-fn due(app: &App, row: &Value, current_id: &Value, used: &[Value]) -> io::Result<bool> {
+fn renewal(app: &App, row: &Value, owner: &Value, used: &[Value]) -> io::Result<Value> {
+    if row["pendingLogin"] == true {
+        return Ok(json!({"state":"pending"}));
+    }
+    if row["id"] == *owner {
+        return Ok(json!({"state":"codex"}));
+    }
+    if used.contains(&row["id"]) {
+        return Ok(json!({"state":"remote"}));
+    }
     let id = text(&row["id"]);
-    if row["pendingLogin"] == true || row["id"] == *current_id || used.contains(&row["id"]) {
-        return Ok(false);
-    }
-    let value = auth(app, id)?;
-    let Some(exp) = claims(text(&value["tokens"]["access_token"]))["exp"].as_i64() else {
-        return Ok(false);
-    };
-    if exp > time::OffsetDateTime::now_utc().unix_timestamp() + 2 * 86400 {
-        return Ok(false);
-    }
     let quota = read(
         &app.bridge.join("accounts").join(id).join("quota.json"),
         json!({}),
     )?;
-    Ok(quota["errorKind"] != "auth_invalid")
+    if quota["errorKind"] == "auth_invalid" {
+        return Ok(json!({"state":"relogin"}));
+    }
+    let value = auth(app, id)?;
+    let Some(exp) = claims(text(&value["tokens"]["access_token"]))["exp"].as_i64() else {
+        return Ok(json!({"state":"unknown"}));
+    };
+    let at = exp - 2 * 86400;
+    let due = at <= time::OffsetDateTime::now_utc().unix_timestamp();
+    let date = time::OffsetDateTime::from_unix_timestamp(at)
+        .map_err(io::Error::other)?
+        .format(&time::format_description::well_known::Rfc3339)
+        .map_err(io::Error::other)?;
+    Ok(
+        json!({"state":if due && quota["status"] == "error" {"retry"} else {"auto"},"at":date,"due":due}),
+    )
 }
 
 async fn renew_due(app: &Arc<App>) -> io::Result<()> {
@@ -1225,10 +1267,10 @@ async fn renew_due(app: &Arc<App>) -> io::Result<()> {
     let ids = {
         let _guard = app.accounts.mutation.lock().await;
         capture(app)?;
-        let current_id = identity(&current(app)?).unwrap_or(Value::Null)["id"].clone();
+        let owner = owner_id(app)?;
         let mut ids = vec![];
         for row in rows(app)? {
-            if due(app, &row, &current_id, &used)? {
+            if renewal(app, &row, &owner, &used)?["due"] == true {
                 ids.push(text(&row["id"]).to_owned());
             }
         }
@@ -1238,6 +1280,39 @@ async fn renew_due(app: &Arc<App>) -> io::Result<()> {
         quota(app.clone(), id, true).await?;
     }
     Ok(())
+}
+
+async fn renew_action(app: Arc<App>, input: &Value) -> io::Result<Value> {
+    if login_active(&app).await {
+        return Err(io::Error::other("请先完成或取消当前登录"));
+    }
+    let _operation = crate::config_ops::operation(&app.bridge)?;
+    let id = text(&input["id"]).to_owned();
+    let used = crate::remote::groups(&app.bridge)?
+        .into_iter()
+        .map(|group| group["account"]["id"].clone())
+        .collect::<Vec<_>>();
+    let state = {
+        let _guard = app.accounts.mutation.lock().await;
+        capture(&app)?;
+        let row = rows(&app)?
+            .into_iter()
+            .find(|r| r["id"] == id)
+            .ok_or_else(|| io::Error::other("账号不存在"))?;
+        renewal(&app, &row, &owner_id(&app)?, &used)?
+    };
+    let refused = match text(&state["state"]) {
+        "auto" | "retry" => None,
+        "codex" => Some("此账号正在使用，由 Codex 自己续期。"),
+        "remote" => Some("SSH 服务器正在使用此账号，未续期。"),
+        "relogin" => Some("此账号登录已失效，请重新登录。"),
+        "pending" => Some("请先应用新登录。"),
+        _ => Some("此账号的登录记录无法续期。"),
+    };
+    if let Some(message) = refused {
+        return Err(io::Error::other(message));
+    }
+    Ok(json!({"items":[quota(app.clone(), id, true).await?]}))
 }
 
 async fn quota(app: Arc<App>, id: String, renew: bool) -> io::Result<Value> {
@@ -1272,6 +1347,16 @@ async fn quota(app: Arc<App>, id: String, renew: bool) -> io::Result<Value> {
 
 pub async fn keep_alive(app: Arc<App>) {
     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    if !login_active(&app).await
+        && let Ok(_operation) = crate::config_ops::operation(&app.bridge)
+        && let Err(error) = clean_accounts(&app).await
+    {
+        let _ = crate::diagnostics::log(
+            &app.bridge,
+            "data.cleanup",
+            json!({"kind":"accounts","status":"failed","reason":error.to_string()}),
+        );
+    }
     loop {
         if let Err(error) = renew_due(&app).await
             && let Err(log_error) = crate::diagnostics::log(
@@ -1284,6 +1369,93 @@ pub async fn keep_alive(app: Arc<App>) {
         }
         tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
     }
+}
+
+fn directory_size(path: &Path) -> io::Result<u64> {
+    if path.is_file() {
+        return Ok(fs::metadata(path)?.len());
+    }
+    let mut total = 0;
+    for entry in fs::read_dir(path)? {
+        total += directory_size(&entry?.path())?;
+    }
+    Ok(total)
+}
+
+fn indexed_ids(app: &App) -> io::Result<Vec<Value>> {
+    Ok(rows(app)?
+        .into_iter()
+        .map(|row| row["id"].clone())
+        .collect())
+}
+
+pub async fn clean_accounts(app: &App) -> io::Result<()> {
+    let _guard = app.accounts.mutation.lock().await;
+    let root = app.bridge.join("accounts");
+    let login = root.join("login");
+    let indexed = indexed_ids(app)?;
+    let mut deleted_entries = 0u64;
+    let mut freed_bytes = 0u64;
+    let mut remove = |path: &Path| -> io::Result<()> {
+        let size = directory_size(path).unwrap_or(0);
+        if path.is_dir() {
+            fs::remove_dir_all(path)?;
+        } else {
+            fs::remove_file(path)?;
+        }
+        deleted_entries += 1;
+        freed_bytes += size;
+        Ok(())
+    };
+    if login.is_dir() {
+        let mut preserve_top = false;
+        for entry in fs::read_dir(&login)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                let value = read(&path.join("auth.json"), Value::Null)?;
+                let preserve = identity(&value)
+                    .map(|info| !indexed.contains(&info["id"]))
+                    .unwrap_or(false);
+                if !preserve {
+                    remove(&path)?;
+                }
+            } else if path.file_name().and_then(|v| v.to_str()) == Some("auth.json") {
+                let value = read(&path, Value::Null)?;
+                preserve_top = identity(&value)
+                    .map(|info| !indexed.contains(&info["id"]))
+                    .unwrap_or(false);
+            }
+        }
+        if !preserve_top {
+            for entry in fs::read_dir(&login)? {
+                let path = entry?.path();
+                if path.is_file() {
+                    remove(&path)?;
+                }
+            }
+        }
+    }
+    if root.is_dir() {
+        for entry in fs::read_dir(&root)? {
+            let path = entry?.path();
+            if path.file_name().and_then(|v| v.to_str()) == Some("login") || !path.is_dir() {
+                continue;
+            }
+            let name = path.file_name().and_then(|v| v.to_str()).unwrap_or("");
+            if indexed.iter().any(|id| text(id) == name) || path.join("auth.json").exists() {
+                continue;
+            }
+            remove(&path)?;
+        }
+    }
+    if deleted_entries > 0 {
+        crate::diagnostics::log(
+            &app.bridge,
+            "data.cleanup",
+            json!({"kind":"accounts","deletedEntries":deleted_entries,"freedBytes":freed_bytes}),
+        )?;
+    }
+    Ok(())
 }
 pub fn claims(token: &str) -> Value {
     let Some(payload) = token.split('.').nth(1) else {

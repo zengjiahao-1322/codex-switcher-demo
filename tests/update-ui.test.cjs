@@ -6,7 +6,7 @@ const { runPage } = require('./fake-page.cjs');
 const current = { version: '0.1.3', build: 'old', sequence: 120 };
 const newer = { version: '0.1.3', build: 'new', sequence: 128, notes: '修复切换失败' };
 function backend(update, calls = {}) {
-  return async (route) => {
+  return async (route, body) => {
     if (route === 'state')
       return {
         body: {
@@ -30,7 +30,7 @@ function backend(update, calls = {}) {
           remotes: [],
         },
       };
-    return calls[route]();
+    return calls[route](body);
   };
 }
 
@@ -59,6 +59,17 @@ test('有新构建时顶部提示，点“立即更新”后显示正在安装',
   assert.equal(page.byId('update-title').textContent, '正在安装更新');
   assert.equal(page.byId('update-install').hidden, true);
   assert.equal(page.byId('status').textContent, '更新已下载并开始安装。');
+});
+
+test('手动检查更新跳过缓存并发送 manual 标记', async () => {
+  const update = { current, latest: null, checkedAt: new Date().toISOString(), status: 'idle' };
+  const page = await runPage({
+    respond: backend(() => update, {
+      checkUpdate: () => ({ body: update }),
+    }),
+  });
+  await page.byId('update-check').onclick();
+  assert.deepEqual(page.calls('checkUpdate').at(-1).body, { manual: true });
 });
 
 test('安装失败时提示原因并可重试', async () => {

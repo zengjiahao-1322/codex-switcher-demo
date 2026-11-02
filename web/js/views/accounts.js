@@ -306,7 +306,35 @@ export function accountFacts(a) {
       : '尚未读取',
   );
   if (a.refreshedAt) fact('登录刷新', stamp(a.refreshedAt) + '（' + ago(a.refreshedAt) + '）');
+  if (a.renewal)
+    fact(
+      '登录续期',
+      renewalText(a.renewal),
+      a.renewal.state === 'relogin' ? 'warn' : '',
+    );
   return facts;
+}
+function renewalText(r) {
+  if (r.state === 'auto') return r.due ? '等待自动续期' : '下次自动续期 ' + day(r.at);
+  return {
+    retry: '续期失败，稍后自动重试',
+    codex: '由 Codex 续期',
+    remote: 'SSH 服务器使用中',
+    relogin: '需要重新登录',
+    pending: '等待应用新登录',
+    unknown: '无法判断',
+  }[r.state];
+}
+const canRenew = (a) => ['auto', 'retry'].includes(a.renewal?.state);
+function renewButton(a) {
+  return rowButton(
+    '立即续期',
+    async () => {
+      await api('accountRenew', { id: a.id });
+      await refreshAccounts();
+    },
+    accountStatus,
+  );
 }
 export function renderSelectedQuota() {
   const a = selectedAccount(),
@@ -321,11 +349,19 @@ export function renderSelectedQuota() {
       b = rowButton(busy ? '正在读取…' : '刷新此账号额度', () => refreshQuota(a.id), accountStatus);
     b.disabled = busy;
     box.append(b);
+    if (canRenew(a)) box.append(renewButton(a));
   }
 }
 // 读取额度时官方可能续期令牌，套餐和会员时间随之变化；只合并这些字段，
 // 不替换整份账号数据，避免覆盖其他账号正在进行的刷新结果。
-const ACCOUNT_INFO = ['email', 'plan', 'subscriptionUntil', 'subscriptionCheckedAt', 'refreshedAt'];
+const ACCOUNT_INFO = [
+  'email',
+  'plan',
+  'subscriptionUntil',
+  'subscriptionCheckedAt',
+  'refreshedAt',
+  'renewal',
+];
 async function syncAccountInfo(ids) {
   const fresh = await api('accounts', {});
   for (const id of ids) {
@@ -403,6 +439,7 @@ export function renderAccounts() {
       accountStatus,
     );
     acts.append(quotaButton);
+    if (canRenew(a)) acts.append(renewButton(a));
     acts.append(
       rowButton(
         '重新登录',

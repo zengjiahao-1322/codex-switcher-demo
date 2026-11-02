@@ -60,11 +60,18 @@ export function renderUpdate(u) {
     poll = null;
   }
 }
-export async function checkUpdate() {
-  renderUpdate(await api('checkUpdate', {}));
+export async function checkUpdate(manual = false) {
+  renderUpdate(await api('checkUpdate', manual ? { manual: true } : {}));
 }
 $('update-check').onclick = () =>
-  busy($('update-check'), checkUpdate, (text) => ($('update-status').textContent = text));
+  busy(
+    $('update-check'),
+    async () => {
+      $('update-status').textContent = '正在检查更新…';
+      await checkUpdate(true);
+    },
+    (text) => ($('update-status').textContent = text),
+  );
 $('update-install').onclick = () =>
   busy($('update-install'), async () => {
     renderUpdate({ ...update, status: 'downloading' });

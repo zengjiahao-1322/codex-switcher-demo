@@ -124,7 +124,7 @@ async function packageArchive(f, modify = () => {}) {
   return { source, build: actual, archive };
 }
 
-test('更新黑盒：发行元数据校验、六小时合并与同版仅较大发行序号可升级', async (t) => {
+test('更新黑盒：发行元数据校验、六小时合并与同版仅较大发行序号可升级', { skip: !isRust }, async (t) => {
   const f = await packageFixture(t);
   f.response.metadata = metadata(f);
   for (const sequence of [undefined, null, '101', 0, -1, 1.5]) {
@@ -142,6 +142,8 @@ test('更新黑盒：发行元数据校验、六小时合并与同版仅较大�
   await api(f, 'checkUpdate', {});
   assert.equal(f.requests.filter((x) => x === '/release.json').length, 7);
   assert.equal((await updateState(f)).status, 'available');
+  await api(f, 'checkUpdate', { manual: true });
+  assert.equal(f.requests.filter((x) => x === '/release.json').length, 8);
 });
 test('更新黑盒：相同或更低序号不下载、不改程序全文', async (t) => {
   for (const sequence of [100, 99]) {

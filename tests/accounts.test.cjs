@@ -541,7 +541,9 @@ test('关闭旧对话跟随时不调用同步，继续同步只重跑设置而�
       syncThreads: async () => assert.fail('关闭时不能启动会话同步后端'),
     },
   );
-  assert.deepEqual(a.status().switchJob.threads, { updated: 0, skipped: 0, failed: 0 });
+  assert.equal(a.status().switchJob.threads.updated, 0);
+  assert.equal(a.status().switchJob.threads.skipped, 0);
+  assert.equal(a.status().switchJob.threads.failed, 0);
   await runSwitch(
     {
       ...f,
@@ -566,7 +568,9 @@ test('关闭旧对话跟随时不调用同步，继续同步只重跑设置而�
     },
   );
   const job = a.status().switchJob;
-  assert.deepEqual(job.threads, { updated: 1, skipped: 2, failed: 0 });
+  assert.equal(job.threads.updated, 1);
+  assert.equal(job.threads.skipped, 2);
+  assert.equal(job.threads.failed, 0);
   assert.equal(job.previousProvider, 'openai');
   assert.equal(Object.hasOwn(job, 'threadRouting'), false);
 });

@@ -11,6 +11,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
+    time::Instant,
 };
 fn setting(line: &[u8]) -> io::Result<Option<Value>> {
     if !line.windows(23).any(|w| w == b"thread_settings_applied") {
@@ -124,9 +125,11 @@ fn progress(app: &App, completed: usize, total: usize, phase: &str) -> io::Resul
     Ok(())
 }
 async fn apply_row(session: &Session, provider: &str, row: &mut Value) -> io::Result<()> {
+    let scan_started = Instant::now();
     let speed = service_tier(Path::new(text(&row["rollout_path"]))).map_err(|error| {
         io::Error::other(format!("旧对话 {} 读取失败：{error}", text(&row["id"])))
     })?;
+    row["scanMs"] = json!(scan_started.elapsed().as_millis());
     let mut params = json!({"threadId":row["id"],"modelProvider":provider,"model":row["nextModel"],"excludeTurns":true});
     if let Some(speed) = &speed {
         params["serviceTier"] = speed["tier"].as_str().map_or(json!(""), |v| json!(v));
@@ -285,6 +288,7 @@ pub async fn synchronize(
         let failed = Arc::new(AtomicBool::new(false));
         let mut tasks = vec![];
         let (send, mut receive) = tokio::sync::mpsc::unbounded_channel();
+        let apply_started = Instant::now();
         progress(app, 0, total, "sync")?;
         for worker in 0..total.min(4) {
             let session = sessions[worker % sessions.len()].clone();
@@ -330,6 +334,13 @@ pub async fn synchronize(
         for task in tasks {
             task.await.map_err(io::Error::other)?;
         }
+        counts["applyMs"] = json!(apply_started.elapsed().as_millis());
+        counts["scanMs"] = json!(
+            applied
+                .iter()
+                .map(|row| row["scanMs"].as_u64().unwrap_or(0))
+                .sum::<u64>()
+        );
         for session in &sessions {
             session.close().await;
         }
@@ -337,6 +348,7 @@ pub async fn synchronize(
         let cold = Session::threads(&app.bridge, &home, &config).map_err(rpc_error)?;
         sessions.push(cold.clone());
         initialize(&cold).await?;
+        let verify_started = Instant::now();
         progress(app, 0, applied.len(), "verify")?;
         for (index, row) in applied.iter().enumerate() {
             match verify_row(&cold, provider, row).await {
@@ -349,6 +361,7 @@ pub async fn synchronize(
                 }
             }
         }
+        counts["verifyMs"] = json!(verify_started.elapsed().as_millis());
         if let Some(error) = failure {
             Err(error)
         } else {

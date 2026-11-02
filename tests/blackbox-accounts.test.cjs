@@ -466,6 +466,31 @@ test('官方账号后台续期：到期前两天刷新凭证并记录成功', { 
   assert.match(log, /"status":"ok"/);
 });
 
+test('官方账号后台续期：API 模式账号可续期并同步本机 auth.json', { skip: !rustBackend }, async (t) => {
+  const old = auth('alice', { exp: Math.floor(Date.now() / 1000) + 86400 });
+  const f = await officialFixture(t, { live: old });
+  await accounts(f);
+  const id = accountId('alice');
+  const fresh = auth('alice', {
+    exp: Math.floor(Date.now() / 1000) + 86400 * 30,
+    refreshed: '2030-01-01T00:00:00Z',
+  });
+  f.update((s) => {
+    s.methods['account/read'] = { result: { account: { type: 'chatgpt' } }, auth: fresh };
+  });
+  const runRenew = () =>
+    algorithm(t, { op: 'accountStore', home: f.home, bridge: f.bridge, method: 'renewDue' }, f.environment);
+
+  assert.deepEqual(runRenew(), { ok: true });
+  assert.deepEqual(f.rpc(), []);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.home, 'auth.json'))), old);
+
+  fs.writeFileSync(path.join(f.bridge, 'current.json'), JSON.stringify({ mode: 'api' }));
+  assert.deepEqual(runRenew(), { ok: true });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.home, 'auth.json'))), fresh);
+  assert.equal(f.rpc().filter((call) => call.method === 'account/read').length, 1);
+});
+
 test('官方账号后台续期：六种不续期情况均不启动假 Codex', { skip: !rustBackend }, async (t) => {
   const cases = [
     ['正在使用', (f, id) => id],
@@ -545,6 +570,123 @@ test('官方额度HTTP：刷新错误写入脱敏原因并将续期标为失败'
   assert.match(log, /"refreshError":"测试原因"/);
   assert.match(log, /"event":"official\.renew"/);
   assert.match(log, /"status":"failed"/);
+});
+
+test('官方账号立即续期：成功续期，拒绝 Codex、SSH、失效和待应用账号', { skip: !rustBackend }, async (t) => {
+  const f = await officialFixture(t, { live: auth('owner') });
+  await accounts(f);
+  const add = (user, extra = {}) => {
+    const id = accountId(user), value = auth(user, { exp: Math.floor(Date.now() / 1000) + 86400 });
+    fs.mkdirSync(path.join(f.bridge, 'accounts', id), { recursive: true });
+    fs.writeFileSync(path.join(f.bridge, 'accounts', id, 'auth.json'), JSON.stringify(value));
+    return { id, value, row: { id, email: user + '@example.test', label: user, plan: 'plus', pendingLogin: false, ...extra } };
+  };
+  const bob = add('bob'), pending = add('pending', { pendingLogin: true }),
+    relogin = add('relogin'), remote = add('remote');
+  fs.writeFileSync(path.join(f.bridge, 'accounts', relogin.id, 'quota.json'), JSON.stringify({ errorKind: 'auth_invalid' }));
+  fs.mkdirSync(path.join(f.bridge, 'clients'), { recursive: true });
+  fs.writeFileSync(path.join(f.bridge, 'clients', 'remote.json'), JSON.stringify({
+    id: 'remote-window', seenAt: Date.now(), authority: 'ssh-remote+fixture', remoteType: 'ssh-remote',
+    remoteAgent: { account: { id: remote.id }, codexHome: '/srv/.codex', host: 'fixture', platform: 'linux', arch: 'x64', protocol: 3, agentVersion: '0.1.6' },
+    companionVersion: '0.1.6', lastAck: {},
+  }));
+  const rows = JSON.parse(fs.readFileSync(path.join(f.bridge, 'accounts', 'index.json')));
+  rows.push(bob.row, pending.row, relogin.row, remote.row);
+  fs.writeFileSync(path.join(f.bridge, 'accounts', 'index.json'), JSON.stringify(rows));
+  f.update((s) => {
+    s.methods['account/read'] = { result: { account: { type: 'chatgpt' } }, auth: auth('bob', { exp: Math.floor(Date.now() / 1000) + 86400 * 30, refreshed: '2030-01-01T00:00:00Z' }) };
+  });
+  const renewed = await api(f, 'accountRenew', { id: bob.id });
+  assert.equal(renewed.items[0].status, 'ok');
+  const callsBeforeRefusals = f.rpc().filter((call) => call.method === 'account/read').length;
+  for (const [id, message] of [
+    [accountId('owner'), /Codex/],
+    [pending.id, /应用新登录/],
+    [relogin.id, /重新登录/],
+    [remote.id, /SSH/],
+  ]) {
+    await api(f, 'accountRenew', { id }, 400).then((value) => assert.match(value.error, message));
+  }
+  assert.equal(
+    f.rpc().filter((call) => call.method === 'account/read').length,
+    callsBeforeRefusals,
+    'refused immediate renewals must not start the fake Codex',
+  );
+});
+
+test('官方刷新stderr在关闭后分类额度和prepare错误', { skip: !rustBackend }, async (t) => {
+  for (const [stderr, expected] of [
+    ['Failed to refresh token: 网络错误', 'network_error'],
+    ['Failed to refresh token: Please log out and sign in again.', 'auth_invalid'],
+  ]) {
+    await t.test(expected, async (st) => {
+      const f = await officialFixture(st, { live: auth('alice') });
+      await accounts(f);
+      const id = accountId('bob'),
+        expired = auth('bob', { exp: 1 });
+      fs.mkdirSync(path.join(f.bridge, 'accounts', id), { recursive: true });
+      fs.writeFileSync(path.join(f.bridge, 'accounts', id, 'auth.json'), JSON.stringify(expired));
+      const rows = JSON.parse(fs.readFileSync(path.join(f.bridge, 'accounts', 'index.json')));
+      rows.push({ id, email: 'bob@example.test', label: 'bob@example.test', plan: 'plus', pendingLogin: false });
+      fs.writeFileSync(path.join(f.bridge, 'accounts', 'index.json'), JSON.stringify(rows));
+      f.update((s) => {
+        // Windows 的假 Codex 经一层程序转发 stderr，留出转发时间；真实 Codex 直接写管道。
+        s.methods['account/read'] = { stderr, delayMs: 250, result: { account: null } };
+      });
+
+      const quota = await api(f, 'accountQuota', { id });
+      assert.equal(quota.items[0].errorKind, expected);
+      const prepare = algorithm(
+        st,
+        { op: 'accountStore', home: f.home, bridge: f.bridge, method: 'prepare', id },
+        f.environment,
+      );
+      assert.equal(prepare.kind, expected);
+      const log = fs.readFileSync(path.join(f.bridge, 'logs', 'switcher.log'), 'utf8');
+      assert.match(log, /"op":"quota"/);
+      assert.match(log, /"op":"prepare"/);
+      assert.match(log, /"refreshError":"/);
+      assert.ok(log.includes('"refreshError":"' + stderr.replace('Failed to refresh token: ', '') + '"'));
+    });
+  }
+});
+
+test('官方账号状态返回续期状态并清理残留账号目录', { skip: !rustBackend }, async (t) => {
+  const f = await officialFixture(t, { live: auth('owner') });
+  await accounts(f);
+  const add = (user, options = {}) => {
+    const id = accountId(user), value = auth(user, { exp: options.exp ?? Math.floor(Date.now() / 1000) + 86400 * 30 });
+    fs.mkdirSync(path.join(f.bridge, 'accounts', id), { recursive: true });
+    fs.writeFileSync(path.join(f.bridge, 'accounts', id, 'auth.json'), JSON.stringify(value));
+    return { id, row: { id, email: user + '@example.test', label: user, plan: 'plus', pendingLogin: options.pendingLogin ?? false }, value };
+  };
+  const auto = add('auto', { exp: Math.floor(Date.now() / 1000) + 86400 * 3 });
+  const retry = add('retry', { exp: Math.floor(Date.now() / 1000) + 86400 });
+  const relogin = add('relogin-status');
+  fs.writeFileSync(path.join(f.bridge, 'accounts', retry.id, 'quota.json'), JSON.stringify({ status: 'error' }));
+  fs.writeFileSync(path.join(f.bridge, 'accounts', relogin.id, 'quota.json'), JSON.stringify({ errorKind: 'auth_invalid' }));
+  const rows = JSON.parse(fs.readFileSync(path.join(f.bridge, 'accounts', 'index.json')));
+  rows.push(auto.row, retry.row, relogin.row);
+  fs.writeFileSync(path.join(f.bridge, 'accounts', 'index.json'), JSON.stringify(rows));
+  const status = await accounts(f);
+  assert.equal(status.items.find((row) => row.id === auto.id).renewal.state, 'auto');
+  assert.equal(status.items.find((row) => row.id === retry.id).renewal.state, 'retry');
+  assert.equal(status.items.find((row) => row.id === accountId('owner')).renewal.state, 'codex');
+  assert.equal(status.items.find((row) => row.id === relogin.id).renewal.state, 'relogin');
+  const loginRoot = path.join(f.bridge, 'accounts', 'login');
+  fs.mkdirSync(path.join(loginRoot, 'saved'), { recursive: true });
+  fs.mkdirSync(path.join(loginRoot, 'orphan'), { recursive: true });
+  fs.mkdirSync(path.join(f.bridge, 'accounts', 'unknown'), { recursive: true });
+  fs.mkdirSync(path.join(f.bridge, 'accounts', 'known'), { recursive: true });
+  fs.writeFileSync(path.join(loginRoot, 'saved', 'auth.json'), JSON.stringify(auto.value));
+  fs.writeFileSync(path.join(loginRoot, 'orphan', 'auth.json'), JSON.stringify(auth('orphan')));
+  fs.writeFileSync(path.join(f.bridge, 'accounts', 'unknown', 'stale.txt'), 'stale');
+  fs.writeFileSync(path.join(f.bridge, 'accounts', 'known', 'auth.json'), JSON.stringify(auto.value));
+  assert.deepEqual(algorithm(t, { op: 'accountStore', home: f.home, bridge: f.bridge, method: 'cleanAccounts' }, f.environment), { ok: true });
+  assert.equal(fs.existsSync(path.join(loginRoot, 'saved')), false);
+  assert.equal(fs.existsSync(path.join(loginRoot, 'orphan')), true);
+  assert.equal(fs.existsSync(path.join(f.bridge, 'accounts', 'unknown')), false);
+  assert.equal(fs.existsSync(path.join(f.bridge, 'accounts', 'known')), true);
 });
 
 test('官方诊断HTTP：过期令牌经真实session准备，按错误类型判断且不关闭客户端', async (t) => {

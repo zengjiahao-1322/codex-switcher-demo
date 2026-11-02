@@ -321,7 +321,9 @@ test('旧对话同步黑盒：切换后通过同一官方RPC冷启动核对来�
   });
   const result = await finish(f);
   assert.equal(result.status, 'done', JSON.stringify({ result, rpc: f.rpc() }));
-  assert.deepEqual(result.threads, { updated: 1, skipped: 0, failed: 0 });
+  assert.equal(result.threads.updated, 1);
+  assert.equal(result.threads.skipped, 0);
+  assert.equal(result.threads.failed, 0);
   assert.equal(read(f), 'model = "new-model"\ncli_auth_credentials_store = "file"\n');
   assert.equal(f.rpc().filter((r) => r.method === 'thread/resume').length >= 1, true);
 });

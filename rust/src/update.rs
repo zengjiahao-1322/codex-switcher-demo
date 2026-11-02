@@ -347,12 +347,13 @@ fn log_failure(
     diagnostics::log(&app.bridge, event, row)?;
     Ok(message)
 }
-pub async fn check(app: &App) -> io::Result<Value> {
+pub async fn check(app: &App, manual: bool) -> io::Result<Value> {
     let _checking = app.updates.checking.lock().await;
     if with_state(app, |s| {
         s.task
-            || s.checked
-                .is_some_and(|at| at.elapsed() < Duration::from_secs(6 * 60 * 60))
+            || (!manual
+                && s.checked
+                    .is_some_and(|at| at.elapsed() < Duration::from_secs(6 * 60 * 60)))
     }) {
         return Ok(snapshot(app));
     }
@@ -514,7 +515,7 @@ pub async fn install(app: Arc<App>, input: &Value) -> io::Result<Value> {
         return Ok(json!({"message":"更新正在进行。"}));
     }
     if with_state(&app, |s| s.metadata.is_none()) {
-        check(&app).await?;
+        check(&app, false).await?;
     }
     let metadata = with_state(&app, |s| -> io::Result<Value> {
         if s.metadata.is_none() {

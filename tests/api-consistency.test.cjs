@@ -31,8 +31,16 @@ function knownActions() {
   return new Set([...Object.keys(service.actions), ...serverRoutes]);
 }
 
+function rustActions() {
+  const source = fs.readFileSync(path.join(root, 'rust/src/server.rs'), 'utf8');
+  const block = source.match(/const ACTIONS: &\[&str\] = &\[([\s\S]*?)\];/);
+  assert.ok(block, 'Rust server action list is missing');
+  return new Set([...block[1].matchAll(/"(\w+)"/g)].map((match) => match[1]));
+}
+
 test('网页与验收脚本调用的后台接口都存在', () => {
   const known = knownActions();
+  const rust = rustActions();
   const files = [
     ...fs
       .readdirSync(path.join(root, 'web', 'js'), { recursive: true })
@@ -45,7 +53,9 @@ test('网页与验收脚本调用的后台接口都存在', () => {
   ];
   const missing = [];
   for (const file of files)
-    for (const name of calls(file)) if (!known.has(name)) missing.push(file + ' → ' + name);
+    for (const name of calls(file))
+      if (!known.has(name) && !rust.has(name)) missing.push(file + ' → ' + name);
+  assert.ok(rust.has('accountRenew'), 'accountRenew must be provided by the Rust backend');
   assert.deepEqual(missing, [], '调用了不存在的接口：\n' + missing.join('\n'));
 });
 

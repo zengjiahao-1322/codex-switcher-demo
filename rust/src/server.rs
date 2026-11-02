@@ -148,6 +148,7 @@ const ACTIONS: &[&str] = &[
     "desktopSwitch",
     "accounts",
     "accountQuota",
+    "accountRenew",
     "accountLogin",
     "accountLoginCancel",
     "accountRename",
@@ -433,7 +434,7 @@ pub(crate) async fn serve(
                             }
                             result
                         }
-                        "checkUpdate" => crate::update::check(&app).await,
+                        "checkUpdate" => crate::update::check(&app, input["manual"] == true).await,
                         "installUpdate" => crate::update::install(app.clone(), &input).await,
                         "updateCompanions" => crate::editor_integration::update_all(&app).await,
                         "quit" => crate::lifecycle::quit(app.clone()),

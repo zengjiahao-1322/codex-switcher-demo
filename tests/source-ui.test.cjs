@@ -82,6 +82,43 @@ test('本机用 API 时，auth.json 里的账号标为“本机登录”并说�
   assert.equal(count('改名'), count('移除') * 2);
 });
 
+test('账号续期按钮只显示给 auto 和 retry 状态', async () => {
+  const page = await runPage({
+    respond: backend({
+      accounts: [
+        { id: 'auto', label: 'auto@example.test', email: 'auto@example.test', renewal: { state: 'auto', due: false, at: now } },
+        { id: 'retry', label: 'retry@example.test', email: 'retry@example.test', renewal: { state: 'retry', due: true } },
+        { id: 'codex', label: 'codex@example.test', email: 'codex@example.test', renewal: { state: 'codex' } },
+        { id: 'relogin', label: 'relogin@example.test', email: 'relogin@example.test', renewal: { state: 'relogin' } },
+      ],
+    }),
+  });
+  for (const [id, expected] of [
+    ['auto', 1],
+    ['retry', 1],
+    ['codex', 0],
+    ['relogin', 0],
+  ]) {
+    const card = page.created.find(
+      (entry) =>
+        entry.tag === 'button' &&
+        entry.node.className === 'source-card' &&
+        entry.node.dataset.source === 'account:' + id,
+    );
+    assert.ok(card, 'account card missing: ' + id);
+    const mark = page.created.length;
+    card.node.onclick();
+    assert.equal(
+      page.created
+        .slice(mark)
+        .filter((entry) => entry.tag === 'button' && entry.node.textContent === '立即续期')
+        .length,
+      expected,
+      id,
+    );
+  }
+});
+
 const cards = (page) =>
   page.created.filter((c) => c.tag === 'button' && c.node.className === 'source-card');
 // 卡片每次渲染都会重建，只看最后一轮（数量 = 账号数 + API 数）。
