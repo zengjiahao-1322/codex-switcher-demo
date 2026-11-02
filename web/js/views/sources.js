@@ -4,6 +4,7 @@ import { showTab } from '../tabs.js';
 import { accessTag, busy, combo, merge, status, tag } from '../ui.js';
 import {
   accountRemaining,
+  accountWindow,
   accountPlan,
   accountStatus,
   ago,
@@ -14,6 +15,7 @@ import {
   refreshQuota,
   renderSelectedQuota,
   watchAccounts,
+  windowName,
 } from './accounts.js';
 import { renderProviderList } from './providers.js';
 export let topModels = [];
@@ -126,18 +128,23 @@ export function sourceCard(o, { checked, using = null, model, blocked = '', onPi
     ]
       .filter(Boolean)
       .join(' · ');
-    // 行尾显示上次读到的剩余额度；超过 10 分钟的读数变淡，提示可能已变化。
-    const known = accountRemaining(a, undefined, Infinity);
+    // 行尾显示上次读到的最紧额度窗口；超过 10 分钟的读数变淡，提示可能已变化。
+    const known = accountWindow(a, undefined, Infinity);
     if (known !== null) {
       const side = document.createElement('span'),
         value = document.createElement('b'),
         bar = document.createElement('progress');
       side.className =
-        'side' + (known > 20 ? '' : ' low') + (accountRemaining(a) === null ? ' stale' : '');
-      side.title = '剩余额度，读取于 ' + new Date(a.quota.checkedAt).toLocaleString('zh-CN');
-      value.textContent = Math.round(known) + '%';
+        'side' +
+        (known.remainingPercent > 20 ? '' : ' low') +
+        (accountRemaining(a) === null ? ' stale' : '');
+      side.title =
+        windowName(known) +
+        '额度是目前剩余最少的窗口，读取于 ' +
+        new Date(a.quota.checkedAt).toLocaleString('zh-CN');
+      value.textContent = windowName(known) + ' ' + Math.round(known.remainingPercent) + '%';
       bar.max = 100;
-      bar.value = known;
+      bar.value = known.remainingPercent;
       side.append(value, bar);
       card.append(side);
     }

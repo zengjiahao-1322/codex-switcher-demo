@@ -173,9 +173,40 @@ test('状态卡显示当前账号额度，不显示进程编号', async () => {
     }),
   });
   assert.equal(page.byId('current-quota').hidden, false);
-  assert.match(page.byId('current-quota').textContent, /^62%额度剩余$/);
+  assert.match(page.byId('current-quota').textContent, /^62%5小时剩余$/);
   assert.equal(page.byId('editor-summary').textContent, '1 个编辑器窗口会随切换自动重载。');
   assert.match(page.byId('editor-reload-hint').textContent, /PID 900/);
+});
+
+test('账号额度标明显示的是哪个窗口，并取剩余最少的窗口', async () => {
+  const page = await runPage({
+    respond: backend({
+      accounts: [
+        {
+          id: 'a1',
+          label: '主账号',
+          email: 'a1@example.com',
+          current: true,
+          quota: {
+            ...quota(66),
+            buckets: [
+              {
+                id: 'codex',
+                name: 'Codex',
+                windows: [
+                  { minutes: 300, remainingPercent: 66 },
+                  { minutes: 10080, remainingPercent: 12 },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+  assert.ok(page.created.some((c) => c.tag === 'b' && c.node.textContent === '7天 12%'));
+  assert.match(page.byId('current-quota').textContent, /^12%7天剩余$/);
+  assert.equal(page.byId('quota-notice').hidden, false);
 });
 
 // 账号多时：正在使用的置顶、可搜索和分类筛选，行尾显示上次读到的额度（旧读数标记为旧）。

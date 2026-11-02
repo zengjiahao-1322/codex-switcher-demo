@@ -559,12 +559,13 @@ button.link:hover:not(:disabled) {
 }
 .source-card .side {
   flex: none;
-  width: 52px;
+  width: 72px;
   text-align: right;
 }
 .source-card .side b {
   font-size: 12.5px;
   font-weight: 600;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 .source-card .side progress {

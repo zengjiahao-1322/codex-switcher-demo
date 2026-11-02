@@ -1,7 +1,13 @@
 import { $, api } from '../api.js';
 import { accountData, state } from '../store.js';
 import { busy, status } from '../ui.js';
-import { accountRemaining, refreshAccounts, renderQuotaNotice, watchAccounts } from './accounts.js';
+import {
+  accountWindow,
+  refreshAccounts,
+  renderQuotaNotice,
+  watchAccounts,
+  windowName,
+} from './accounts.js';
 import { switchPending } from './sources.js';
 
 export let progressJob = null;
@@ -106,20 +112,24 @@ export function renderSummary() {
   $('summary').replaceChildren(b, kind);
   $('summary').title = state.codexVersion || '';
   // 状态卡只显示当前账号近期读取到的最低剩余比例，详细窗口在账号卡片和账号管理里。
-  const remaining = c.official && account ? accountRemaining(account) : null,
+  const low = c.official && account ? accountWindow(account) : null,
     box = $('current-quota');
-  box.hidden = remaining === null;
+  box.hidden = low === null;
   box.replaceChildren();
-  if (remaining !== null) {
-    const ring = document.createElement('div'),
+  if (low !== null) {
+    const remaining = low.remainingPercent,
+      ring = document.createElement('div'),
       value = document.createElement('b'),
       label = document.createElement('small');
     ring.className = 'ring' + (remaining > 20 ? '' : ' low');
     ring.style.setProperty('--p', remaining);
     ring.setAttribute('role', 'img');
-    ring.setAttribute('aria-label', '当前账号剩余额度 ' + Math.round(remaining) + '%');
+    ring.setAttribute(
+      'aria-label',
+      '当前账号' + windowName(low) + '额度剩余 ' + Math.round(remaining) + '%',
+    );
     value.textContent = Math.round(remaining) + '%';
-    label.textContent = '额度剩余';
+    label.textContent = windowName(low) + '剩余';
     ring.append(value, label);
     box.append(ring);
   }

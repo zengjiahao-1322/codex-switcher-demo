@@ -23,7 +23,7 @@ export let accountTimer = null,
 export const quotaRefreshing = new Set();
 // 只使用近期成功读取、尚未重置的窗口；旧缓存和读取失败不推断为额度耗尽。
 // maxAge 仅供列表展示上次读数（标为旧数据）；提醒和备用账号建议使用默认的 10 分钟。
-export function accountRemaining(account, bucketId, maxAge = 600000) {
+export function accountWindow(account, bucketId, maxAge = 600000) {
   const quota = account.quota;
   if (
     account.pendingLogin ||
@@ -38,18 +38,37 @@ export function accountRemaining(account, bucketId, maxAge = 600000) {
   const windows = (bucket?.windows || []).filter(
     (w) => Number.isFinite(w.remainingPercent) && (!w.resetsAt || w.resetsAt * 1000 > Date.now()),
   );
-  return windows.length ? Math.min(...windows.map((w) => w.remainingPercent)) : null;
+  return windows.length
+    ? windows.reduce((low, w) => (w.remainingPercent < low.remainingPercent ? w : low))
+    : null;
 }
+export function accountRemaining(account, bucketId, maxAge) {
+  return accountWindow(account, bucketId, maxAge)?.remainingPercent ?? null;
+}
+export const windowName = (w) =>
+  w.minutes == null
+    ? '额度窗口'
+    : w.minutes % 1440 === 0
+      ? w.minutes / 1440 + '天'
+      : w.minutes % 60 === 0
+        ? w.minutes / 60 + '小时'
+        : w.minutes + '分钟';
 export function renderQuotaNotice() {
   const box = $('quota-notice');
   box.replaceChildren();
   const current = state?.current.official && accountData?.items.find((a) => a.current);
-  const remaining = current ? accountRemaining(current) : null;
-  box.hidden = remaining === null || remaining > 20;
+  const low = current ? accountWindow(current) : null;
+  box.hidden = low === null || low.remainingPercent > 20;
   if (box.hidden) return;
   box.append(
     document.createTextNode(
-      '当前账号「' + current.label + '」有订阅额度窗口仅剩 ' + Math.round(remaining) + '%。',
+      '当前账号「' +
+        current.label +
+        '」的' +
+        windowName(low) +
+        '额度仅剩 ' +
+        Math.round(low.remainingPercent) +
+        '%。',
     ),
   );
   const bucketId = (current.quota.buckets.find((b) => b.id === 'codex') || current.quota.buckets[0])
@@ -115,14 +134,6 @@ export function quotaNode(q, compact = false) {
       note('上次成功读取：' + new Date(q.checkedAt).toLocaleString('zh-CN'), 'quota-time');
     return box;
   }
-  const duration = (n) =>
-    n == null
-      ? '额度窗口'
-      : n % 1440 === 0
-        ? n / 1440 + '天'
-        : n % 60 === 0
-          ? n / 60 + '小时'
-          : n + '分钟';
   if (compact) {
     note(
       q.buckets
@@ -130,7 +141,7 @@ export function quotaNode(q, compact = false) {
           b.windows.map(
             (w) =>
               (q.buckets.length > 1 ? b.name + ' ' : '') +
-              duration(w.minutes) +
+              windowName(w) +
               ' ' +
               (w.remainingPercent == null ? '未返回' : Math.round(w.remainingPercent) + '%'),
           ),
@@ -163,7 +174,7 @@ export function quotaNode(q, compact = false) {
       label.className = 'quota-line';
       const title = document.createElement('span'),
         value = document.createElement('b');
-      title.textContent = duration(w.minutes);
+      title.textContent = windowName(w);
       value.textContent =
         w.remainingPercent == null
           ? '未返回比例'

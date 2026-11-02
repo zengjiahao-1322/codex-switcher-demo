@@ -248,7 +248,7 @@ let officialMode = false,
     syncNative();
     await page.reload();
     await page.locator('#quota-notice').waitFor({ state: 'visible' });
-    assert.ok((await page.locator('#quota-notice').innerText()).includes('10%'));
+    assert.ok((await page.locator('#quota-notice').innerText()).includes('5小时额度仅剩 10%'));
     // 一键换号：取消确认时不切换；确认后直接对备用账号发起切换。
     const swap = page.getByRole('button', { name: '换到「Fast account」', exact: true });
     page.once('dialog', (dialog) => dialog.dismiss());
