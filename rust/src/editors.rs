@@ -332,7 +332,7 @@ pub fn snapshot(home: &Path, bridge: &Path, inventory: &Value) -> io::Result<Val
         .collect::<Vec<_>>();
     clients.retain(|v| v["kind"] != "auxiliary");
     Ok(
-        json!({"home":home,"desktop":clients.iter().any(|c|c["kind"]=="desktop"),"ide":clients.iter().filter(|c|c["kind"]=="ide").count(),"other":clients.iter().filter(|c|c["kind"]=="cli").count(),"connectedEditors":windows.len(),"clients":clients,"auxiliary":auxiliary,"checkedAt":now()}),
+        json!({"home":home,"desktop":clients.iter().any(|c|c["kind"]=="desktop"),"ide":clients.iter().filter(|c|c["kind"]=="ide").count(),"other":clients.iter().filter(|c|c["kind"]=="cli").count(),"connectedEditors":windows.len(),"editorRunning":all.iter().any(|p|editor(text(&p["name"]))),"clients":clients,"auxiliary":auxiliary,"checkedAt":now()}),
     )
 }
 fn timestamp(value: &Value) -> i128 {

@@ -59,11 +59,15 @@ export async function refreshClients() {
       const message = '伴随扩展已被禁用，请在 VS Code 扩展面板启用后重载窗口。';
       $('editor-reload-hint').textContent = message;
       $('editor-summary').textContent = message;
-    } else if (c.companion?.editors?.length && !ready.length && !missing.length) {
+    } else if (c.companion?.editors?.length && !c.connectedEditors && !missing.length) {
       const installed = c.companion.editors.some((e) => e.installed);
       $('editor-reload-hint').textContent = installed
-        ? '伴随扩展已安装但没有运行，请在 VS Code 执行“重载窗口”并确认扩展未被禁用。'
-        : '未安装伴随扩展，请点击“接入 VS Code”安装。';
+        ? c.editorRunning
+          ? '伴随扩展已安装但没有运行，请在 VS Code 执行“重载窗口”并确认扩展未被禁用。'
+          : '伴随扩展已安装，VS Code 未运行；启动后会自动接入。'
+        : c.editors?.length
+          ? '未安装伴随扩展，请点击“接入 VS Code”安装。'
+          : '未检测到 VS Code，安装后这里会出现“接入”按钮。';
     }
     $('clients-status').textContent =
       `本次切换目录：${c.home}\nCodex 程序：${c.runtime || '未找到，请安装官方扩展或填写下方路径'}\n检测到 ${c.clients.length} 个客户端 / 窗口，${c.connectedEditors} 个伴随扩展连接。`;

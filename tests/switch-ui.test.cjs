@@ -8,7 +8,15 @@ const { runPage } = require('./fake-page.cjs');
 const { createService } = require('../src/server/service.cjs');
 
 // 页面读取的状态来自真实 service，只替换会启动或重启客户端的接口。
-function backend({ switchJob = null, desktopSwitch, clients = [], accounts = [] } = {}) {
+function backend({
+  switchJob = null,
+  desktopSwitch,
+  clients = [],
+  accounts = [],
+  companion,
+  editors = [],
+  editorRunning = false,
+} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-switch-ui-'));
   fs.mkdirSync(path.join(root, 'codex'));
   fs.mkdirSync(path.join(root, 'bridge'));
@@ -22,7 +30,16 @@ function backend({ switchJob = null, desktopSwitch, clients = [], accounts = [] 
     if (route === 'accounts') return { body: { items: accounts, switchJob } };
     if (route === 'clients')
       return {
-        body: { home: '', clients, auxiliary: [], editors: [], connectedEditors: 0, remotes: [] },
+        body: {
+          home: '',
+          clients,
+          auxiliary: [],
+          editors,
+          editorRunning,
+          companion,
+          connectedEditors: 0,
+          remotes: [],
+        },
       };
     if (route === 'desktopSwitch') return desktopSwitch(body);
     return { body: { message: route + ' ok' } };
@@ -229,6 +246,21 @@ test('所有后台都已接入时只显示可自动重载', async () => {
     page.byId('editor-reload-hint').textContent,
     '1 个窗口已接入（扩展宿主 PID 900），可自动重载。',
   );
+});
+
+test('伴随扩展提示按 VS Code 是否安装、是否运行区分', async () => {
+  const hint = async (installed, options) => {
+    const page = await runPage({
+      respond: backend({ companion: { editors: [{ installed }] }, ...options }),
+    });
+    page.byId('tab-editors').onclick();
+    await page.settle();
+    return page.byId('editor-reload-hint').textContent;
+  };
+  assert.match(await hint(true, { editorRunning: false }), /VS Code 未运行；启动后会自动接入/);
+  assert.match(await hint(true, { editorRunning: true }), /重载窗口/);
+  assert.match(await hint(false, { editors: [{ id: 0, name: 'VS Code' }] }), /点击“接入 VS Code”/);
+  assert.match(await hint(false, {}), /未检测到 VS Code/);
 });
 
 // 朋友是经 SSH 登录到 Windows 后在该机操作；远程标签不能用来推断后端在别的主机。
