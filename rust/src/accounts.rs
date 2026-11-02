@@ -1181,16 +1181,21 @@ async fn read_quota(app: &App, id: &str, renew: bool) -> io::Result<Value> {
             v
         }
     };
+    let renewed = renew
+        && result["status"] == "ok"
+        && timestamp(&auth(app, id)?["last_refresh"]) > timestamp(&value["last_refresh"]);
     if renew {
-        let refreshed = auth(app, id)?;
         crate::diagnostics::log(
             &app.bridge,
             "official.renew",
-            json!({"account":selected["email"],"status":if result["status"] == "ok" && timestamp(&refreshed["last_refresh"]) > timestamp(&value["last_refresh"]) {"ok"} else {"failed"},"refreshError":refresh_error}),
+            json!({"account":selected["email"],"status":if renewed {"ok"} else {"failed"},"refreshError":refresh_error}),
         )?;
     }
     write_json(&file, &result)?;
     result["id"] = json!(id);
+    if renew {
+        result["renewed"] = json!(renewed);
+    }
     Ok(result)
 }
 async fn quota_action(app: Arc<App>, input: &Value) -> io::Result<Value> {
@@ -1303,7 +1308,11 @@ async fn renew_action(app: Arc<App>, input: &Value) -> io::Result<Value> {
     if let Some(message) = refused {
         return Err(io::Error::other(message));
     }
-    Ok(json!({"items":[quota(app.clone(), id, true).await?]}))
+    let item = quota(app.clone(), id, true).await?;
+    if item["renewed"] != true {
+        return Err(io::Error::other("续期失败，稍后会自动重试。"));
+    }
+    Ok(json!({"items":[item]}))
 }
 
 async fn quota(app: Arc<App>, id: String, renew: bool) -> io::Result<Value> {

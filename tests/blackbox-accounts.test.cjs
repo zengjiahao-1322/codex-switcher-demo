@@ -557,7 +557,7 @@ test('官方额度HTTP：刷新错误写入脱敏原因并将续期标为失败'
   fs.writeFileSync(path.join(f.bridge, 'accounts', 'index.json'), JSON.stringify(rows));
   f.update((s) => {
     s.methods['account/read'] = {
-      stderr: 'ERROR codex_login::auth::manager: Failed to refresh token: 测试原因',
+      stderr: 'ERROR codex_login::auth::manager: Failed to refresh token status=503 Service Unavailable',
       delayMs: 250,
       result: { account: null },
     };
@@ -567,7 +567,7 @@ test('官方额度HTTP：刷新错误写入脱敏原因并将续期标为失败'
     { ok: true },
   );
   const log = fs.readFileSync(path.join(f.bridge, 'logs', 'switcher.log'), 'utf8');
-  assert.match(log, /"refreshError":"测试原因"/);
+  assert.match(log, /"refreshError":"status=503 Service Unavailable"/);
   assert.match(log, /"event":"official\.renew"/);
   assert.match(log, /"status":"failed"/);
 });
@@ -594,6 +594,12 @@ test('官方账号立即续期：成功续期，拒绝 Codex、SSH、失效和�
   rows.push(bob.row, pending.row, relogin.row, remote.row);
   fs.writeFileSync(path.join(f.bridge, 'accounts', 'index.json'), JSON.stringify(rows));
   f.update((s) => {
+    s.methods['account/read'] = { result: { account: { type: 'chatgpt' } } };
+  });
+  await api(f, 'accountRenew', { id: bob.id }, 400).then((value) =>
+    assert.match(value.error, /续期失败/),
+  );
+  f.update((s) => {
     s.methods['account/read'] = { result: { account: { type: 'chatgpt' } }, auth: auth('bob', { exp: Math.floor(Date.now() / 1000) + 86400 * 30, refreshed: '2030-01-01T00:00:00Z' }) };
   });
   const renewed = await api(f, 'accountRenew', { id: bob.id });
@@ -616,8 +622,8 @@ test('官方账号立即续期：成功续期，拒绝 Codex、SSH、失效和�
 
 test('官方刷新stderr在关闭后分类额度和prepare错误', { skip: !rustBackend }, async (t) => {
   for (const [stderr, expected] of [
-    ['Failed to refresh token: 网络错误', 'network_error'],
-    ['Failed to refresh token: Please log out and sign in again.', 'auth_invalid'],
+    ['Failed to refresh token status=503 Service Unavailable', 'network_error'],
+    ['Failed to refresh token status=401 Unauthorized', 'auth_invalid'],
   ]) {
     await t.test(expected, async (st) => {
       const f = await officialFixture(st, { live: auth('alice') });
@@ -646,7 +652,7 @@ test('官方刷新stderr在关闭后分类额度和prepare错误', { skip: !rust
       assert.match(log, /"op":"quota"/);
       assert.match(log, /"op":"prepare"/);
       assert.match(log, /"refreshError":"/);
-      assert.ok(log.includes('"refreshError":"' + stderr.replace('Failed to refresh token: ', '') + '"'));
+      assert.ok(log.includes('"refreshError":"' + stderr.replace('Failed to refresh token ', '') + '"'));
     });
   }
 });

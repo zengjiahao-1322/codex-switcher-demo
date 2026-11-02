@@ -94,7 +94,7 @@ flowchart LR
 
 刷新令牌只能用一次，所以同一账号同一时间只有一方负责续期。本机官方模式下，`auth.json` 里的账号归 Codex 自己续期。服务器最后一次心跳记录的账号归服务器，服务器断开后仍然如此，因为那边的 Codex 可能还在运行。其余账号由切换器续期：`accounts::keep_alive` 启动 60 秒后开始，每小时检查一次，访问令牌到期前 2 天内调用 `account/read(refreshToken=true)`；用户也可以点“立即续期”，规则相同。API 模式下 `auth.json` 里的账号没有 Codex 在用，同样由切换器续期，并写回 `auth.json`。需要重新登录的账号不再自动重试。同步在所有者之间传递新令牌，不是跨机器刷新锁，服务器同时刷新造成的冲突仍需实际续期验收。
 
-官方刷新失败的原因只在 Codex 的 stderr 里，`official_session.rs` 关闭进程后才读取，并按其中是否含 `sign in again` 区分“需要重新登录”和“可以重试”。
+官方刷新失败的原因只在 Codex 的 stderr 里，格式是 `Failed to refresh token status=<HTTP 状态>`。`official_session.rs` 关闭进程后才读取，`status=401` 表示需要重新登录，其它状态可以重试。`account/read` 在刷新失败时仍可能返回账号，所以续期是否成功只看 `last_refresh` 有没有变新。
 
 远端命令与 ackResult 使用常驻服务内存通道，客户端文件只存公开状态与确认元数据。心跳长轮询同时检查该通道，配置回执请求上限为 1 MiB，其他 HTTP 动作仍为 16 KiB。读、写各等待最多 30 秒，不重试；各组独立返回 synced、skipped 或 failed。synced 代表写入已确认、重载已请求；新宿主带 completedReload，后台核对原命令、authority、目录与版本后才返回 reloadConfirmed，随后淘汰旧窗口登记。
 

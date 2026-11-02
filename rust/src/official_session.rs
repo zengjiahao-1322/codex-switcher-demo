@@ -148,7 +148,7 @@ impl Session {
         let refresh_reader = tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                if let Some((_, reason)) = line.split_once("Failed to refresh token: ") {
+                if let Some((_, reason)) = line.split_once("Failed to refresh token ") {
                     *refresh_failure_reader.lock().unwrap() =
                         Some(reason.chars().take(200).collect());
                 }
@@ -195,9 +195,9 @@ impl Session {
     pub fn refresh_failure(&self) -> Option<String> {
         self.refresh_failure.lock().unwrap().clone()
     }
-    // 官方要求重新登录的两种提示都含这句；其它刷新失败可以重试。
+    // Codex 的 stderr 只写 HTTP 状态；只有 401 表示刷新令牌已失效，其它状态可以重试。
     pub fn retryable(reason: Option<&str>) -> bool {
-        reason.is_some_and(|reason| !reason.contains("sign in again"))
+        reason.is_some_and(|reason| !reason.contains("status=401"))
     }
     async fn write(&self, value: Value) -> Result<(), Failure> {
         let mut input = self.input.lock().await;
