@@ -89,8 +89,12 @@ test('双后台黑盒：BRIDGE_HOME等于默认数据目录时仍写默认发现
       const discovery = path.join(user, '.codex-api-switcher');
       fs.mkdirSync(user);
       environment.USERPROFILE = user;
+      environment.HOME = user;
       environment.LOCALAPPDATA = path.join(user, 'AppData', 'Local');
-      environment.BRIDGE_HOME = path.join(environment.LOCALAPPDATA, 'CodexSwitcher');
+      environment.BRIDGE_HOME =
+        process.platform === 'win32'
+          ? path.join(environment.LOCALAPPDATA, 'CodexSwitcher')
+          : path.join(user, 'Library', 'Application Support', 'CodexApiSwitcher');
       environment.SWITCHER_TEST_SHELL_ROOT = path.join(root, 'shell');
       delete environment.BRIDGE_DISCOVERY_DIR;
       fs.mkdirSync(environment.BRIDGE_HOME, { recursive: true });
