@@ -113,26 +113,48 @@ pub fn detached(command: &mut Command) {
 struct TransportError {
     message: String,
     curl: Option<Value>,
+    url: Option<String>,
+    fallback: Option<Value>,
 }
 impl From<io::Error> for TransportError {
     fn from(e: io::Error) -> Self {
         Self {
             message: e.to_string(),
             curl: None,
+            url: None,
+            fallback: None,
         }
     }
 }
 
-async fn request(app: &App, name: &str, output: Option<&Path>) -> Result<Vec<u8>, TransportError> {
+struct Fetch {
+    body: Vec<u8>,
+    fallback: Option<Value>,
+}
+
+#[allow(clippy::result_large_err)]
+async fn curl_once(
+    app: &App,
+    url: &str,
+    output: Option<&Path>,
+    direct: bool,
+) -> Result<Vec<u8>, TransportError> {
     let quick = output.is_none();
     let mut command = Command::new(if cfg!(windows) {
         "curl.exe"
     } else {
         "/usr/bin/curl"
     });
-    command
-        .args(curl_arguments(cfg!(windows), quick, output, &url(name)?))
-        .envs(crate::platform::codex_env(&app.codex_home()));
+    command.args(curl_arguments(cfg!(windows), quick, output, url));
+    if direct {
+        command.args(["--noproxy", "*"]);
+    }
+    let mut environment = crate::platform::codex_env(&app.codex_home());
+    if direct {
+        environment.insert("NO_PROXY".into(), "*".into());
+        environment.insert("no_proxy".into(), "*".into());
+    }
+    command.envs(environment);
     hidden(&mut command);
     let result = tokio::time::timeout(
         Duration::from_secs(250),
@@ -147,6 +169,8 @@ async fn request(app: &App, name: &str, output: Option<&Path>) -> Result<Vec<u8>
             return Err(TransportError {
                 message: "连接 GitHub 超时，请检查网络或代理后重试。".into(),
                 curl: Some(json!({"code":null,"detail":"timeout"})),
+                url: Some(url.to_owned()),
+                fallback: None,
             });
         }
     };
@@ -154,7 +178,57 @@ async fn request(app: &App, name: &str, output: Option<&Path>) -> Result<Vec<u8>
     if output.status.success() {
         return Ok(body);
     }
-    Err(curl_error(output.status.code(), &output.stderr, timings))
+    let mut error = curl_error(output.status.code(), &output.stderr, timings);
+    error.url = Some(url.to_owned());
+    Err(error)
+}
+
+#[allow(clippy::result_large_err)]
+async fn request(app: &App, name: &str, output: Option<&Path>) -> Result<Fetch, TransportError> {
+    let target = url(name)?;
+    let first = curl_once(app, &target, output, false).await;
+    let proxy_value = proxy(app);
+    let should_retry = first
+        .as_ref()
+        .err()
+        .is_some_and(|error| should_retry_direct(&proxy_value, error));
+    match first {
+        Ok(body) => Ok(Fetch {
+            body,
+            fallback: None,
+        }),
+        Err(error) if should_retry => {
+            let first_curl = error.curl.clone();
+            match curl_once(app, &target, output, true).await {
+                Ok(body) => Ok(Fetch {
+                    body,
+                    fallback: Some(json!({"proxy":first_curl,"direct":{"status":"success"}})),
+                }),
+                Err(mut direct) => {
+                    let a = first_curl
+                        .as_ref()
+                        .and_then(|v| v["code"].as_i64())
+                        .map_or("null".into(), |v| v.to_string());
+                    let b = direct
+                        .curl
+                        .as_ref()
+                        .and_then(|v| v["code"].as_i64())
+                        .map_or("null".into(), |v| v.to_string());
+                    let address = proxy_value["value"].as_str().unwrap_or("");
+                    direct.message = format!(
+                        "经系统代理 {address} 和直连都连不上 GitHub（退出码 {a} / {b}）{}",
+                        direct.message
+                    );
+                    direct.fallback = Some(json!({"proxy":first_curl,"direct":direct.curl}));
+                    Err(direct)
+                }
+            }
+        }
+        Err(mut error) => {
+            error.url = Some(target);
+            Err(error)
+        }
+    }
 }
 
 fn split_curl_times(stdout: &[u8]) -> (Vec<u8>, Option<Value>) {
@@ -208,6 +282,8 @@ fn curl_error(code: Option<i32>, stderr: &[u8], timings: Option<Value>) -> Trans
     TransportError {
         message,
         curl: Some(json!({"code":code,"detail":detail,"timings":timings})),
+        url: None,
+        fallback: None,
     }
 }
 
@@ -321,6 +397,9 @@ fn proxy(app: &App) -> Value {
     }
 }
 fn failure(error: &TransportError, proxy: &Value) -> String {
+    if error.message.starts_with("经系统代理 ") {
+        return error.message.clone();
+    }
     if proxy["type"] != "manual" {
         return error.message.clone();
     }
@@ -330,6 +409,9 @@ fn failure(error: &TransportError, proxy: &Value) -> String {
     } else {
         format!("{}（经系统代理 {address}）", error.message)
     }
+}
+fn should_retry_direct(proxy: &Value, error: &TransportError) -> bool {
+    proxy["type"] == "manual" && error.curl.as_ref().and_then(|v| v["code"].as_i64()) != Some(22)
 }
 fn log_failure(
     app: &App,
@@ -344,6 +426,12 @@ fn log_failure(
     if let Some(curl) = &error.curl {
         row["curl"] = curl.clone();
     }
+    if let Some(url) = &error.url {
+        row["url"] = json!(url);
+    }
+    if let Some(fallback) = &error.fallback {
+        row["fallback"] = fallback.clone();
+    }
     diagnostics::log(&app.bridge, event, row)?;
     Ok(message)
 }
@@ -356,6 +444,7 @@ fn refuse_mac_install(app: &App, bundle: &Path, error: &str) -> io::Result<Value
             "status": "refused",
             "error": error,
             "app": bundle.to_string_lossy(),
+            "url": RELEASE_URL,
         }),
     )?;
     with_state(app, |s| {
@@ -420,6 +509,32 @@ mod mac_refusal_tests {
         fs::remove_dir_all(bridge).unwrap();
     }
 }
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+
+    #[test]
+    fn direct_retry_requires_manual_proxy_and_non_http_curl_error() {
+        let manual = json!({"type":"manual","value":"http://127.0.0.1:9"});
+        let none = json!({"type":"none"});
+        let connect = TransportError {
+            message: String::new(),
+            curl: Some(json!({"code":7})),
+            url: None,
+            fallback: None,
+        };
+        let http = TransportError {
+            message: String::new(),
+            curl: Some(json!({"code":22})),
+            url: None,
+            fallback: None,
+        };
+        assert!(should_retry_direct(&manual, &connect));
+        assert!(!should_retry_direct(&manual, &http));
+        assert!(!should_retry_direct(&none, &connect));
+    }
+}
 pub async fn check(app: &App, manual: bool) -> io::Result<Value> {
     let _checking = app.updates.checking.lock().await;
     if with_state(app, |s| {
@@ -433,8 +548,18 @@ pub async fn check(app: &App, manual: bool) -> io::Result<Value> {
     let started = Instant::now();
     with_state(app, |s| s.value["status"] = json!("checking"));
     let result = match request(app, "release.json", None).await {
-        Ok(bytes) => serde_json::from_slice::<Value>(&bytes)
-            .map_err(|e| TransportError::from(io::Error::other(e))),
+        Ok(fetch) => {
+            let latest = serde_json::from_slice::<Value>(&fetch.body)
+                .map_err(|e| TransportError::from(io::Error::other(e)));
+            if let Ok(latest) = &latest
+                && let Some(fallback) = fetch.fallback
+            {
+                let mut row = json!({"build":latest["build"],"durationMs":started.elapsed().as_millis(),"status":"fallback","proxy":proxy(app),"url":url("release.json").unwrap_or_default()});
+                row["fallback"] = fallback;
+                diagnostics::log(&app.bridge, "update.check", row)?;
+            }
+            latest
+        }
         Err(error) => Err(error),
     };
     match result {
@@ -460,14 +585,19 @@ pub async fn check(app: &App, manual: bool) -> io::Result<Value> {
             diagnostics::log(
                 &app.bridge,
                 "update.check",
-                json!({"build":latest["build"],"durationMs":started.elapsed().as_millis(),"status":snapshot(app)["status"],"proxy":proxy(app)}),
+                json!({"build":latest["build"],"durationMs":started.elapsed().as_millis(),"status":snapshot(app)["status"],"proxy":proxy(app),"url":url("release.json")?}),
             )?;
         }
         result => {
-            let error = result.err().unwrap_or(TransportError {
+            let mut error = result.err().unwrap_or(TransportError {
                 message: "发布元数据不完整，请稍后检查。".into(),
                 curl: None,
+                url: None,
+                fallback: None,
             });
+            if error.url.is_none() {
+                error.url = url("release.json").ok();
+            }
             let message = log_failure(
                 app,
                 "update.check",
@@ -619,7 +749,10 @@ pub async fn install(app: Arc<App>, input: &Value) -> io::Result<Value> {
         tokio::task::yield_now().await;
         let started = Instant::now();
         let result = download_package(&app, &metadata, started).await;
-        if let Err(error) = result {
+        if let Err(mut error) = result {
+            if error.url.is_none() {
+                error.url = url(&asset_name()).ok();
+            }
             let event = if snapshot(&app)["status"] == "downloading" {
                 "update.download"
             } else {
@@ -638,6 +771,7 @@ pub async fn install(app: Arc<App>, input: &Value) -> io::Result<Value> {
     Ok(json!({"message":"正在下载并校验更新，安装完成后会自动打开新页面。"}))
 }
 
+#[allow(clippy::result_large_err)]
 async fn download_package(
     app: &App,
     metadata: &Value,
@@ -656,7 +790,7 @@ async fn download_package(
     fs::create_dir(&staging)?;
     let name = asset_name();
     let archive = staging.join(&name);
-    request(app, &name, Some(&archive)).await?;
+    let fetch = request(app, &name, Some(&archive)).await?;
     let hash = format!("{:x}", Sha256::digest(fs::read(&archive)?));
     if metadata["assets"][&name] != hash {
         return Err(io::Error::other("更新校验和不匹配，未修改安装文件。").into());
@@ -664,7 +798,7 @@ async fn download_package(
     diagnostics::log(
         &app.bridge,
         "update.download",
-        json!({"build":metadata["build"],"durationMs":started.elapsed().as_millis(),"status":"verified","proxy":proxy(app)}),
+        json!({"build":metadata["build"],"durationMs":started.elapsed().as_millis(),"status":"verified","proxy":proxy(app),"url":url(&name)?,"fallback":fetch.fallback}),
     )?;
     with_state(app, |s| s.value["progress"] = json!(50));
     let extracted = staging.join("extracted");
@@ -1153,7 +1287,7 @@ async fn stop_adapter(job: &Job) -> io::Result<Option<u16>> {
     diagnostics::log(
         &job.bridge_home,
         "update.adapter",
-        json!({"pid":pid,"port":port,"verified":true,"status":"stopped"}),
+        json!({"pid":pid,"port":port,"verified":true,"status":"stopped","url":RELEASE_URL}),
     )?;
     Ok(Some(port))
 }
@@ -1217,7 +1351,7 @@ pub async fn worker(file: &Path) -> io::Result<()> {
         diagnostics::log(
             &job.bridge_home,
             "update.rollback",
-            json!({"build":job.build,"error":message,"status":"error"}),
+            json!({"build":job.build,"error":message,"status":"error","url":RELEASE_URL}),
         )?;
     }
     result
@@ -1254,7 +1388,7 @@ async fn perform(job: &Job) -> io::Result<()> {
         diagnostics::log(
             &job.bridge_home,
             "update.install",
-            json!({"build":job.build,"status":"done","durationMs":started.elapsed().as_millis()}),
+            json!({"build":job.build,"status":"done","durationMs":started.elapsed().as_millis(),"url":RELEASE_URL}),
         )
     }
     .await;
@@ -1262,14 +1396,14 @@ async fn perform(job: &Job) -> io::Result<()> {
         diagnostics::log(
             &job.bridge_home,
             "update.install",
-            json!({"build":job.build,"error":error.to_string(),"durationMs":started.elapsed().as_millis()}),
+            json!({"build":job.build,"error":error.to_string(),"durationMs":started.elapsed().as_millis(),"url":RELEASE_URL}),
         )?;
         let rollback=async {
             if let Some(pid)=new_pid{crate::platform::stop(pid).await?;}
             if let Some(replacement)=&replacement{replacement.restore()?;}
             let message=format!("{}{}",if replacement.is_some(){"更新失败，已恢复上一版："}else{"更新未完成，原版本未改动："},error);
             instance::write_json(&result,&json!({"build":job.build,"error":message}))?;launch(job,adapter_port).await?;
-            diagnostics::log(&job.bridge_home,"update.rollback",json!({"build":job.build,"status":"done","error":message,"durationMs":started.elapsed().as_millis()}))
+            diagnostics::log(&job.bridge_home,"update.rollback",json!({"build":job.build,"status":"done","error":message,"durationMs":started.elapsed().as_millis(),"url":RELEASE_URL}))
         }.await;
         if let Err(rollback_error) = rollback {
             return Err(io::Error::other(format!(

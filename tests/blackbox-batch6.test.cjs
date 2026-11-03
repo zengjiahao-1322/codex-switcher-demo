@@ -974,12 +974,35 @@ test('更新黑盒：代理不可达时页面明确给地址，日志和页面�
   f.environment.no_proxy = '';
   f.response.metadata = metadata(f);
   const result = await api(f, 'checkUpdate', {});
-  assert.equal(result.status, 'error');
-  assert.match(result.error, /连不上系统代理 http:\/\/127.0.0.1:9/);
+  assert.equal(result.status, 'available');
   const log = fs.readFileSync(path.join(f.bridge, 'logs/switcher.log'), 'utf8');
   for (const content of [JSON.stringify(result), log]) {
     assert.ok(!content.includes('fixture-password'));
     assert.ok(!content.includes('fixture-user'));
   }
-  assert.equal(f.requests.length, 0);
+  assert.equal(f.requests.length, 1);
+  assert.match(log, /"status":"fallback"/);
+});
+
+test('更新黑盒：手动代理连接失败时直连回退并记录公开URL', async (t) => {
+  const f = await packageFixture(t, {
+    setup({ environment }) {
+      for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'])
+        environment[key] = 'http://127.0.0.1:9';
+      environment.NO_PROXY = '';
+      environment.no_proxy = '';
+    },
+  });
+  f.response.metadata = metadata(f);
+  const result = await api(f, 'checkUpdate', {});
+  assert.equal(result.status, 'available');
+  assert.deepEqual(f.requests, ['/release.json']);
+  const rows = fs
+    .readFileSync(path.join(f.bridge, 'logs/switcher.log'), 'utf8')
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((row) => row.event === 'update.check');
+  assert.ok(rows.some((row) => row.status === 'fallback' && row.fallback.direct.status === 'success'));
+  assert.ok(rows.every((row) => /^http:\/\/127\.0\.0\.1:\d+\/release\.json$/.test(row.url)));
 });
