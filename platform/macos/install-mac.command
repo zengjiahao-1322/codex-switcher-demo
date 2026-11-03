@@ -37,6 +37,9 @@ JS
   fi
 fi
 /usr/bin/ditto "$SOURCE" "$TARGET"
+# ditto can preserve the quarantine flag and make the installed app run from
+# AppTranslocation. The attribute may not exist, so do not fail the install.
+/usr/bin/xattr -dr com.apple.quarantine "$TARGET" 2>/dev/null || true
 echo "Installed to $TARGET. Account data stays in $DATA."
 # 无界面安装用于 CI 实际执行安装流程，日常双击仍会自动打开应用。
 if [ "${1:-}" != '--no-open' ]; then

@@ -153,6 +153,7 @@ async function runtime(platform, arch) {
       : sourceEntries(resources);
     entries.push(
       { name: resources + 'bin/mac-process-context', file: native, mode: 0o100755 },
+      { name: resources + 'AppIcon.icns', file: path.join(project, 'platform/macos/AppIcon.icns') },
       {
         name: bundle + 'MacOS/CodexSwitcher',
         file: launcher,
@@ -178,7 +179,7 @@ async function runtime(platform, arch) {
     }
     entries.push({
       name: bundle + 'Info.plist',
-      data: `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleName</key><string>Codex Switcher</string><key>CFBundleIdentifier</key><string>com.codex-switcher.demo</string><key>CFBundleExecutable</key><string>CodexSwitcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${version}</string><key>LSMinimumSystemVersion</key><string>12.0</string><key>LSUIElement</key><true/></dict></plist>`,
+      data: `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleName</key><string>Codex Switcher</string><key>CFBundleIdentifier</key><string>com.codex-switcher.demo</string><key>CFBundleExecutable</key><string>CodexSwitcher</string><key>CFBundleIconFile</key><string>AppIcon</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${version}</string><key>LSMinimumSystemVersion</key><string>12.0</string><key>LSUIElement</key><true/></dict></plist>`,
     });
     filename = `codex-switcher-macos-${macArch}.zip`;
   } else throw Error('Unsupported release target: ' + target);

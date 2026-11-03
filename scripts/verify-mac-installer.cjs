@@ -37,6 +37,19 @@ const inspect = (exe, args) => {
     ]);
     const installer = path.join(root, 'Install.command');
     run('/bin/bash', ['-n', installer]);
+    const sourceApp = path.join(root, 'Codex Switcher.app');
+    run('/usr/bin/xattr', [
+      '-w',
+      'com.apple.quarantine',
+      '0081;5f000000;Codex Switcher;fixture',
+      sourceApp,
+    ]);
+    report.quarantineBefore = inspect('/usr/bin/xattr', [
+      '-p',
+      'com.apple.quarantine',
+      sourceApp,
+    ]);
+    assert.equal(report.quarantineBefore.status, 0);
     const home = path.join(root, 'home with spaces');
     const data = path.join(home, 'Library', 'Application Support', 'CodexApiSwitcher');
     fs.mkdirSync(data, { recursive: true });
@@ -46,9 +59,12 @@ const inspect = (exe, args) => {
     const env = { ...process.env, HOME: home };
     // 直接运行本包已有记录分支，不依赖已经清理的历史发布标签。
     run('/bin/bash', [installer, '--no-open'], { env });
-    run('/bin/bash', [installer, '--no-open'], { env });
     const app = path.join(home, 'Applications', 'Codex Switcher.app');
     assert.ok(fs.existsSync(path.join(app, 'Contents', 'MacOS', 'CodexSwitcher')));
+    report.quarantineAfter = inspect('/usr/bin/xattr', ['-lr', app]);
+    assert.equal(report.quarantineAfter.status, 0);
+    assert.doesNotMatch(report.quarantineAfter.output, /com\.apple\.quarantine/);
+    run('/bin/bash', [installer, '--no-open'], { env });
     assert.equal(fs.readFileSync(path.join(data, 'keep.txt'), 'utf8'), 'account-data-marker');
     report.signature = inspect('/usr/bin/codesign', [
       '--verify',
@@ -69,6 +85,7 @@ const inspect = (exe, args) => {
       'first-install',
       'repeat-install',
       'existing-running-record',
+      'quarantine-cleared',
       'data-preserved',
       'valid-bundle-signature',
       'native-universal-launcher',

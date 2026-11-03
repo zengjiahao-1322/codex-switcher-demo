@@ -347,6 +347,79 @@ fn log_failure(
     diagnostics::log(&app.bridge, event, row)?;
     Ok(message)
 }
+#[cfg(any(target_os = "macos", test))]
+fn refuse_mac_install(app: &App, bundle: &Path, error: &str) -> io::Result<Value> {
+    diagnostics::log(
+        &app.bridge,
+        "update.install",
+        json!({
+            "status": "refused",
+            "error": error,
+            "app": bundle.to_string_lossy(),
+        }),
+    )?;
+    with_state(app, |s| {
+        s.value["status"] = json!("error");
+        s.value["error"] = json!(error);
+        s.value["installationFailed"] = json!(true);
+        s.install_error = Some(error.to_owned());
+    });
+    Err(io::Error::other(error))
+}
+
+#[cfg(test)]
+mod mac_refusal_tests {
+    use super::*;
+
+    #[test]
+    fn refusal_records_diagnostics_and_update_state() {
+        let bridge = env::temp_dir().join(format!(
+            "switcher-update-refusal-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let app = App {
+            home: bridge.clone(),
+            bridge: bridge.clone(),
+            web: PathBuf::new(),
+            token: String::new(),
+            port: 0,
+            protection: crate::platform::DataProtection {
+                ok: true,
+                path: bridge.clone(),
+                error: None,
+            },
+            first_request: std::sync::atomic::AtomicBool::new(false),
+            ready_at: Instant::now(),
+            downloads: Mutex::new(std::collections::HashMap::new()),
+            accounts: crate::accounts::Runtime::default(),
+            editors: crate::editors::Runtime::default(),
+            updates: Runtime::default(),
+        };
+        let bundle = Path::new("/AppTranslocation/fixture/Codex Switcher.app");
+        let message = "应用正在被 macOS 隔离运行，无法一键更新。请解压安装包后运行其中的 Install.command 安装一次，之后即可一键更新。";
+        assert_eq!(
+            refuse_mac_install(&app, bundle, message)
+                .unwrap_err()
+                .to_string(),
+            message
+        );
+        let state = snapshot(&app);
+        assert_eq!(state["status"], "error");
+        assert_eq!(state["error"], message);
+        assert_eq!(state["installationFailed"], true);
+        let rows = diagnostics::recent(&bridge, 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["event"], "update.install");
+        assert_eq!(rows[0]["status"], "refused");
+        assert_eq!(rows[0]["error"], message);
+        assert_eq!(rows[0]["app"], bundle.to_string_lossy().as_ref());
+        fs::remove_dir_all(bridge).unwrap();
+    }
+}
 pub async fn check(app: &App, manual: bool) -> io::Result<Value> {
     let _checking = app.updates.checking.lock().await;
     if with_state(app, |s| {
@@ -490,16 +563,24 @@ pub async fn install(app: Arc<App>, input: &Value) -> io::Result<Value> {
     }
     #[cfg(target_os = "macos")]
     {
-        let bundle = root
-            .parent()
-            .and_then(Path::parent)
-            .ok_or_else(|| io::Error::other("当前应用位置无法直接更新，请手动下载安装。"))?;
+        let bundle = match root.parent().and_then(Path::parent) {
+            Some(bundle) => bundle,
+            None => {
+                return refuse_mac_install(
+                    &app,
+                    &root,
+                    "应用正在被 macOS 隔离运行，无法一键更新。请解压安装包后运行其中的 Install.command 安装一次，之后即可一键更新。",
+                );
+            }
+        };
         if bundle.extension().is_none_or(|e| e != "app")
             || bundle.to_string_lossy().contains("/AppTranslocation/")
         {
-            return Err(io::Error::other(
-                "当前应用位置无法直接更新，请手动下载安装。",
-            ));
+            return refuse_mac_install(
+                &app,
+                bundle,
+                "应用正在被 macOS 隔离运行，无法一键更新。请解压安装包后运行其中的 Install.command 安装一次，之后即可一键更新。",
+            );
         }
         use std::{ffi::CString, os::unix::ffi::OsStrExt};
         unsafe extern "C" {
@@ -508,7 +589,7 @@ pub async fn install(app: Arc<App>, input: &Value) -> io::Result<Value> {
         let path = CString::new(bundle.parent().unwrap().as_os_str().as_bytes())
             .map_err(io::Error::other)?;
         if unsafe { access(path.as_ptr(), 2) } != 0 {
-            return Err(io::Error::other("当前应用位置只读，请手动下载安装。"));
+            return refuse_mac_install(&app, bundle, "当前应用位置只读，请手动下载安装。");
         }
     }
     if with_state(&app, |s| s.task) {
