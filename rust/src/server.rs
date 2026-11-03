@@ -164,6 +164,9 @@ const ACTIONS: &[&str] = &[
     "providerRemove",
     "importHermes",
     "integrate",
+    "claudeApply",
+    "claudeRestore",
+    "claudeState",
 ];
 fn same_secret(left: &str, right: &str) -> bool {
     left.len() == right.len()
@@ -495,6 +498,17 @@ pub(crate) async fn serve(
                 }
                 if crate::config_ops::ACTIONS.contains(&action) {
                     let result = crate::config_ops::action(&app, action, &input.unwrap()).await;
+                    return Ok(match result {
+                        Ok(value) => response(
+                            200,
+                            "application/json; charset=utf-8",
+                            serde_json::to_vec(&value).unwrap(),
+                        ),
+                        Err(error_value) => error(400, &error_value.to_string()),
+                    });
+                }
+                if crate::claude_code::ACTIONS.contains(&action) {
+                    let result = crate::claude_code::action(&app, action, &input.unwrap());
                     return Ok(match result {
                         Ok(value) => response(
                             200,

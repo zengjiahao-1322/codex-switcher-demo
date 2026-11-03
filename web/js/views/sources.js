@@ -1,4 +1,5 @@
 import { $, api } from '../api.js';
+import { refresh } from '../main.js';
 import { accountData, hooks, modelCache, pendingRequests, state } from '../store.js';
 import { showTab } from '../tabs.js';
 import { accessTag, busy, combo, merge, status, tag } from '../ui.js';
@@ -42,6 +43,13 @@ export function updateSwitchAction() {
   $('probe').disabled = locked || official || pendingRequests.has($('probe'));
   $('probe').hidden = official;
   $('switch').disabled = locked || !p || (!official && !$('model').value.trim());
+  $('claude-apply').disabled = locked || pendingRequests.has($('claude-apply')) || official || !p || p.apiMode !== 'anthropic_messages' || !$('model').value.trim();
+  $('claude-apply').title = p && !official && p.apiMode !== 'anthropic_messages' ? '需要 Anthropic 协议' : '';
+  const claude = state?.claudeCode;
+  $('claude-status').textContent = claude?.current
+    ? `Claude Code：${claude.current.label} · ${claude.current.model}`
+    : 'Claude Code：官方' + (claude?.notice ? `（${claude.notice}）` : '');
+  $('claude-restore').hidden = !claude?.current;
   $('switch').textContent = locked
     ? '正在切换…'
     : official && !a
@@ -354,6 +362,18 @@ $('switch').onclick = () =>
         reloadEditors,
       });
     }
+  });
+$('claude-apply').onclick = () =>
+  busy($('claude-apply'), async () => {
+    const r = await api('claudeApply', { id: $('provider').value, model: $('model').value.trim() });
+    await refresh();
+    status(r.message);
+  });
+$('claude-restore').onclick = () =>
+  busy($('claude-restore'), async () => {
+    const r = await api('claudeRestore', {});
+    await refresh();
+    status(r.message);
   });
 export function chooseSource(value, model) {
   $('provider').value = value;

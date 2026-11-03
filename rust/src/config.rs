@@ -260,6 +260,7 @@ impl App {
                 "name":name
             },
             "providers":providers,
+            "claudeCode":crate::claude_code::state(&self.bridge)?,
             "catalog":{
                 "selected":catalog_file.is_some(),
                 "readable":catalog_models.is_some(),
