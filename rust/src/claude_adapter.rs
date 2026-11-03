@@ -92,11 +92,6 @@ fn to_responses(body: &Value) -> Result<Value, Failure> {
     if let Some(max) = body.get("max_tokens") {
         out["max_output_tokens"] = max.clone();
     }
-    for key in ["temperature", "top_p"] {
-        if let Some(v) = body.get(key) {
-            out[key] = v.clone();
-        }
-    }
     let tools=body["tools"].as_array().into_iter().flatten().filter(|t|t["name"].is_string() && (t["type"].is_null() || t["type"]=="custom")).map(|t|json!({"type":"function","name":t["name"],"description":t["description"],"parameters":t["input_schema"]})).collect::<Vec<_>>();
     if !tools.is_empty() {
         out["tools"] = json!(tools);
@@ -205,6 +200,15 @@ fn sse(body: Body) -> Response<Body> {
         .unwrap()
 }
 type Upstream = Pin<Box<dyn Future<Output = Result<Value, Failure>> + Send>>;
+fn upstream_error(status: u16, body: &str) -> String {
+    let parsed = serde_json::from_str::<Value>(body).ok();
+    let detail = parsed
+        .as_ref()
+        .and_then(|v| v["error"]["message"].as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| body.chars().take(300).collect());
+    format!("上游 HTTP {status}：{detail}")
+}
 async fn request(provider: Value, payload: Value) -> Result<Value, Failure> {
     let mode = text(&provider["apiMode"]);
     let suffix = if mode == "responses" {
@@ -226,9 +230,10 @@ async fn request(provider: Value, payload: Value) -> Result<Value, Failure> {
         .map_err(|_| Failure::unsupported())?;
     let status = response.status().as_u16();
     if !(200..300).contains(&status) {
+        let body = response.text().await.unwrap_or_default();
         return Err(Failure {
             status: if status >= 400 { status } else { 502 },
-            message: format!("Upstream HTTP {status}"),
+            message: upstream_error(status, &body),
             upstream: true,
         });
     }
@@ -281,15 +286,10 @@ pub async fn handle(req: Request<Incoming>, app: Arc<App>, _settings: Value) -> 
     } else {
         None
     };
-    let mut payload = prepared
+    let payload = prepared
         .as_ref()
         .map(|p| p.payload.clone())
         .unwrap_or(response_input);
-    for key in ["temperature", "top_p"] {
-        if let Some(v) = source.get(key) {
-            payload[key] = v.clone();
-        }
-    }
     let timeout = provider["timeoutMs"]
         .as_u64()
         .filter(|n| *n > 0)
@@ -348,6 +348,28 @@ pub async fn handle(req: Request<Incoming>, app: Arc<App>, _settings: Value) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sampling_parameters_are_omitted() {
+        let value = to_responses(&json!({"model":"m","messages":[],"temperature":0.5,"top_p":0.8}))
+            .unwrap();
+        assert!(value.get("temperature").is_none() && value.get("top_p").is_none());
+        let chat =
+            adapter_convert::prepare(&value, &json!({"apiMode":"chat_completions"}), "m").unwrap();
+        assert!(chat.payload.get("temperature").is_none() && chat.payload.get("top_p").is_none());
+    }
+
+    #[test]
+    fn upstream_error_reports_message_or_truncated_body() {
+        assert_eq!(
+            upstream_error(400, r#"{"error":{"message":"余额不足"}}"#),
+            "上游 HTTP 400：余额不足"
+        );
+        assert_eq!(
+            upstream_error(503, &"错".repeat(301)),
+            format!("上游 HTTP 503：{}", "错".repeat(300))
+        );
+    }
 
     #[test]
     fn messages_with_image_and_tool_round_trip_map_to_openai_chat() {
