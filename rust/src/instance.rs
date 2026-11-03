@@ -72,10 +72,24 @@ pub fn fixture_app() -> io::Result<crate::server::App> {
     })
 }
 pub fn other_action(old: u64, current: u64) -> &'static str {
-    if old >= current {
+    if old > 0 && current > 0 && old > current {
         "deferred"
     } else {
         "stopped"
+    }
+}
+#[cfg(test)]
+mod handover_tests {
+    use super::other_action;
+
+    #[test]
+    fn unknown_or_equal_sequence_is_reclaimed_but_newer_is_preserved() {
+        assert_eq!(other_action(0, 0), "stopped");
+        assert_eq!(other_action(0, 136), "stopped");
+        assert_eq!(other_action(136, 0), "stopped");
+        assert_eq!(other_action(136, 136), "stopped");
+        assert_eq!(other_action(136, 137), "stopped");
+        assert_eq!(other_action(137, 136), "deferred");
     }
 }
 fn legacy_bridge_handover(raw_bridge: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
@@ -102,11 +116,8 @@ fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
 }
 fn owner_install(pid: u32) -> Option<PathBuf> {
     let image = platform::image(pid).ok()?;
-    if image
-        .file_name()?
-        .to_string_lossy()
-        .eq_ignore_ascii_case(if cfg!(windows) { "node.exe" } else { "node" })
-    {
+    let name = image.file_name()?.to_string_lossy();
+    if name.eq_ignore_ascii_case(if cfg!(windows) { "node.exe" } else { "node" }) {
         let command = platform::command(pid).ok()?;
         let expression = regex::Regex::new(
             r#"(?i)(?:^|[\\/])node(?:\.exe)?"?\s+"?(.+?[\\/]main\.cjs)"?(?:\s|$)"#,
@@ -114,9 +125,31 @@ fn owner_install(pid: u32) -> Option<PathBuf> {
         .unwrap();
         let entry = expression.captures(&command)?.get(1)?.as_str();
         PathBuf::from(entry).parent().map(PathBuf::from)
-    } else {
+    } else if [
+        "codex-switcher",
+        "codex-switcher.exe",
+        "switcher",
+        "switcher.exe",
+    ]
+    .iter()
+    .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    {
         image.parent().map(PathBuf::from)
+    } else {
+        None
     }
+}
+
+fn install_sequence(root: &Path) -> Option<Option<u64>> {
+    let package: Value = serde_json::from_slice(&fs::read(root.join("package.json")).ok()?).ok()?;
+    if package["name"] != "codex-api-switcher" {
+        return None;
+    }
+    let sequence = fs::read(root.join("src/platform/release-info.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|release| release["sequence"].as_u64());
+    Some(sequence)
 }
 
 pub async fn stop_installed(record: &std::path::Path, target: &std::path::Path) -> io::Result<()> {
@@ -321,52 +354,38 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             && let Ok((status, body)) = local_response(url, "/api/runtime").await
         {
             let pid = previous["pid"].as_u64().ok_or("Missing old runtime PID")? as u32;
-            let (old, legacy_verified) = if status.is_success() {
-                (serde_json::from_slice::<Value>(&body)?, false)
+            let old = if status.is_success() {
+                serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null)
             } else {
-                let (status, body) = local_response(url, "/api/accounts").await?;
-                let accounts: Value = serde_json::from_slice(&body)?;
-                let node_process = platform::image(pid)
-                    .ok()
-                    .and_then(|file| {
-                        file.file_name()
-                            .map(|name| name.to_string_lossy().to_string())
-                    })
-                    .is_some_and(|name| {
-                        name.eq_ignore_ascii_case(if cfg!(windows) { "node.exe" } else { "node" })
-                    });
-                if !status.is_success()
-                    || !accounts["items"].is_array()
-                    || !accounts
-                        .as_object()
-                        .is_some_and(|object| object.contains_key("switchJob"))
-                    || !node_process
-                    || owner_install(pid).is_none()
-                {
-                    return Err(
-                        "无法确认旧切换器后台归属，请先关闭旧切换器再启动新版；配置尚未修改。"
-                            .into(),
-                    );
-                }
-                (json!({}), true)
+                Value::Null
             };
-            let same_build = old["id"] == runtime()["id"];
+            let port = url
+                .split_once("/#")
+                .and_then(|(base, _)| base.strip_prefix("http://127.0.0.1:"))
+                .and_then(|port| port.parse::<u16>().ok());
+            let owns_port =
+                port.and_then(|port| platform::port_pid(port).ok().flatten()) == Some(pid);
+            let owner = owner_install(pid);
+            let installed = owner.as_ref().and_then(|root| install_sequence(root));
+            let same_executable = platform::image(pid)
+                .ok()
+                .zip(env::current_exe().ok())
+                .is_some_and(|(image, current)| same_path(&image, &current));
+            let identified =
+                owns_port && (installed.is_some() || (same_executable && verified(pid, &old)));
+            let same_build = old["id"]
+                .as_str()
+                .is_some_and(|id| Some(id) == runtime()["id"].as_str());
             let old_sequence = previous["build"]["sequence"]
                 .as_u64()
                 .or(old["sequence"].as_u64())
+                .or(installed.flatten())
                 .unwrap_or(0);
-            if !legacy_verified && !verified(pid, &old) {
-                return Err(
-                    "无法确认旧切换器后台归属，请先关闭旧切换器再启动新版；配置尚未修改。".into(),
-                );
-            }
             let action = other_action(old_sequence, runtime()["sequence"].as_u64().unwrap_or(0));
-            if discovered.is_some() {
+            if identified && discovered.is_some() {
                 other_install = json!({"pid":pid,"sequence":old_sequence,"action":action});
             }
-            if (discovered.is_none() && same_build)
-                || (discovered.is_some() && action == "deferred")
-            {
+            if identified && (same_build || action == "deferred") {
                 if let Some(directory) = &discovery {
                     write_json(&directory.join("connection.json"), &previous)?;
                 }
@@ -378,7 +397,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 return Ok(());
             }
-            platform::stop(pid).await?;
+            if identified {
+                platform::stop(pid).await?;
+            }
         }
     }
     let existing_ms = existing_started.elapsed().as_millis();
@@ -436,21 +457,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 || install
                     .as_ref()
                     .is_some_and(|path| same_path(path, &project_root()));
-            let older_install = install
-                .and_then(|root| {
-                    let package: Value =
-                        serde_json::from_slice(&fs::read(root.join("package.json")).ok()?).ok()?;
-                    let release: Value = serde_json::from_slice(
-                        &fs::read(root.join("src/platform/release-info.json")).ok()?,
-                    )
-                    .ok()?;
-                    (package["name"] == "codex-api-switcher")
-                        .then(|| release["sequence"].as_u64())
-                        .flatten()
-                })
-                .filter(|old| *old < runtime()["sequence"].as_u64().unwrap_or(0));
-            if same_install || older_install.is_some() {
-                if let Some(sequence) = older_install {
+            let installed = install.as_ref().and_then(|root| install_sequence(root));
+            let reclaim = installed.is_some_and(|old| {
+                other_action(
+                    old.unwrap_or(0),
+                    runtime()["sequence"].as_u64().unwrap_or(0),
+                ) == "stopped"
+            });
+            if (same_install && installed.is_none()) || reclaim {
+                if let Some(sequence) = installed {
                     other_install = json!({"pid":owner,"sequence":sequence,"action":"stopped"});
                 }
                 platform::stop(owner.unwrap()).await?;

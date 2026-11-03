@@ -42,7 +42,7 @@ test('双后台样例对：系统代理转换与多安装序号决策', (t) => {
   assert.deepEqual(run({ op: 'windowsProxyEnv', value: { enabled: 0, server: 'fixture:8' } }), {});
   for (const [old, current, expected] of [
     [9, 10, 'stopped'],
-    [10, 10, 'deferred'],
+    [10, 10, isRust ? 'stopped' : 'deferred'],
     [11, 10, 'deferred'],
   ])
     assert.equal(run({ op: 'otherInstallAction', old, current }), expected);
