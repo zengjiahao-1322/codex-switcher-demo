@@ -275,7 +275,11 @@ function activate(context) {
     let result;
     try {
       result =
-        command.step === 'write'
+        command.step === 'writeClaude'
+          ? await vscode.commands.executeCommand('codexSwitcherRemote.writeClaude', { text: command.text, expectedSha256: command.expectedSha256 })
+          : command.step === 'readClaude'
+          ? await vscode.commands.executeCommand('codexSwitcherRemote.readClaude')
+          : command.step === 'write'
           ? await vscode.commands.executeCommand('codexSwitcherRemote.write', {
               text: command.text,
               expectedSha256: command.expectedSha256,

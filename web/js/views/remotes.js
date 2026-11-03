@@ -206,11 +206,12 @@ function chooser(authority, host, rows) {
     ...apis.map((p) => ({ value: p.id, name: p.name, provider: p })),
   ];
   const inUse = (o) => (o.account ? usingAccount(rows, o.account) : usingApi(rows, o.provider));
+  const unselectable = (o) => o.provider && o.provider.apiMode === 'anthropic_messages' && o.provider.hasKey ? '' : (o.provider ? blockedReason(o.provider) : '');
   const draft = drafts.get(authority) || {};
   const picked =
     options.find((o) => o.value === draft.source) ||
-    options.find((o) => inUse(o) && !(o.provider && blockedReason(o.provider))) ||
-    options.find((o) => !(o.provider && blockedReason(o.provider)));
+    options.find((o) => inUse(o) && !unselectable(o)) ||
+    options.find((o) => !unselectable(o));
   const wrap = document.createElement('div'),
     list = document.createElement('div'),
     panel = document.createElement('div');
@@ -234,7 +235,7 @@ function chooser(authority, host, rows) {
         checked: o === picked,
         using: inUse(o) ? tag('服务器正在使用', 'done') : null,
         model: o.provider?.model,
-        blocked: o.provider ? blockedReason(o.provider) : '',
+        blocked: unselectable(o),
         onPick: () => {
           drafts.set(authority, { source: o.value, model: o.provider?.model || '' });
           renderRemotes(remotes);
@@ -250,7 +251,27 @@ function chooser(authority, host, rows) {
   }
   wrap.append(list, panel);
   if (picked) detail(panel, authority, host, rows, picked, draft);
-  else panel.append(note('没有能用于服务器的账号或 API。'));
+  else {
+    panel.append(note('没有能用于服务器的账号或 API。'));
+    if (rows.some((r) => r.claudeCanRestore)) {
+      const line = document.createElement('div'), restore = document.createElement('button'), status = document.createElement('span');
+      line.className = 'editor-line';
+      const current = rows.find((r) => r.claudeCurrent)?.claudeCurrent;
+      status.textContent = current ? 'Claude Code：' + current.label + ' · ' + current.model : 'Claude Code：可恢复原始配置';
+      restore.type = 'button';
+      restore.className = 'link';
+      restore.textContent = '恢复官方';
+      restore.disabled = !rows.some((r) => r.windows.some((w) => w.agentProtocol >= 5 && w.agentVersion === w.companionVersion));
+      restore.onclick = () => busy(restore, async () => {
+        const result = await api('remoteClaudeRestore', { authority });
+        results.set(authority, result.message);
+        const refreshed = await api('clients', {});
+        renderRemotes(refreshed.remotes || []);
+      }, (message) => { results.set(authority, message); renderRemotes(remotes); });
+      line.append(status, restore);
+      panel.append(line);
+    }
+  }
   if (results.has(authority)) panel.append(note(results.get(authority)));
   return wrap;
 }
@@ -299,6 +320,10 @@ function detail(panel, authority, host, rows, o, draft) {
   apply.type = 'button';
   apply.className = 'primary';
   apply.textContent = '应用到这台服务器';
+  if (p && (p.apiMode === 'anthropic_messages' || blockedReason(p))) {
+    apply.disabled = true;
+    apply.title = '此配置不能用于远程 Codex';
+  }
   apply.onclick = () =>
     busy(
       apply,
@@ -358,4 +383,43 @@ function detail(panel, authority, host, rows, o, draft) {
   buttons.className = 'actions';
   buttons.append(apply);
   panel.append(hint, buttons);
+  const claude = document.createElement('div'),
+    claudeApply = document.createElement('button'),
+    claudeRestore = document.createElement('button'),
+    status = document.createElement('span'),
+    current = rows.find((r) => r.claudeCurrent)?.claudeCurrent,
+    supported = rows.some((r) => r.windows.some((w) => w.agentProtocol >= 5 && w.agentVersion === w.companionVersion));
+  claude.className = 'editor-line';
+  status.textContent = current ? 'Claude Code：' + current.label + ' · ' + current.model : 'Claude Code：官方或未记录';
+  claudeApply.type = claudeRestore.type = 'button';
+  claudeApply.className = claudeRestore.className = 'link';
+  claudeApply.textContent = '用于 Claude Code';
+  claudeRestore.textContent = '恢复官方';
+  claudeApply.disabled = !supported || !p || p.apiMode !== 'anthropic_messages' || !p.hasKey;
+  claudeApply.title = !supported ? '请更新远端代理' : p && p.apiMode !== 'anthropic_messages' ? '远程服务器只支持 Anthropic 协议的 API' : '';
+  claudeRestore.disabled = !supported || !rows.some((r) => r.claudeCanRestore);
+  claudeRestore.title = !supported ? '请更新远端代理' : '';
+  const changeClaude = (button, action, data) => busy(button, async () => {
+    const result = await api(action, { authority, ...data });
+    results.set(authority, result.message);
+    const refreshed = await api('clients', {});
+    renderRemotes(refreshed.remotes || []);
+  }, (message) => { results.set(authority, message); renderRemotes(remotes); });
+  claudeApply.onclick = () => changeClaude(claudeApply, 'remoteClaudeApply', { providerId: p.id, model: model.value.trim() });
+  claudeRestore.onclick = () => changeClaude(claudeRestore, 'remoteClaudeRestore', {});
+  claude.append(status, claudeApply, claudeRestore);
+  if (!supported) {
+    const update = document.createElement('button');
+    update.type = 'button';
+    update.className = 'link';
+    update.textContent = '更新远端代理';
+    update.onclick = () => busy(update, async () => {
+      if (!confirm('更新会重启服务器上的扩展，正在运行的 Codex 任务会中断。继续？')) return;
+      const result = await api('installRemoteAgent', { id: rows[0].windows[0].id });
+      results.set(authority, result?.reload?.notice || '已请求更新远端代理。');
+      renderRemotes(remotes);
+    }, (message) => { results.set(authority, message); renderRemotes(remotes); });
+    claude.append(update);
+  }
+  panel.append(claude);
 }

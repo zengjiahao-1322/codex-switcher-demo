@@ -12,7 +12,7 @@ const CONFIG = 'config.toml',
   BACKUP = '.switcher-backup';
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
 // 协议号：同一版本号重新发布时，靠它认出缺少登录读写的旧代理（2 = 带 readAuth 和登录写入，4 = 原地更新）。
-const PROTOCOL = 4;
+const PROTOCOL = 5;
 
 const claims = (token) => JSON.parse(Buffer.from(token.split('.')[1], 'base64url'));
 // 只取账号身份、邮箱、套餐和登录刷新时间，令牌本身不读出。
@@ -105,6 +105,8 @@ function stopDirectChildren() {
 
 function createAgent({ home, extensionPath }) {
   const startedAt = new Date().toISOString();
+  const claudeFile = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'settings.json');
+  const claudeContent = () => fs.existsSync(claudeFile) ? fs.readFileSync(claudeFile, 'utf8') : '';
   const file = (name) => path.join(home, name);
   const extensionDir = extensionPath,
     packageFile = path.join(extensionDir, 'package.json');
@@ -139,6 +141,14 @@ function createAgent({ home, extensionPath }) {
     },
     read: () => snapshot(CONFIG),
     readAuth: () => snapshot(AUTH),
+    readClaude: () => { const text = claudeContent(); return { text, sha256: sha256(text) }; },
+    writeClaude(input) {
+      if (typeof input.text !== 'string' || typeof input.expectedSha256 !== 'string') throw Error('缺少新配置或原配置校验值。');
+      if (sha256(claudeContent()) !== input.expectedSha256) throw Error('服务器上的配置在读取后被修改过，未写入；请重新切换。');
+      fs.mkdirSync(path.dirname(claudeFile), { recursive: true, mode: 0o700 });
+      writeAtomic(claudeFile, input.text);
+      return { ok: true, sha256: sha256(input.text) };
+    },
     update(input) {
       if (sha256(input.extensionCjs) !== input.extensionSha256)
         throw Error('远端代理 extension.cjs 校验失败。');
@@ -208,7 +218,7 @@ function activate(context) {
     home: path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex')),
     extensionPath: context.extensionPath || __dirname,
   });
-  for (const name of ['status', 'read', 'readAuth', 'write', 'update', 'restart'])
+  for (const name of ['status', 'read', 'readAuth', 'write', 'readClaude', 'writeClaude', 'update', 'restart'])
     context.subscriptions.push(
       vscode.commands.registerCommand('codexSwitcherRemote.' + name, (input) => agent[name](input)),
     );

@@ -104,6 +104,22 @@ async function reopenTab(page) {
   await openTab(page);
 }
 
+test('远端 Claude Code 仅允许 Anthropic 配置，并复用所选模型', async () => {
+  const anthropic = { ...provider('anthropic', 'unknown'), apiMode: 'anthropic_messages' };
+  const row = group({ agentProtocol: 5, windows: [{ id: 'w', agentProtocol: 5, agentVersion: '0.1.3', companionVersion: '0.1.3' }] });
+  const calls = [];
+  const page = await runPage({ respond: backend({ remotes: () => [row], providers: [anthropic], calls: { remoteClaudeApply: (body) => { calls.push(body); return { body: { message: 'ok' } }; } } }) });
+  await openTab(page);
+  assert.equal(card(page, 'anthropic').disabled, false);
+  assert.equal(applyButton(page).disabled, true);
+  const button = created(page, 'button', (n) => n.textContent === '用于 Claude Code').at(-1);
+  assert.equal(button.disabled, false);
+  await button.onclick();
+  await page.settle();
+  assert.equal(calls[0].providerId, 'anthropic');
+  assert.equal(calls[0].model, 'anthropic-model');
+});
+
 test('没有远程窗口时分页照常显示，给出接入步骤和本机伴随扩展的连接情况', async () => {
   const guide = (page) =>
     created(page, 'p', (n) => /还没有检测到 Remote-SSH 窗口/.test(n.textContent)).at(-1);

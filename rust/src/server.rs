@@ -137,6 +137,8 @@ const ACTIONS: &[&str] = &[
     "clientHeartbeat",
     "installRemoteAgent",
     "remoteSwitch",
+    "remoteClaudeApply",
+    "remoteClaudeRestore",
     "reloadClients",
     "companionPackage",
     "remoteAgentPackage",
@@ -442,6 +444,8 @@ pub(crate) async fn serve(
                     "clients",
                     "reloadClients",
                     "remoteSwitch",
+                    "remoteClaudeApply",
+                    "remoteClaudeRestore",
                     "installRemoteAgent",
                     "companionInstall",
                     "desktopSwitch",
@@ -492,6 +496,12 @@ pub(crate) async fn serve(
                         }),
                         "reloadClients" => crate::editors::reload(&app, &input, &[], false),
                         "remoteSwitch" => crate::remote::apply(app.clone(), &input).await,
+                        "remoteClaudeApply" => {
+                            crate::remote::claude(app.clone(), &input, false).await
+                        }
+                        "remoteClaudeRestore" => {
+                            crate::remote::claude(app.clone(), &input, true).await
+                        }
                         "installRemoteAgent" => crate::remote::install(app.clone(), &input).await,
                         "companionInstall" => {
                             crate::editor_integration::install(&app, &input).await

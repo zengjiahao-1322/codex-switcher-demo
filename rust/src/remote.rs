@@ -92,7 +92,77 @@ pub fn groups(bridge: &Path) -> io::Result<Vec<Value>> {
         };
         found[index]["windows"].as_array_mut().unwrap().push(json!({"id":row["id"],"name":row["name"],"workspace":row["workspace"],"agentVersion":agent["agentVersion"],"agentProtocol":agent["protocol"].as_u64().unwrap_or(0),"companionVersion":row["companionVersion"],"remoteAgentState":row["remoteAgentState"],"installStatus":row["lastAck"]["installStatus"]}));
     }
+    for group in &mut found {
+        let file = claude_file(bridge, text(&group["authority"]));
+        group["claudeCurrent"] = accounts::read(&file, Value::Null)?["current"].clone();
+        group["claudeCanRestore"] = json!(file.exists());
+    }
     Ok(found)
+}
+fn claude_file(bridge: &Path, authority: &str) -> std::path::PathBuf {
+    bridge
+        .join("remote-claude")
+        .join(format!("{}.json", digest(authority)))
+}
+pub async fn claude(app: Arc<App>, input: &Value, restore: bool) -> io::Result<Value> {
+    let authority = text(&input["authority"]);
+    let selected = editors::records(&app.bridge)?
+        .into_iter()
+        .find(|r| {
+            r["authority"] == authority
+                && r["remoteType"] == "ssh-remote"
+                && r["remoteAgent"]["agentVersion"] == r["companionVersion"]
+                && r["remoteAgent"]["protocol"].as_u64().unwrap_or(0) >= 5
+        })
+        .ok_or_else(|| io::Error::other("请更新远端代理后重试"))?;
+    let id = text(&selected["id"]);
+    let file = claude_file(&app.bridge, authority);
+    let existing = accounts::read(&file, Value::Null)?;
+    let provider = if restore {
+        Value::Null
+    } else {
+        let store = crate::config_store::load(&app.bridge)?;
+        let provider = store["providers"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|p| p["id"] == input["providerId"]))
+            .cloned()
+            .ok_or_else(|| io::Error::other("配置不存在"))?;
+        if provider["apiMode"] != "anthropic_messages" {
+            return Err(io::Error::other("远程服务器只支持 Anthropic 协议的 API"));
+        }
+        if text(&provider["apiKey"]).is_empty() || text(&input["model"]).trim().is_empty() {
+            return Err(io::Error::other("请选择密钥和模型"));
+        }
+        provider
+    };
+    let mut secrets = vec![text(&provider["apiKey"]).to_owned()];
+    let result = async {
+        let read = dispatch(app.clone(), id, json!({"type":"remoteApply","step":"readClaude"}), 30).await?;
+        let raw = read["text"].as_str().ok_or_else(|| io::Error::other("远端配置读取结果无效"))?;
+        secrets.push(raw.to_owned());
+        if read["sha256"] != digest(raw) { return Err(io::Error::other("远端配置校验失败")); }
+        let source = if raw.is_empty() { None } else { Some(raw) };
+        let next = if restore {
+            let snapshot = existing["snapshot"].as_str().ok_or_else(|| io::Error::other("没有可恢复的 Claude Code 原始配置"))?;
+            crate::claude_code::transform_restore(source, snapshot)?
+        } else {
+            let (next, snapshot) = crate::claude_code::transform_apply(source, existing["snapshot"].as_str(), text(&provider["baseUrl"]), provider["apiKey"].clone(), text(&input["model"]))?;
+            std::fs::create_dir_all(file.parent().unwrap())?;
+            let saved = json!({"snapshot":snapshot,"current":existing["current"]});
+            crate::config_ops::atomic(&file, &serde_json::to_string_pretty(&saved).unwrap(), None)?;
+            next
+        };
+        secrets.push(next.clone());
+        let out = dispatch(app.clone(), id, json!({"type":"remoteApply","step":"writeClaude","text":next,"expectedSha256":read["sha256"]}), 30).await?;
+        if out["ok"] != true || out["sha256"] != digest(&next) { return Err(io::Error::other("服务器未确认写入配置")); }
+        if restore { std::fs::remove_file(&file)?; } else {
+            let mut saved = accounts::read(&file, Value::Null)?;
+            saved["current"] = json!({"providerId":provider["id"],"label":provider["name"],"model":input["model"]});
+            crate::config_ops::atomic(&file, &serde_json::to_string_pretty(&saved).unwrap(), None)?;
+        }
+        Ok(json!({"message":if restore {"已恢复远程 Claude Code 官方配置"} else {"已切换远程 Claude Code，新会话生效"}}))
+    }.await;
+    result.map_err(|e| io::Error::other(redact(&e.to_string(), &secrets)))
 }
 // 断开的服务器上 Codex 可能还在运行，所以每台服务器取最后一次心跳记录的账号。
 pub fn server_accounts(bridge: &Path) -> io::Result<Vec<Value>> {

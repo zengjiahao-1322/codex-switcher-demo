@@ -20,6 +20,19 @@ const original = [
   '',
 ].join('\n');
 const sha = (text) => crypto.createHash('sha256').update(text).digest('hex');
+test('Claude settings 固定路径按 SHA 写入并拒绝并发修改', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-claude-remote-'));
+  const old = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = path.join(root, 'claude');
+  t.after(() => { if (old === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = old; fs.rmSync(root, { recursive: true, force: true }); });
+  const agent = createAgent({ home: root, extensionPath: root });
+  const before = agent.readClaude();
+  assert.equal(before.text, '');
+  const next = '{"env":{"ANTHROPIC_AUTH_TOKEN":"fixture"}}';
+  assert.equal(agent.writeClaude({ text: next, expectedSha256: before.sha256 }).sha256, sha(next));
+  assert.throws(() => agent.writeClaude({ text: '{}', expectedSha256: before.sha256 }), /被修改/);
+  assert.equal(agent.readClaude().text, next);
+});
 function setup(text = original) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-remote-agent-'));
   const extensionPath = path.join(path.dirname(home), path.basename(home) + '-extension-0.1.3');

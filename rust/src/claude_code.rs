@@ -86,7 +86,7 @@ fn original_snapshot(env: Option<&Map<String, Value>>) -> Value {
             out.insert(key.into(), value.clone());
         }
     }
-    json!({"values":out,"envOrder":env.map(|e| e.keys().cloned().collect::<Vec<_>>()).unwrap_or_default()})
+    json!({"values":out,"envPresent":env.is_some(),"envOrder":env.map(|e| e.keys().cloned().collect::<Vec<_>>()).unwrap_or_default()})
 }
 fn normalized_base(value: &str) -> String {
     let mut value = value.trim_end_matches('/').to_owned();
@@ -94,6 +94,61 @@ fn normalized_base(value: &str) -> String {
         value.truncate(value.len() - 3);
     }
     value.trim_end_matches('/').to_owned()
+}
+pub(crate) fn transform_apply(
+    text: Option<&str>,
+    snapshot: Option<&str>,
+    base: &str,
+    token: Value,
+    model: &str,
+) -> io::Result<(String, String)> {
+    let mut root = parse(text)?;
+    if !root.is_object() || root.get("env").is_some_and(|env| !env.is_object()) {
+        return Err(io::Error::other("Claude Code settings.json 格式无效"));
+    }
+    let snapshot = match snapshot {
+        Some(value) => value.to_owned(),
+        None => pretty(&original_snapshot(root["env"].as_object()))?,
+    };
+    let env = env_object(&mut root)?;
+    env.insert("ANTHROPIC_BASE_URL".into(), json!(normalized_base(base)));
+    env.insert("ANTHROPIC_AUTH_TOKEN".into(), token);
+    env.shift_remove("ANTHROPIC_API_KEY");
+    for key in [
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    ] {
+        env.insert(key.into(), json!(model));
+    }
+    Ok((pretty(&root)?, snapshot))
+}
+pub(crate) fn transform_restore(text: Option<&str>, snapshot: &str) -> io::Result<String> {
+    let original = parse(Some(snapshot))?;
+    let mut root = parse(text)?;
+    let env = env_object(&mut root)?;
+    for key in KEYS {
+        env.shift_remove(key);
+    }
+    let mut ordered = Map::new();
+    if let Some(order) = original["envOrder"].as_array() {
+        for key in order.iter().filter_map(Value::as_str) {
+            if KEYS.contains(&key) {
+                if let Some(value) = original["values"].get(key) {
+                    ordered.insert(key.into(), value.clone());
+                }
+            } else if let Some(value) = env.shift_remove(key) {
+                ordered.insert(key.into(), value);
+            }
+        }
+    }
+    ordered.extend(std::mem::take(env));
+    *env = ordered;
+    if env.is_empty() && original["envPresent"] != true {
+        root.as_object_mut().unwrap().shift_remove("env");
+    }
+    pretty(&root)
 }
 pub fn is_current(bridge: &Path, id: &str) -> io::Result<bool> {
     Ok(state(bridge)?["current"]["providerId"] == id)
@@ -161,46 +216,26 @@ fn apply_at(app: &App, input: &Value, dir: &Path) -> io::Result<Value> {
     };
     let file = dir.join("settings.json");
     let original_text = read(&file)?;
-    let mut root = parse(original_text.as_deref())?;
-    if !root.is_object() || root.get("env").is_some_and(|env| !env.is_object()) {
-        return Err(io::Error::other("Claude Code settings.json 格式无效"));
-    }
-    let old_env = root["env"].as_object();
-    let snapshot_text = if original_file(&app.bridge).exists() {
-        None
-    } else {
-        Some(pretty(&original_snapshot(old_env))?)
-    };
-    backup(&app.bridge, original_text.as_deref().unwrap_or("{}"))?;
-    let env = env_object(&mut root)?;
-    env.insert(
-        "ANTHROPIC_BASE_URL".into(),
+    let snapshot = read(&original_file(&app.bridge))?;
+    let (next, snapshot_text) = transform_apply(
+        original_text.as_deref(),
+        snapshot.as_deref(),
         if let Some(settings) = &settings {
-            json!(format!("http://127.0.0.1:{}", settings["port"]))
+            format!("http://127.0.0.1:{}", settings["port"])
         } else {
-            json!(normalized_base(provider["baseUrl"].as_str().unwrap_or("")))
-        },
-    );
-    env.insert(
-        "ANTHROPIC_AUTH_TOKEN".into(),
+            normalized_base(provider["baseUrl"].as_str().unwrap_or(""))
+        }
+        .as_str(),
         settings
             .as_ref()
             .map(|s| s["token"].clone())
             .unwrap_or_else(|| provider["apiKey"].clone()),
-    );
-    env.shift_remove("ANTHROPIC_API_KEY");
-    env.insert("ANTHROPIC_MODEL".into(), json!(model));
-    for key in [
-        "ANTHROPIC_DEFAULT_SONNET_MODEL",
-        "ANTHROPIC_DEFAULT_OPUS_MODEL",
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-    ] {
-        env.insert(key.into(), json!(model));
-    }
-    let next = pretty(&root)?;
+        model,
+    )?;
+    backup(&app.bridge, original_text.as_deref().unwrap_or("{}"))?;
     fs::create_dir_all(dir)?;
-    if let Some(snapshot) = &snapshot_text {
-        atomic(&original_file(&app.bridge), snapshot, None)?;
+    if snapshot.is_none() {
+        atomic(&original_file(&app.bridge), &snapshot_text, None)?;
     }
     atomic(&file, &next, original_text.as_deref())?;
     let current = json!({"providerId":id,"model":model,"label":provider["name"]});
@@ -229,32 +264,11 @@ fn restore_at(app: &App, dir: &Path) -> io::Result<Value> {
     if !original_file(&app.bridge).exists() {
         return Err(io::Error::other("没有可恢复的 Claude Code 原始配置"));
     }
-    let original = parse(read(&original_file(&app.bridge))?.as_deref())?;
+    let original = read(&original_file(&app.bridge))?.unwrap();
     let file = dir.join("settings.json");
     let current_text = read(&file)?;
-    let mut root = parse(current_text.as_deref())?;
-    let env = env_object(&mut root)?;
-    for key in KEYS {
-        env.shift_remove(key);
-    }
-    let mut ordered = Map::new();
-    if let Some(order) = original["envOrder"].as_array() {
-        for key in order.iter().filter_map(Value::as_str) {
-            if KEYS.contains(&key) {
-                if let Some(value) = original["values"].get(key) {
-                    ordered.insert(key.into(), value.clone());
-                }
-            } else if let Some(value) = env.shift_remove(key) {
-                ordered.insert(key.into(), value);
-            }
-        }
-    }
-    ordered.extend(std::mem::take(env));
-    *env = ordered;
-    if env.is_empty() {
-        root.as_object_mut().unwrap().shift_remove("env");
-    }
-    atomic(&file, &pretty(&root)?, current_text.as_deref())?;
+    let next = transform_restore(current_text.as_deref(), &original)?;
+    atomic(&file, &next, current_text.as_deref())?;
     if original_file(&app.bridge).exists() {
         fs::remove_file(original_file(&app.bridge))?;
     }
@@ -281,6 +295,24 @@ mod tests {
         sync::{Mutex, atomic::AtomicBool},
         time::Instant,
     };
+
+    #[test]
+    fn restore_keeps_an_originally_empty_env_object() {
+        let original = r#"{"env":{},"other":true}"#;
+        let (changed, snapshot) = transform_apply(
+            Some(original),
+            None,
+            "https://fixture.invalid",
+            json!("fake"),
+            "model",
+        )
+        .unwrap();
+        let restored = transform_restore(Some(&changed), &snapshot).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&restored).unwrap(),
+            serde_json::from_str::<Value>(original).unwrap()
+        );
+    }
 
     fn fixture() -> (App, PathBuf) {
         let random = crate::platform::random_bytes().unwrap();
