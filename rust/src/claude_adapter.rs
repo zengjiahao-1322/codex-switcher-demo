@@ -25,6 +25,20 @@ fn error(status: u16, message: &str) -> Response<Body> {
 pub fn reject(status: u16, message: &str) -> Response<Body> {
     error(status, message)
 }
+fn log_failure(app: &App, failure: &Failure) {
+    if failure.upstream {
+        crate::adapter::log(
+            app,
+            &Failure {
+                status: failure.status,
+                message: format!("上游 HTTP {}", failure.status),
+                upstream: true,
+            },
+        );
+    } else {
+        crate::adapter::log(app, failure);
+    }
+}
 fn text(value: &Value) -> &str {
     value.as_str().unwrap_or("")
 }
@@ -310,7 +324,7 @@ pub async fn handle(req: Request<Incoming>, app: Arc<App>, _settings: Value) -> 
         return match future.await {
             Ok(v) => response(200, "application/json", serde_json::to_vec(&v).unwrap()),
             Err(e) => {
-                crate::adapter::log(&app, &e);
+                log_failure(&app, &e);
                 error(e.status, &e.message)
             }
         };
@@ -318,7 +332,7 @@ pub async fn handle(req: Request<Incoming>, app: Arc<App>, _settings: Value) -> 
     tokio::select! {
         result = &mut future => match result {
             Ok(v) => sse(Full::new(Bytes::from(events(&v).iter().flat_map(|v| encode(v).to_vec()).collect::<Vec<_>>())).boxed_unsync()),
-            Err(e) => { crate::adapter::log(&app, &e); error(e.status, &e.message) }
+            Err(e) => { log_failure(&app, &e); error(e.status, &e.message) }
         },
         _ = tokio::time::sleep(Duration::from_secs(5)) => {
             let (sender, receiver) = mpsc::channel(2);
@@ -332,7 +346,7 @@ pub async fn handle(req: Request<Incoming>, app: Arc<App>, _settings: Value) -> 
                         result = &mut future => {
                             let values = match result {
                                 Ok(v) => events(&v).into_iter().skip(1).collect(),
-                                Err(e) => { crate::adapter::log(&app, &e); vec![json!({"type":"error","error":{"type":"api_error","message":e.message}})] }
+                                Err(e) => { log_failure(&app, &e); vec![json!({"type":"error","error":{"type":"api_error","message":e.message}})] }
                             };
                             for value in values { if sender.send(encode(&value)).await.is_err() { return; } }
                             return;
