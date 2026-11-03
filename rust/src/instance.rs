@@ -78,20 +78,6 @@ pub fn other_action(old: u64, current: u64) -> &'static str {
         "stopped"
     }
 }
-#[cfg(test)]
-mod handover_tests {
-    use super::other_action;
-
-    #[test]
-    fn unknown_or_equal_sequence_is_reclaimed_but_newer_is_preserved() {
-        assert_eq!(other_action(0, 0), "stopped");
-        assert_eq!(other_action(0, 136), "stopped");
-        assert_eq!(other_action(136, 0), "stopped");
-        assert_eq!(other_action(136, 136), "stopped");
-        assert_eq!(other_action(136, 137), "stopped");
-        assert_eq!(other_action(137, 136), "deferred");
-    }
-}
 fn legacy_bridge_handover(raw_bridge: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
     if env::var("BRIDGE_LEGACY_HANDOVER").as_deref() != Ok("1") {
         return None;
@@ -672,4 +658,19 @@ fn directory_size(path: &Path) -> u64 {
             .unwrap_or(0)
         })
         .sum()
+}
+
+#[cfg(test)]
+mod handover_tests {
+    use super::other_action;
+
+    #[test]
+    fn unknown_or_equal_sequence_is_reclaimed_but_newer_is_preserved() {
+        assert_eq!(other_action(0, 0), "stopped");
+        assert_eq!(other_action(0, 136), "stopped");
+        assert_eq!(other_action(136, 0), "stopped");
+        assert_eq!(other_action(136, 136), "stopped");
+        assert_eq!(other_action(136, 137), "stopped");
+        assert_eq!(other_action(137, 136), "deferred");
+    }
 }
