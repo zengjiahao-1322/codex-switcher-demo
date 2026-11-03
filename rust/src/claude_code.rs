@@ -111,8 +111,16 @@ pub fn state(bridge: &Path) -> io::Result<Value> {
         let expected = providers["providers"]
             .as_array()
             .and_then(|rows| rows.iter().find(|p| p["id"] == v["providerId"]))
-            .and_then(|p| p["baseUrl"].as_str())
-            .map(normalized_base);
+            .and_then(|p| {
+                if p["apiMode"] == "anthropic_messages" {
+                    p["baseUrl"].as_str().map(normalized_base)
+                } else {
+                    config_store::read_json(&bridge.join("adapter.json"))
+                        .ok()
+                        .and_then(|s| s["port"].as_u64())
+                        .map(|port| format!("http://127.0.0.1:{port}"))
+                }
+            });
         !root["env"]["ANTHROPIC_BASE_URL"]
             .as_str()
             .zip(expected)
@@ -122,7 +130,15 @@ pub fn state(bridge: &Path) -> io::Result<Value> {
         json!({"configDir":dir,"current":if changed { None } else { current },"notice":if changed { Some("Claude Code 配置已被外部修改，请重新选择。") } else { None }}),
     )
 }
-pub fn apply(app: &App, input: &Value) -> io::Result<Value> {
+pub async fn apply(app: &App, input: &Value) -> io::Result<Value> {
+    let store = config_store::load(&app.bridge)?;
+    let provider = store["providers"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|p| p["id"] == input["id"]))
+        .ok_or_else(|| io::Error::other("配置不存在，请刷新"))?;
+    if provider["apiMode"] != "anthropic_messages" {
+        crate::adapter::local_provider(app, provider).await?;
+    }
     apply_at(app, input, &config_dir())
 }
 fn apply_at(app: &App, input: &Value, dir: &Path) -> io::Result<Value> {
@@ -137,9 +153,12 @@ fn apply_at(app: &App, input: &Value, dir: &Path) -> io::Result<Value> {
         .and_then(|rows| rows.iter().find(|p| p["id"] == id))
         .cloned()
         .ok_or_else(|| io::Error::other("配置不存在，请刷新"))?;
-    if provider["apiMode"] != "anthropic_messages" {
-        return Err(io::Error::other("需要 Anthropic 协议"));
-    }
+    let adapter = provider["apiMode"] != "anthropic_messages";
+    let settings = if adapter {
+        Some(crate::adapter::settings(app)?)
+    } else {
+        None
+    };
     let file = dir.join("settings.json");
     let original_text = read(&file)?;
     let mut root = parse(original_text.as_deref())?;
@@ -156,9 +175,19 @@ fn apply_at(app: &App, input: &Value, dir: &Path) -> io::Result<Value> {
     let env = env_object(&mut root)?;
     env.insert(
         "ANTHROPIC_BASE_URL".into(),
-        json!(normalized_base(provider["baseUrl"].as_str().unwrap_or(""))),
+        if let Some(settings) = &settings {
+            json!(format!("http://127.0.0.1:{}", settings["port"]))
+        } else {
+            json!(normalized_base(provider["baseUrl"].as_str().unwrap_or("")))
+        },
     );
-    env.insert("ANTHROPIC_AUTH_TOKEN".into(), provider["apiKey"].clone());
+    env.insert(
+        "ANTHROPIC_AUTH_TOKEN".into(),
+        settings
+            .as_ref()
+            .map(|s| s["token"].clone())
+            .unwrap_or_else(|| provider["apiKey"].clone()),
+    );
     env.shift_remove("ANTHROPIC_API_KEY");
     env.insert("ANTHROPIC_MODEL".into(), json!(model));
     for key in [
@@ -176,8 +205,20 @@ fn apply_at(app: &App, input: &Value, dir: &Path) -> io::Result<Value> {
     atomic(&file, &next, original_text.as_deref())?;
     let current = json!({"providerId":id,"model":model,"label":provider["name"]});
     config_ops::atomic(&current_file(&app.bridge), &pretty(&current)?, None)?;
+    let mut note = "";
+    if let Some(settings) = &settings {
+        if input["autostart"] != false
+            && settings["autostartDecided"] != true
+            && !crate::integration::startup_file().exists()
+        {
+            crate::integration::autostart(true, &app.bridge)?;
+            note = "已开启开机自启转换服务。";
+        } else if !crate::integration::startup_file().exists() {
+            note = "注意：未开启开机自启，重启后需先打开切换器。";
+        }
+    }
     Ok(
-        json!({"message":format!("已让 Claude Code 使用{}（{}）。新开的 Claude Code 会话生效（CLI、VS Code、桌面版 Code），已打开的会话需重开。官方登录凭据未改动。", provider["name"].as_str().unwrap_or("配置"), model)}),
+        json!({"message":format!("已让 Claude Code 使用{}（{}）。{}{}新开的 Claude Code 会话生效（CLI、VS Code、桌面版 Code），已打开的会话需重开。官方登录凭据未改动。", provider["name"].as_str().unwrap_or("配置"), model, if adapter {"经本机转换，需保持切换器运行。"} else {""}, note)}),
     )
 }
 pub fn restore(app: &App) -> io::Result<Value> {
@@ -223,9 +264,9 @@ fn restore_at(app: &App, dir: &Path) -> io::Result<Value> {
     Ok(json!({"message":"已恢复官方。官方登录凭据未改动。"}))
 }
 pub const ACTIONS: &[&str] = &["claudeApply", "claudeRestore", "claudeState"];
-pub fn action(app: &App, action: &str, input: &Value) -> io::Result<Value> {
+pub async fn action(app: &App, action: &str, input: &Value) -> io::Result<Value> {
     match action {
-        "claudeApply" => apply(app, input),
+        "claudeApply" => apply(app, input).await,
         "claudeRestore" => restore(app),
         "claudeState" => state(&app.bridge),
         _ => Err(io::Error::other("Unknown Claude Code action")),

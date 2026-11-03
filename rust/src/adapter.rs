@@ -87,7 +87,7 @@ fn json_response(status: u16, value: Value) -> Response<Body> {
         serde_json::to_vec(&value).unwrap(),
     )
 }
-fn log(app: &App, error: &Failure) {
+pub(crate) fn log(app: &App, error: &Failure) {
     let result = (|| -> io::Result<()> {
         let file = app.bridge.join("adapter.log");
         if fs::metadata(&file).is_ok_and(|m| m.len() > 1024 * 1024) {

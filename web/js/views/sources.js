@@ -43,8 +43,8 @@ export function updateSwitchAction() {
   $('probe').disabled = locked || official || pendingRequests.has($('probe'));
   $('probe').hidden = official;
   $('switch').disabled = locked || !p || (!official && !$('model').value.trim());
-  $('claude-apply').disabled = locked || pendingRequests.has($('claude-apply')) || official || !p || p.apiMode !== 'anthropic_messages' || !$('model').value.trim();
-  $('claude-apply').title = p && !official && p.apiMode !== 'anthropic_messages' ? '需要 Anthropic 协议' : '';
+  $('claude-apply').disabled = locked || pendingRequests.has($('claude-apply')) || official || !p || !$('model').value.trim();
+  $('claude-apply').title = '';
   const claude = state?.claudeCode;
   $('claude-status').textContent = claude?.current
     ? `Claude Code：${claude.current.label} · ${claude.current.model}`

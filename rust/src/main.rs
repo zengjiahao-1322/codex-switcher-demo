@@ -3,6 +3,7 @@
 mod accounts;
 mod adapter;
 mod adapter_convert;
+mod claude_adapter;
 mod claude_code;
 mod config;
 mod config_catalog;

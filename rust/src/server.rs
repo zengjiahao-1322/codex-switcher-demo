@@ -238,10 +238,16 @@ pub(crate) async fn serve(
         return Ok(error(403, "Origin rejected"));
     }
     let route = req.uri().path().to_owned();
-    if route == "/v1/responses" {
+    if ["/v1/responses", "/v1/messages", "/v1/messages/count_tokens"].contains(&route.as_str()) {
         let settings = match crate::adapter::settings(&app) {
             Ok(value) => value,
-            Err(_) => return Ok(error(500, "Adapter settings unavailable")),
+            Err(_) => {
+                return Ok(if route == "/v1/responses" {
+                    error(500, "Adapter settings unavailable")
+                } else {
+                    crate::claude_adapter::reject(500, "Adapter settings unavailable")
+                });
+            }
         };
         if !settings["token"].as_str().is_some_and(|token| {
             same_secret(
@@ -252,10 +258,27 @@ pub(crate) async fn serve(
                 &format!("Bearer {token}"),
             )
         }) {
-            return Ok(error(401, "Proxy authentication required"));
+            return Ok(if route == "/v1/responses" {
+                error(401, "Proxy authentication required")
+            } else {
+                crate::claude_adapter::reject(401, "Proxy authentication required")
+            });
         }
         if req.method() != "POST" {
-            return Ok(error(405, "POST required"));
+            return Ok(if route == "/v1/responses" {
+                error(405, "POST required")
+            } else {
+                crate::claude_adapter::reject(405, "POST required")
+            });
+        }
+        if route == "/v1/messages/count_tokens" {
+            return Ok(crate::claude_adapter::reject(
+                404,
+                "Token counting is not supported",
+            ));
+        }
+        if route == "/v1/messages" {
+            return Ok(crate::claude_adapter::handle(req, app, settings).await);
         }
         return Ok(crate::adapter::handle(req, app, settings).await);
     }
@@ -508,7 +531,7 @@ pub(crate) async fn serve(
                     });
                 }
                 if crate::claude_code::ACTIONS.contains(&action) {
-                    let result = crate::claude_code::action(&app, action, &input.unwrap());
+                    let result = crate::claude_code::action(&app, action, &input.unwrap()).await;
                     return Ok(match result {
                         Ok(value) => response(
                             200,
