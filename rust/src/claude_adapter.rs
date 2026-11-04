@@ -283,6 +283,9 @@ pub async fn handle(req: Request<Incoming>, app: Arc<App>, _settings: Value) -> 
         Ok(v) => v,
         Err(_) => return error(400, "Malformed JSON"),
     };
+    if !source["model"].is_string() || text(&source["model"]).is_empty() {
+        return error(400, "model 为必填项");
+    }
     let model = text(&source["model"]).to_owned();
     let message_id = format!("msg_{}", crate::editors::uuid().unwrap());
     let start = json!({"type":"message_start","message":{"id":message_id,"type":"message","role":"assistant","model":model,"content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}});

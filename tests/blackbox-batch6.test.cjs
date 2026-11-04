@@ -182,9 +182,17 @@ test('更新黑盒：下载中断和SHA不符保留完整安装与私有数据',
   const bad = path.join(f.root, 'bad.zip');
   write(bad, 'wrong bytes');
   f.response.archive = bad;
+  const staging = path.join(f.bridge, 'updates/staging');
+  const beforeBadStaging = fs.existsSync(staging)
+    ? fs.readdirSync(staging).filter((name) => name.startsWith('package-'))
+    : [];
   await api(f, 'installUpdate', {});
   await failed(f, /校验和不匹配/);
   assert.deepEqual(snapshot(f.target), before);
+  assert.deepEqual(
+    fs.existsSync(staging) ? fs.readdirSync(staging).filter((name) => name.startsWith('package-')) : [],
+    beforeBadStaging,
+  );
   assert.equal(fs.readFileSync(privateSentinel(f), 'utf8'), 'preserve private');
   assert.equal(
     fs.readFileSync(path.join(f.bridge, 'accounts/keep.txt'), 'utf8'),

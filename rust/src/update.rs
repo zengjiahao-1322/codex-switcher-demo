@@ -804,9 +804,16 @@ async fn download_package(
     fs::create_dir(&staging)?;
     let name = asset_name();
     let archive = staging.join(&name);
-    let fetch = request(app, &name, Some(&archive)).await?;
+    let fetch = match request(app, &name, Some(&archive)).await {
+        Ok(fetch) => fetch,
+        Err(error) => {
+            remove_tree(&staging)?;
+            return Err(error);
+        }
+    };
     let hash = format!("{:x}", Sha256::digest(fs::read(&archive)?));
     if metadata["assets"][&name] != hash {
+        remove_tree(&staging)?;
         return Err(io::Error::other("更新校验和不匹配，未修改安装文件。").into());
     }
     diagnostics::log(

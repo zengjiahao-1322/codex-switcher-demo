@@ -123,6 +123,13 @@ test('Anthropic 转换拒绝 Fast，不丢弃参数后假装加速成功', async
   assert.equal(r.status, 400);
   assert.equal(f.captured(), undefined);
 });
+test('Anthropic Messages 缺 model 在转发前返回 400 且不泄露上游正文', async (t) => {
+  const f = await fixture(t, 'anthropic_messages');
+  const r = await f.request({ max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] });
+  assert.equal(r.status, 400);
+  assert.equal((await r.text()).includes('上游'), false);
+  assert.equal(f.captured(), undefined);
+});
 test('local mock chat function history and complete tool output', async (t) => {
   const f = await fixture(t, 'chat_completions', {
     choices: [
