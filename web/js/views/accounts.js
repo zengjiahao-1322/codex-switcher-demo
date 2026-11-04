@@ -5,6 +5,7 @@ import { showTab } from '../tabs.js';
 import { busy, rowButton, status, tag } from '../ui.js';
 import {
   chooseSource,
+  confirmSwitchRestart,
   officialTarget,
   renderSelect,
   renderSources,
@@ -82,16 +83,7 @@ export function renderQuotaNotice() {
     const button = rowButton(
       '换到「' + alternative.label + '」',
       async () => {
-        if (
-          !confirm(
-            '切换到「' +
-              alternative.label +
-              '」？Codex 桌面端会重启' +
-              ($('reload-editors').checked ? '，已接入的编辑器窗口会重载' : '') +
-              '，正在运行的任务会中断。',
-          )
-        )
-          return;
+        if (!(await confirmSwitchRestart('切换到「' + alternative.label + '」？'))) return;
         chooseSource('account:' + alternative.id);
         status('正在准备应用账号…');
         await startSwitch('accountSwitch', {

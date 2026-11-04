@@ -21,6 +21,21 @@ function backend({
   fs.mkdirSync(path.join(root, 'codex'));
   fs.mkdirSync(path.join(root, 'bridge'));
   fs.writeFileSync(path.join(root, 'codex', 'config.toml'), 'model="gpt-5"\n');
+  fs.writeFileSync(
+    path.join(root, 'bridge', 'providers.json'),
+    JSON.stringify({
+      providers: [
+        {
+          id: 'api-1',
+          name: '测试 API',
+          baseUrl: 'https://api.example.com/v1',
+          apiMode: 'chat_completions',
+          model: 'model-a',
+          models: ['model-a'],
+        },
+      ],
+    }),
+  );
   const service = createService({
     codexHome: path.join(root, 'codex'),
     bridgeHome: path.join(root, 'bridge'),
@@ -104,6 +119,95 @@ test('切换直接发出，不询问旧对话去向', async () => {
   );
   assert.equal(page.calls('setThreadFollow').length, 0);
   assert.equal(page.byId('status').textContent.startsWith('已开始切换'), true);
+});
+
+test('共用桌面端时切换先确认，取消不发请求；没有桌面端时不询问', async () => {
+  let asked = 0;
+  const prompts = [];
+  const page = await runPage({
+    respond: backend({
+      clients: [{ kind: 'desktop', confirmed: true, shared: true }],
+      desktopSwitch: () => ({ body: { message: '不应切换' } }),
+    }),
+    confirm: (text) => {
+      asked++;
+      prompts.push(text);
+      return false;
+    },
+  });
+  page.byId('provider').value = 'api-1';
+  page.byId('model').value = 'model-1';
+  await page.byId('switch').onclick();
+  assert.equal(asked, 1);
+  assert.equal(
+    prompts[0],
+    '切换到「测试 API」？Codex 桌面端会重启，已接入的编辑器窗口会重载，正在运行的任务会中断。',
+  );
+  assert.equal(page.calls('desktopSwitch').length, 0);
+
+  const noDesktop = await runPage({
+    respond: backend({ desktopSwitch: () => ({ body: { message: '已切换' } }) }),
+    confirm: (text) => {
+      asked++;
+      prompts.push(text);
+      return false;
+    },
+  });
+  noDesktop.byId('provider').value = 'api-1';
+  noDesktop.byId('model').value = 'model-1';
+  await noDesktop.byId('switch').onclick();
+  assert.equal(asked, 1);
+  assert.equal(noDesktop.calls('desktopSwitch').length, 1);
+});
+
+test('账号额度一键换号沿用桌面端确认，取消不发请求', async () => {
+  const now = new Date().toISOString();
+  let asked = 0;
+  let prompt = '';
+  const page = await runPage({
+    respond: backend({
+      clients: [{ kind: 'desktop', confirmed: true, shared: true }],
+      accounts: [
+        {
+          id: 'current',
+          label: '当前',
+          current: true,
+          quota: {
+            status: 'ok',
+            checkedAt: now,
+            buckets: [{ id: 'codex', windows: [{ minutes: 300, remainingPercent: 10 }] }],
+          },
+        },
+        {
+          id: 'alternative',
+          label: '备用',
+          current: false,
+          quota: {
+            status: 'ok',
+            checkedAt: now,
+            buckets: [{ id: 'codex', windows: [{ minutes: 300, remainingPercent: 80 }] }],
+          },
+        },
+      ],
+      desktopSwitch: () => ({ body: { message: '不应切换' } }),
+    }),
+    confirm: (text) => {
+      asked++;
+      prompt = text;
+      return false;
+    },
+  });
+  const button = page.created
+    .filter((entry) => entry.tag === 'button' && entry.node.textContent === '换到「备用」')
+    .at(-1);
+  assert.ok(button);
+  await button.node.onclick();
+  assert.equal(asked, 1);
+  assert.equal(
+    prompt,
+    '切换到「备用」？Codex 桌面端会重启，已接入的编辑器窗口会重载，正在运行的任务会中断。',
+  );
+  assert.equal(page.calls('accountSwitch').length, 0);
 });
 
 test('#4 旧对话部分未同步时提供继续同步', async () => {

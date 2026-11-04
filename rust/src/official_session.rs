@@ -59,7 +59,13 @@ impl Failure {
             } else if raw.contains("active writer") {
                 "旧对话仍被客户端占用，请关闭该客户端后继续同步。".into()
             } else {
-                format!("官方服务请求失败（{}）。", code)
+                let summary =
+                    crate::diagnostics::redact(&json!(error["message"].as_str().unwrap_or("")))
+                        .as_str()
+                        .unwrap_or("")
+                        .replace(['\r', '\n'], " ");
+                let summary = summary.chars().take(200).collect::<String>();
+                format!("官方服务请求失败（{}）：{}", code, summary)
             },
             kind,
             code,
@@ -280,5 +286,32 @@ mod tests {
         }
         let other = Failure::rpc(&json!({"code":-32600,"message":"Invalid request"}));
         assert_eq!(other.kind, "service_error");
+        assert_eq!(other.message, "官方服务请求失败（-32600）：Invalid request");
+    }
+
+    #[test]
+    fn preserves_redacted_rpc_summary_and_existing_messages() {
+        let failure = Failure::rpc(&json!({
+            "code": -32600,
+            "message": "bad sk-test-token Bearer secret alice@example.com"
+        }));
+        assert_eq!(failure.kind, "service_error");
+        assert!(!failure.message.contains("sk-test-token"));
+        assert!(!failure.message.contains("Bearer secret"));
+        assert!(!failure.message.contains("alice@example.com"));
+        assert!(failure.message.contains("[已隐藏]"));
+
+        let long = "x".repeat(240);
+        let failure = Failure::rpc(&json!({"code":-32600,"message":long}));
+        assert_eq!(
+            failure.message,
+            format!("官方服务请求失败（-32600）：{}", "x".repeat(200))
+        );
+
+        let active = Failure::rpc(&json!({"code":-32600,"message":"active writer"}));
+        assert_eq!(
+            active.message,
+            "旧对话仍被客户端占用，请关闭该客户端后继续同步。"
+        );
     }
 }

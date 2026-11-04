@@ -29,6 +29,21 @@ export const selectedProvider = () =>
   state?.providers.find((p) => p.id === (officialTarget() ? 'official' : $('provider').value));
 export const switchPending = () =>
   ['queued', 'preparing', 'switching', 'reopening'].includes(accountData?.switchJob?.status);
+export async function confirmSwitchRestart(prefix) {
+  const clients = await api('clients', {});
+  const desktops = clients.clients?.filter((client) => client.kind === 'desktop') || [];
+  const restartsDesktop =
+    desktops.length > 0 &&
+    desktops.every((client) => client.confirmed === true) &&
+    desktops.some((client) => client.shared === true);
+  if (!restartsDesktop) return true;
+  return confirm(
+    prefix +
+      'Codex 桌面端会重启' +
+      ($('reload-editors').checked ? '，已接入的编辑器窗口会重载' : '') +
+      '，正在运行的任务会中断。',
+  );
+}
 export function updateSwitchAction() {
   const p = selectedProvider(),
     a = selectedAccount(),
@@ -352,9 +367,12 @@ $('switch').onclick = () =>
         $('account-add').click();
         return;
       }
+      if (!(await confirmSwitchRestart('切换到「' + a.label + '」？'))) return;
       status('正在准备应用账号…');
       await startSwitch('accountSwitch', { id: a.id, reloadEditors });
     } else {
+      const provider = selectedProvider();
+      if (!(await confirmSwitchRestart('切换到「' + provider.name + '」？'))) return;
       status('正在准备应用 API…');
       await startSwitch('desktopSwitch', {
         id: $('provider').value,
