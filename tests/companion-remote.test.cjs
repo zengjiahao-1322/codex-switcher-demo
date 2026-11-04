@@ -27,6 +27,8 @@ async function runCompanion({
   authText,
   agentVersion,
   agentProtocol,
+  backendVersion = require('../vscode-companion/package.json').version,
+  runtimeFailures = 0,
   statusNever = false,
   restartChangesStatus = false,
   // routes：切换器普通接口的假回复；ui：快捷列表和确认框的选择；act：心跳就绪后执行的操作。
@@ -58,6 +60,7 @@ async function runCompanion({
   const requests = [],
     executed = [],
     installed = [];
+  let runtimeRequests = 0;
   let restartedAt = null;
   const state = new Map(pendingReload ? [['codexSwitcher.pendingReload', pendingReload]] : []);
   const fake = http.createServer((req, res) => {
@@ -66,6 +69,20 @@ async function runCompanion({
     req.on('end', () => {
       const body = JSON.parse(text || '{}'),
         route = req.url.replace(/^\/api\//, '');
+      if (route === 'runtime') {
+        runtimeRequests++;
+        res.writeHead(runtimeRequests <= runtimeFailures ? 500 : 200, {
+          'Content-Type': 'application/json',
+        });
+        res.end(
+          JSON.stringify(
+            runtimeRequests <= runtimeFailures
+              ? { error: 'temporary fixture failure' }
+              : { version: backendVersion },
+          ),
+        );
+        return;
+      }
       if (routes[route]) {
         calls.push({ route, method: req.method, body });
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -184,6 +201,27 @@ async function runCompanion({
   return { requests, executed, installed, state, home, statusItem, calls, shown };
 }
 const acked = (id) => (requests) => requests.some((r) => r.ack === id);
+
+test('后台版本一致时不提示，不一致时只提示一次且不泄露 token', async () => {
+  const same = await runCompanion({ remoteName: null, until: (r) => r.length >= 3 });
+  assert.equal(same.shown.filter((row) => row.warning?.includes('版本不一致')).length, 0);
+  const different = await runCompanion({
+    remoteName: null,
+    backendVersion: 'fixture-session-token',
+    until: (r) => r.length >= 3,
+  });
+  const notices = different.shown.filter((row) => row.warning?.includes('版本不一致'));
+  assert.equal(notices.length, 1);
+  assert.equal(JSON.stringify(notices).includes('fixture-session-token'), false);
+  assert.equal(JSON.stringify(notices).includes('companion-token'), false);
+  const recovered = await runCompanion({
+    remoteName: null,
+    backendVersion: '0.0.1',
+    runtimeFailures: 1,
+    until: (r) => r.length >= 5,
+  });
+  assert.equal(recovered.shown.filter((row) => row.warning?.includes('版本不一致')).length, 1);
+});
 
 test('SSH 窗口心跳附带远端代理状态（约定字段、不含密钥）和 authority', async () => {
   const { requests } = await runCompanion({ until: (r) => r[0]?.remoteAgent && r.length >= 2 });

@@ -29,7 +29,7 @@ function post(connection, route, data, signal, method = 'POST', timeout = 15000)
     );
     q.setTimeout(timeout, () => q.destroy(Error('switcher unavailable')));
     q.on('error', reject);
-    q.end(JSON.stringify(data));
+    q.end(method === 'GET' ? undefined : JSON.stringify(data));
   });
 }
 function activate(context) {
@@ -43,7 +43,8 @@ function activate(context) {
     remoteAgentState = 'checking',
     remoteAgentFlight = null,
     remoteAgentGeneration = 0,
-    remoteRestart = null;
+    remoteRestart = null,
+    versionConnection = null;
   const controller = new AbortController();
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 20);
   status.text = '$(plug) Codex Switcher';
@@ -375,6 +376,19 @@ function activate(context) {
           30000,
         );
       if (stopped) return;
+      if (versionConnection !== c.url) {
+        versionConnection = c.url;
+        post(c, 'runtime', null, controller.signal, 'GET')
+          .then((runtime) => {
+            if (runtime.version && runtime.version !== data.companionVersion)
+              vscode.window.showWarningMessage(
+                '切换器后台与伴随扩展版本不一致，请更新到相同版本。',
+              );
+          })
+          .catch(() => {
+            versionConnection = null;
+          });
+      }
       longPoll = r.longPoll === true;
       // 以后台核对后的结论为准：本机窗口要新后端已关联，远程窗口要同服务器同目录的远端代理版本一致。
       if (completedReload && r.reloadConfirmed === true) {
