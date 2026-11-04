@@ -866,6 +866,12 @@ test('MCP登记黑盒：仅迁移旧node登记，集成开关保留其他配置�
     '# user settings\nmodel = "official"\n\n[mcp_servers.keep]\ncommand = "keep-original"\n\n[mcp_servers.api_switcher]\ncommand = "C:/old/node.exe"\nargs = ["C:/old/mcp-server.cjs"]\nstartup_timeout_sec = 45\n';
   const f = await startBackend(t, {
     setup({ root, home, environment }) {
+      const userRoot = path.join(root, 'user');
+      for (const name of ['HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA']) {
+        const value = path.join(userRoot, name.toLowerCase());
+        fs.mkdirSync(value, { recursive: true });
+        environment[name] = value;
+      }
       const native = path.join(
         root,
         process.platform === 'win32' ? 'official-native.exe' : 'official-native',

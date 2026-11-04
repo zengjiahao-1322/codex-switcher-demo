@@ -93,6 +93,12 @@ test('官方原生额度HTTP：隔离真实Codex RPC保持慢快账号独立及l
   const f = await officialFixture(t, {
     live: nativeAuth('slow'),
     setup({ root, environment, scenario }) {
+      const userRoot = path.join(root, 'user');
+      for (const name of ['HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA']) {
+        const value = path.join(userRoot, name.toLowerCase());
+        fs.mkdirSync(value, { recursive: true });
+        environment[name] = value;
+      }
       const exe = path.join(
         root,
         process.platform === 'win32' ? 'official-codex.exe' : 'official-codex',
