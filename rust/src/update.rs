@@ -255,6 +255,8 @@ fn curl_error(code: Option<i32>, stderr: &[u8], timings: Option<Value>) -> Trans
         .unwrap()
         .find_iter(&stderr)
         .map(|m| m.as_str())
+        // Curl may echo a malformed proxy URL including its userinfo.
+        .filter(|s| !s.contains('@'))
         .filter(|s| {
             regex::Regex::new(
                 r"(?i)curl:|schannel|CRYPT_|SSL|TLS|certificate|connect|resolve|timed out",
@@ -513,6 +515,18 @@ mod mac_refusal_tests {
 #[cfg(test)]
 mod retry_tests {
     use super::*;
+
+    #[test]
+    fn curl_detail_omits_proxy_userinfo() {
+        let error = curl_error(
+            Some(5),
+            b"curl: (5) Unsupported proxy syntax in 'http://fixture-user:fixture-secret@[invalid': Bad IPv6 address",
+            None,
+        );
+        let detail = error.curl.unwrap().to_string();
+        assert!(!detail.contains("fixture-user"));
+        assert!(!detail.contains("fixture-secret"));
+    }
 
     #[test]
     fn direct_retry_requires_manual_proxy_and_non_http_curl_error() {

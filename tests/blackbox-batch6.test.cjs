@@ -1006,3 +1006,23 @@ test('更新黑盒：手动代理连接失败时直连回退并记录公开URL',
   assert.ok(rows.some((row) => row.status === 'fallback' && row.fallback.direct.status === 'success'));
   assert.ok(rows.every((row) => /^http:\/\/127\.0\.0\.1:\d+\/release\.json$/.test(row.url)));
 });
+
+test('更新黑盒：格式错误的代理地址含凭据时日志和返回值不泄露凭据', async (t) => {
+  const username = 'fixture-proxy-user', password = 'fixture-proxy-secret';
+  const f = await packageFixture(t, {
+    setup({ root, environment }) {
+      for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'])
+        environment[key] = `http://${username}:${password}@[invalid`;
+      Object.assign(environment, { HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root, NO_PROXY: '', no_proxy: '' });
+    },
+  });
+  f.response.metadata = metadata(f);
+  const result = await api(f, 'checkUpdate', {});
+  assert.equal(result.status, 'available');
+  const log = fs.readFileSync(path.join(f.bridge, 'logs/switcher.log'), 'utf8');
+  assert.ok(log.includes('"status":"fallback"'));
+  for (const data of [JSON.stringify(result), log]) {
+    assert.equal(data.includes(username), false);
+    assert.equal(data.includes(password), false);
+  }
+});

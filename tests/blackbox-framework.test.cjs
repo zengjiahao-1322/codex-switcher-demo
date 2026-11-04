@@ -13,6 +13,10 @@ test('双后台黑盒：没有runtime接口的旧后台通过accounts鉴权与PI
       const entry = path.join(root, '旧版本 后台', 'main.cjs');
       fs.mkdirSync(path.dirname(entry));
       fs.writeFileSync(
+        path.join(path.dirname(entry), 'package.json'),
+        JSON.stringify({ name: 'codex-api-switcher', version: '0.1.5' }),
+      );
+      fs.writeFileSync(
         entry,
         `const http=require('node:http');http.createServer((req,res)=>{
       if(req.url==='/'){res.end('legacy fixture');return;}
