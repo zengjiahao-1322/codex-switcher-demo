@@ -113,12 +113,13 @@ test('#4 旧对话部分未同步时提供继续同步', async () => {
     elapsedMs: 1000,
     configurationApplied: true,
     threadFollow: 'matching',
-    threads: { updated: 3, skipped: 1, failed: 2 },
+    threads: { updated: 3, skipped: 1, kept: 1, failed: 2 },
     steps: [{ id: 'threads', label: '同步并核对旧对话', status: 'error', durationMs: 500 }],
   };
   const page = await runPage({ respond: backend({ switchJob: failedJob }) });
   assert.equal(page.byId('threads-resume').hidden, false);
   assert.equal(page.byId('threads-resume').textContent, '继续同步剩余 2 条旧对话');
+  assert.match(page.byId('switch-windows').textContent, /1 条属于其他来源，已保留在原来源/);
   await page.byId('threads-resume').onclick();
   assert.equal(page.calls('resumeThreadSync').length, 1);
 });

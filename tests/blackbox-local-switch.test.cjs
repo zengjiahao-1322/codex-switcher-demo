@@ -5,6 +5,7 @@ const assert = require('node:assert/strict'),
   path = require('node:path');
 const toml = require('smol-toml');
 const { api, isolatedEditor, read } = require('./config-blackbox-helpers.cjs');
+const { isRust } = require('./backend.cjs');
 const {
   auth,
   accountId,
@@ -383,6 +384,44 @@ test('旧对话失败黑盒：失败保持未完成并恢复编辑器，继续�
   assert.equal(result.threads.updated, 1);
   assert.equal(read(f), config);
   assert.equal(read(f, 'auth.json'), applied);
+});
+test('旧对话供应商绑定拒绝时保留原来源并完成切换', { skip: !isRust }, async (t) => {
+  const f = await fixture(t, {
+    scenario: {
+      methods: {
+        initialize: { result: {} },
+        'model/list': { result: { data: [{ model: 'blackbox-fixture', isDefault: true }] } },
+        'thread/resume': {
+          error: {
+            code: -32600,
+            message: 'This chat uses other, but your current provider is openai. Switch to other to continue.',
+          },
+        },
+      },
+    },
+  });
+  const { DatabaseSync } = require('node:sqlite');
+  const rollout = path.join(f.root, 'thread-bound.jsonl');
+  fs.writeFileSync(rollout, '{}\n');
+  const db = new DatabaseSync(path.join(f.home, 'state_5.sqlite'));
+  db.exec(
+    'CREATE TABLE threads (id TEXT, model_provider TEXT, model TEXT, rollout_path TEXT, archived INTEGER, source TEXT)',
+  );
+  db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?)').run(
+    'thread-bound',
+    'other',
+    'old-model',
+    rollout,
+    0,
+    '{}',
+  );
+  db.close();
+  await api(f, 'accountSwitch', { id: accountId('target'), reloadEditors: false });
+  const result = await finish(f);
+  assert.equal(result.status, 'done', JSON.stringify(result));
+  assert.equal(result.threads.kept, 1);
+  assert.equal(result.threads.failed, 0);
+  assert.equal(result.threads.updated, 0);
 });
 
 test('并行准备失败黑盒：缺重载通道时等另一校验收尾，保留锁和客户端且有进程链日志', async (t) => {

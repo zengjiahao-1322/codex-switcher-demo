@@ -104,6 +104,10 @@ async fn initialize(session: &Session) -> io::Result<()> {
 fn rpc_error(error: crate::official_session::Failure) -> io::Error {
     io::Error::other(error.message)
 }
+enum ApplyOutcome {
+    Applied,
+    Kept,
+}
 fn progress(app: &App, completed: usize, total: usize, phase: &str) -> io::Result<()> {
     let file = app.bridge.join("account-switch.json");
     let mut job = crate::accounts::read(&file, Value::Null)?;
@@ -124,7 +128,7 @@ fn progress(app: &App, completed: usize, total: usize, phase: &str) -> io::Resul
     }
     Ok(())
 }
-async fn apply_row(session: &Session, provider: &str, row: &mut Value) -> io::Result<()> {
+async fn apply_row(session: &Session, provider: &str, row: &mut Value) -> io::Result<ApplyOutcome> {
     let scan_started = Instant::now();
     let speed = service_tier(Path::new(text(&row["rollout_path"]))).map_err(|error| {
         io::Error::other(format!("旧对话 {} 读取失败：{error}", text(&row["id"])))
@@ -134,10 +138,13 @@ async fn apply_row(session: &Session, provider: &str, row: &mut Value) -> io::Re
     if let Some(speed) = &speed {
         params["serviceTier"] = speed["tier"].as_str().map_or(json!(""), |v| json!(v));
     }
-    let result = session
-        .rpc("thread/resume", params)
-        .await
-        .map_err(rpc_error)?;
+    let result = match session.rpc("thread/resume", params).await {
+        Ok(result) => result,
+        Err(error) if error.kind == "provider_bound" => {
+            return Ok(ApplyOutcome::Kept);
+        }
+        Err(error) => return Err(rpc_error(error)),
+    };
     if result["modelProvider"] != provider || result["model"] != row["nextModel"] {
         return Err(io::Error::other(format!(
             "旧对话 {} 未采用目标来源或模型。",
@@ -156,7 +163,7 @@ async fn apply_row(session: &Session, provider: &str, row: &mut Value) -> io::Re
         .rpc("thread/unsubscribe", json!({"threadId":row["id"]}))
         .await
         .map_err(rpc_error)?;
-    Ok(())
+    Ok(ApplyOutcome::Applied)
 }
 async fn verify_row(session: &Session, provider: &str, row: &Value) -> io::Result<()> {
     let result = session
@@ -184,7 +191,7 @@ pub async fn synchronize(
     mode: &str,
     previous: Option<&str>,
 ) -> Result<Value, (io::Error, Value)> {
-    let mut counts = json!({"updated":0,"skipped":0,"failed":0});
+    let mut counts = json!({"updated":0,"skipped":0,"kept":0,"failed":0});
     if mode == "off" {
         return Ok(counts);
     }
@@ -319,7 +326,10 @@ pub async fn synchronize(
                 applied.push(row);
             }
             match result {
-                Ok(()) => {
+                Ok(outcome) => {
+                    if matches!(outcome, ApplyOutcome::Kept) {
+                        counts["kept"] = json!(counts["kept"].as_u64().unwrap_or(0) + 1);
+                    }
                     completed += 1;
                     if let Err(error) = progress(app, completed, total, "sync") {
                         failed.store(true, Ordering::Relaxed);
@@ -375,8 +385,9 @@ pub async fn synchronize(
     match result {
         Ok(()) => Ok(counts),
         Err(error) => {
-            counts["failed"] =
-                json!(total.saturating_sub(counts["updated"].as_u64().unwrap_or(0) as usize));
+            counts["failed"] = json!(total
+                .saturating_sub(counts["updated"].as_u64().unwrap_or(0) as usize)
+                .saturating_sub(counts["kept"].as_u64().unwrap_or(0) as usize));
             Err((error, counts))
         }
     }

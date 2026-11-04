@@ -70,7 +70,13 @@ test(
     const id = accountId('target');
     const f = await startBackend(t, {
       shortRoot: true,
-      setup({ home, bridge, fake }) {
+      setup({ root, home, bridge, fake, environment }) {
+        const userRoot = path.join(root, 'user');
+        for (const name of ['HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA']) {
+          const value = path.join(userRoot, name.toLowerCase());
+          fs.mkdirSync(value, { recursive: true });
+          environment[name] = value;
+        }
         fs.copyFileSync(process.env.CODEX_EXE, fake);
         if (process.platform !== 'win32') fs.chmodSync(fake, 0o755);
         fs.mkdirSync(path.join(bridge, 'accounts', id), { recursive: true });
@@ -81,7 +87,7 @@ test(
         fs.writeFileSync(path.join(bridge, 'accounts', id, 'auth.json'), JSON.stringify(target));
         fs.writeFileSync(
           path.join(home, 'config.toml'),
-          'model="gpt-6.1-sol"\n[features]\nplugins=false\n',
+          'model="gpt-6.1-sol"\nmodel_provider="openai"\n[model_providers.other]\nname="Other fixture"\nbase_url="http://127.0.0.1:9/v1"\nwire_api="responses"\n[features]\nplugins=false\n',
         );
       },
     });
@@ -136,9 +142,42 @@ test(
         .filter((r) => r.type === 'response_item');
     const before = threads.map(history);
     const db = new DatabaseSync(path.join(f.home, 'state_5.sqlite'));
-    db.prepare('UPDATE threads SET model_provider=? WHERE id=?').run('other', threads[7].id);
     db.prepare('UPDATE threads SET archived=1 WHERE id=?').run(threads[6].id);
+    db.prepare('UPDATE threads SET archived=1 WHERE id=?').run(threads[7].id);
     db.close();
+    const seedConfig = path.join(f.home, 'config.toml');
+    fs.writeFileSync(
+      seedConfig,
+      fs.readFileSync(seedConfig, 'utf8').replace('model_provider="openai"', 'model_provider="other"'),
+    );
+    client = await session(f);
+    try {
+      const { thread } = await client.call('thread/start', {
+        model: 'gpt-6.1-sol',
+        modelProvider: 'other',
+        cwd: f.root,
+        historyMode: 'legacy',
+      });
+      await client.call('thread/inject_items', {
+        threadId: thread.id,
+        items: [
+          { type: 'message', role: 'user', content: [{ type: 'input_text', text: '保留历史 7' }] },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: '工具结果保留。' }],
+          },
+        ],
+      });
+      await client.call('thread/unsubscribe', { threadId: thread.id });
+      threads[7] = thread;
+      before[7] = history(thread);
+      const cold = (await client.call('thread/read', { threadId: thread.id, includeTurns: false }))
+        .thread;
+      assert.equal(cold.modelProvider, 'other');
+    } finally {
+      await client.close();
+    }
     await isolatedEditor(t, f);
     const selected = 'model="gpt-6.1-sol"\nmodel_provider="openai"\n';
     fs.writeFileSync(path.join(f.home, 'config.toml'), selected);
@@ -150,14 +189,15 @@ test(
     );
     assert.equal(job.status, 'done', JSON.stringify(job));
     assert.equal(job.threads.failed, 0);
-    assert.equal(job.threads.updated, 1);
+    assert.equal(job.threads.updated, 0);
+    assert.equal(job.threads.kept, 1);
     client = await session(f);
     try {
       for (const [i, thread] of threads.entries()) {
         const cold = (
           await client.call('thread/read', { threadId: thread.id, includeTurns: false })
         ).thread;
-        assert.equal(cold.modelProvider, 'openai');
+        assert.equal(cold.modelProvider, i === 7 ? 'other' : 'openai');
         assert.equal(cold.historyMode, thread.historyMode);
         assert.deepEqual(history(thread), before[i]);
       }
@@ -174,16 +214,17 @@ test(
       models: ['gpt-6.1-sol'],
     });
     const switched = await api(f, 'switch', { id: custom.id, model: 'gpt-6.1-sol' });
-    assert.equal(switched.threads.updated, 7);
+    assert.equal(switched.threads.updated, 0);
+    assert.equal(switched.threads.kept, 7);
     client = await session(f);
     try {
       for (const [i, thread] of threads.entries()) {
         const cold = (
           await client.call('thread/read', { threadId: thread.id, includeTurns: false })
         ).thread;
-        assert.equal(cold.modelProvider, i === 6 ? 'openai' : 'hermes_bridge');
+        assert.equal(cold.modelProvider, i === 7 ? 'other' : 'openai');
         assert.deepEqual(history(thread), before[i]);
-        if (i !== 6) {
+        if (i < 6) {
           const settings = fs
             .readFileSync(thread.path, 'utf8')
             .split('\n')
@@ -201,14 +242,15 @@ test(
       await client.close();
     }
     const restored = await api(f, 'restore', {});
-    assert.equal(restored.threads.updated, 7);
+    assert.equal(restored.threads.updated, 0);
+    assert.equal(restored.threads.kept, 1);
     client = await session(f);
     try {
       for (const [i, thread] of threads.entries()) {
         assert.equal(
           (await client.call('thread/read', { threadId: thread.id, includeTurns: false })).thread
             .modelProvider,
-          'openai',
+          i === 7 ? 'other' : 'openai',
         );
         assert.deepEqual(history(thread), before[i]);
       }

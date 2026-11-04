@@ -51,6 +51,7 @@ export function renderSwitchProgress() {
             ' 条，跳过 ' +
             threads.skipped +
             ' 条' +
+            (threads.kept ? '，' + threads.kept + ' 条属于其他来源，已保留在原来源' : '') +
             (threads.failed ? '，' + threads.failed + ' 条未完成' : '')
           : '');
     $('switch-windows').append(line);

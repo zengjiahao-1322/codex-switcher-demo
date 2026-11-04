@@ -33,13 +33,16 @@ impl Failure {
     }
     fn rpc(error: &Value) -> Self {
         let raw = error["message"].as_str().unwrap_or("").to_lowercase();
+        let provider_bound = raw.starts_with("this chat") && raw.contains("provider");
         let network =
             regex::Regex::new(r"network|connect|dns|timed? ?out|proxy|transport|send.*request")
                 .unwrap()
                 .is_match(&raw);
         let auth = regex::Regex::new(r"401|unauthoriz|invalid.grant|token.{0,80}(?:expired|invalid|revoked|reused|already been used)|not authenticated|login required").unwrap().is_match(&raw);
         let code = error["code"].clone();
-        let kind = if code == 401 {
+        let kind = if provider_bound {
+            "provider_bound"
+        } else if code == 401 {
             "auth_invalid"
         } else if code == -32601 {
             "runtime_error"
@@ -51,7 +54,9 @@ impl Failure {
             "service_error"
         };
         Self {
-            message: if raw.contains("active writer") {
+            message: if provider_bound {
+                "旧对话属于其他来源，已保留在原来源。".into()
+            } else if raw.contains("active writer") {
                 "旧对话仍被客户端占用，请关闭该客户端后继续同步。".into()
             } else {
                 format!("官方服务请求失败（{}）。", code)
@@ -61,6 +66,7 @@ impl Failure {
         }
     }
 }
+
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, Failure>>>>>;
 pub struct Session {
     child: AsyncMutex<Child>,
@@ -251,5 +257,28 @@ impl Session {
         if let Some(reader) = self.refresh_reader.lock().await.take() {
             let _ = tokio::time::timeout(Duration::from_secs(1), reader).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn classifies_provider_bound_messages_only() {
+        for message in [
+            "This chat uses openai, but your current provider is other. Switch to openai to continue.",
+            "This chat uses model provider openai, which is no longer configured.",
+            "This chat's model provider settings no longer match your organization's requirements.",
+            "This chat uses model provider openai, but your organization requires other.",
+        ] {
+            let failure = Failure::rpc(&json!({"code":-32600,"message":message}));
+            assert_eq!(failure.kind, "provider_bound");
+            assert_eq!(failure.code, -32600);
+            assert_eq!(failure.message, "旧对话属于其他来源，已保留在原来源。");
+        }
+        let other = Failure::rpc(&json!({"code":-32600,"message":"Invalid request"}));
+        assert_eq!(other.kind, "service_error");
     }
 }
