@@ -66,6 +66,16 @@ test(
       process.env.CODEX_EXE && fs.existsSync(process.env.CODEX_EXE),
       'Use an isolated copy of official Codex',
     );
+    const versionOutput = require('node:child_process')
+        .execFileSync(process.env.CODEX_EXE, ['--version'], { encoding: 'utf8' })
+        .trim(),
+      version = versionOutput.match(/\b(\d+)\.(\d+)/),
+      providerBoundSemantics = version && Number(version[1]) * 1000 + Number(version[2]) >= 166,
+      expected = {
+        first: providerBoundSemantics ? { updated: 0, kept: 1 } : { updated: 1, kept: 0 },
+        custom: providerBoundSemantics ? { updated: 0, kept: 7 } : { updated: 7, kept: 0 },
+        restore: providerBoundSemantics ? { updated: 0, kept: 1 } : { updated: 7, kept: 0 },
+      };
     const target = auth('target');
     const id = accountId('target');
     const f = await startBackend(t, {
@@ -189,15 +199,18 @@ test(
     );
     assert.equal(job.status, 'done', JSON.stringify(job));
     assert.equal(job.threads.failed, 0);
-    assert.equal(job.threads.updated, 0);
-    assert.equal(job.threads.kept, 1);
+    assert.equal(job.threads.updated, expected.first.updated);
+    assert.equal(job.threads.kept, expected.first.kept);
     client = await session(f);
     try {
       for (const [i, thread] of threads.entries()) {
         const cold = (
           await client.call('thread/read', { threadId: thread.id, includeTurns: false })
         ).thread;
-        assert.equal(cold.modelProvider, i === 7 ? 'other' : 'openai');
+        assert.equal(
+          cold.modelProvider,
+          providerBoundSemantics ? (i === 7 ? 'other' : 'openai') : 'openai',
+        );
         assert.equal(cold.historyMode, thread.historyMode);
         assert.deepEqual(history(thread), before[i]);
       }
@@ -214,15 +227,18 @@ test(
       models: ['gpt-6.1-sol'],
     });
     const switched = await api(f, 'switch', { id: custom.id, model: 'gpt-6.1-sol' });
-    assert.equal(switched.threads.updated, 0);
-    assert.equal(switched.threads.kept, 7);
+    assert.equal(switched.threads.updated, expected.custom.updated);
+    assert.equal(switched.threads.kept, expected.custom.kept);
     client = await session(f);
     try {
       for (const [i, thread] of threads.entries()) {
         const cold = (
           await client.call('thread/read', { threadId: thread.id, includeTurns: false })
         ).thread;
-        assert.equal(cold.modelProvider, i === 7 ? 'other' : 'openai');
+        assert.equal(
+          cold.modelProvider,
+          providerBoundSemantics ? (i === 7 ? 'other' : 'openai') : i === 6 ? 'openai' : 'hermes_bridge',
+        );
         assert.deepEqual(history(thread), before[i]);
         if (i < 6) {
           const settings = fs
@@ -242,15 +258,15 @@ test(
       await client.close();
     }
     const restored = await api(f, 'restore', {});
-    assert.equal(restored.threads.updated, 0);
-    assert.equal(restored.threads.kept, 1);
+    assert.equal(restored.threads.updated, expected.restore.updated);
+    assert.equal(restored.threads.kept, expected.restore.kept);
     client = await session(f);
     try {
       for (const [i, thread] of threads.entries()) {
         assert.equal(
           (await client.call('thread/read', { threadId: thread.id, includeTurns: false })).thread
             .modelProvider,
-          i === 7 ? 'other' : 'openai',
+            providerBoundSemantics ? (i === 7 ? 'other' : 'openai') : 'openai',
         );
         assert.deepEqual(history(thread), before[i]);
       }
