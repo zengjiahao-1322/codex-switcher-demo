@@ -3,22 +3,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const assert = require('node:assert/strict');
-const browserRoot = path.resolve('.build-cache/browser-check');
-const browserPaths = [
-  process.env.PLAYWRIGHT_BROWSERS_PATH,
-  path.join(browserRoot, 'ms-playwright'),
-  process.platform === 'win32'
-    ? path.join(process.env.LOCALAPPDATA || '', 'ms-playwright')
-    : path.join(os.homedir(), '.cache', 'ms-playwright'),
-  path.join(os.homedir(), '.cache', 'ms-playwright'),
-].filter(Boolean);
-process.env.PLAYWRIGHT_BROWSERS_PATH =
-  browserPaths.find((candidate) => fs.existsSync(candidate)) || browserPaths[0];
 let chromium;
 try {
   ({ chromium } = require('playwright'));
 } catch {
-  ({ chromium } = require(path.join(browserRoot, 'node_modules/playwright')));
+  ({ chromium } = require('../.build-cache/browser-check/node_modules/playwright'));
 }
 const { createServer, isRust } = require('../tests/backend.cjs');
 const { createService } = require('../src/server/service.cjs');

@@ -102,6 +102,8 @@ for (const file of fs
     );
     const output = (run.stdout || '') + (run.stderr || '');
     fs.writeFileSync(path.join(destination, file + '.tap'), output);
+    // CI keeps only the job log, so print a failing file's TAP to show which case failed.
+    if (run.status !== 0) process.stdout.write(output);
     row.exitCode = run.status;
     row.runnerError = run.error?.message || null;
     row.pass = Number(output.match(/^# pass (\d+)$/m)?.[1] || 0);
