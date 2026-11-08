@@ -271,6 +271,7 @@ h1 {
   padding: 26px 28px;
 }
 .status-card > #status,
+.status-card > #claude-status,
 .status-card > #switch-progress {
   grid-column: 1 / -1;
 }
@@ -281,11 +282,13 @@ h1 {
   background: var(--live);
   box-shadow: 0 0 0 4px var(--live-soft);
 }
-#summary {
+#summary,
+#claude-summary {
   font-size: 15px;
   color: var(--muted);
 }
-#summary b {
+#summary b,
+#claude-summary b {
   display: block;
   font-size: 26px;
   font-weight: 650;
@@ -294,7 +297,8 @@ h1 {
   color: var(--ink);
   overflow-wrap: anywhere;
 }
-#summary small {
+#summary small,
+#claude-summary small {
   display: block;
   font-size: 13.5px;
   margin-top: 4px;
@@ -343,6 +347,7 @@ h1 {
   line-height: 1.3;
 }
 #status,
+#claude-status,
 #provider-status {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -355,6 +360,7 @@ h1 {
   font-size: 13px;
 }
 #status:empty,
+#claude-status:empty,
 #account-status:empty {
   display: none;
 }
@@ -430,7 +436,8 @@ h1 {
   margin-bottom: 10px;
 }
 /* 列表本身滚动，账号再多右侧详情和切换按钮也始终可见。 */
-#source-list {
+#source-list,
+#claude-list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 2px;
@@ -1165,7 +1172,8 @@ footer {
   .chooser {
     grid-template-columns: 1fr;
   }
-  #source-list {
+  #source-list,
+  #claude-list {
     max-height: none;
   }
   .remote-chooser {
@@ -1201,20 +1209,92 @@ footer {
   }
 }
 
-/* Claude Code */
-body { overflow-x: hidden; }
-.clients { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; padding:5px; margin-bottom:14px; background:#e9e9e7; border-radius:14px; min-width:0; }
-.client-tab { min-width:0; padding:10px 14px; border-radius:10px; text-align:left; background:transparent; color:var(--muted); }
-.client-tab[aria-pressed="true"] { background:var(--surface); color:var(--ink); box-shadow:0 1px 2px rgba(24,24,27,.1); }
-.client-tab b,.client-tab span { display:block; }
-.client-tab span { min-width:0; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#claude-chooser { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
-#claude-list { display:grid; gap:4px; padding:6px; }
-#claude-list .source-card { display:flex; align-items:center; gap:10px; width:100%; padding:10px; border:0; text-align:left; background:transparent; border-radius:9px; }
-#claude-list .source-card[aria-checked="true"] { background:var(--sunken); box-shadow:inset 0 0 0 1px var(--ink); }
-#claude-list .source-card .name { font-weight:600; flex:1; }
-#claude-list .source-card small { flex:1; color:var(--muted); }
-#claude-panel { display:flex; flex-direction:column; gap:10px; padding:24px 26px; }
-#claude-panel input { min-height:38px; padding:0 10px; border:1px solid var(--field); border-radius:8px; }
-#claude-panel button { align-self:flex-start; padding:8px 14px; border-radius:8px; }
-@media (max-width: 860px) { #claude-chooser { grid-template-columns:1fr; } }
+/* 顶部客户端切换（Codex / Claude Code） */
+.clients {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+  padding: 5px;
+  background: #e9e9e7;
+  border-radius: 14px;
+}
+.client-tab {
+  height: auto;
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  text-align: left;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+.client-tab:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.5);
+}
+.client-tab[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(24, 24, 27, 0.1);
+}
+.client-tab b {
+  display: block;
+  font-size: 15px;
+  font-weight: 650;
+}
+.client-tab > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-top: 2px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.client-tab .live {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  box-shadow: none;
+}
+.live.off {
+  background: var(--faint);
+  box-shadow: 0 0 0 4px var(--sunken);
+}
+.client-tab .live.off {
+  box-shadow: none;
+}
+
+/* Claude Code 页 */
+.hint.info {
+  color: #1e3a8a;
+  background: var(--info-soft);
+}
+.hint.action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hint.action button {
+  flex: none;
+  height: 32px;
+}
+label small {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.group-label small {
+  font-size: 11px;
+  font-weight: 500;
+}
+.source-panel > .combo {
+  margin-bottom: 18px;
+}
+.source-panel .foot {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}

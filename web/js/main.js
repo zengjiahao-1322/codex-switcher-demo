@@ -12,15 +12,39 @@ import { refreshClients, renderDiagnosis } from './views/diagnostics.js';
 import { renderProviderList } from './views/providers.js';
 import { renderService } from './views/settings.js';
 import { renderSelect, switchPending } from './clients/codex/sources.js';
-import { renderClientSwitcher } from './components/client-switcher.js';
-import { renderClaude } from './clients/claude/list.js';
+import { summary as claudeSummary } from './clients/claude/model.js';
+import { renderClaude } from './clients/claude/view.js';
+import { renderClientSwitcher, selectedClient } from './components/client-switcher.js';
 import { renderEffect, renderSummary } from './views/status.js';
 import { checkUpdate, renderUpdate } from './views/update.js';
 
-// 页面入口：各分区的渲染和事件在 views/ 下，共享数据在 store.js，请求与会话在 api.js。
+// 顶部 Codex / Claude Code 切换，以及当前选中客户端的页面。
+function renderClients() {
+  const c = state.current,
+    account = accountData?.items.find((a) => a.current),
+    provider = state.providers.find((p) => p.inUse),
+    claude = claudeSummary(state.claudeCode);
+  renderClientSwitcher(
+    [
+      {
+        key: 'codex',
+        label: 'Codex',
+        live: true,
+        detail:
+          (c.official ? account?.label || 'ChatGPT 官方账号' : provider?.name || '自定义 API') +
+          (c.model ? ' · ' + c.model : ''),
+      },
+      { key: 'claude', label: 'Claude Code', live: claude.live, detail: claude.short },
+    ],
+    renderClients,
+  );
+  if (selectedClient() === 'claude') renderClaude(refresh);
+}
+
+// 页面入口：各分区的渲染和事件在 views/ 与 clients/ 下，共享数据在 store.js，请求与会话在 api.js。
 export async function refresh() {
   setState(await api('state'));
-  renderClientSwitcher(() => renderClaude(state.claudeCode || {}, state.providers, refresh));
+  renderClients();
   $('app-version').textContent = state.build
     ? '版本 ' + state.build.version + ' · 构建 ' + state.build.id
     : '后台构建未知，请重新启动新版切换器';

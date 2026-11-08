@@ -99,11 +99,29 @@
           </div>
         </section>
 
-        <section class="card" id="claude-status-card" hidden aria-label="Claude Code 状态">
-          <div class="status-main"><h2 class="eyebrow"><span class="live"></span>Claude Code</h2><div id="claude-summary">官方登录（未接管）</div></div>
+        <section
+          class="card status-card"
+          id="claude-status-card"
+          aria-labelledby="claude-status-heading"
+          hidden
+        >
+          <div class="status-main">
+            <h2 id="claude-status-heading" class="eyebrow">
+              <span class="live" id="claude-live"></span><span id="claude-eyebrow">Claude Code</span>
+            </h2>
+            <div id="claude-summary">正在读取 Claude Code 配置…</div>
+            <p class="editor-line" id="claude-line"></p>
+          </div>
+          <div id="claude-status" role="status"></div>
         </section>
-        <section class="chooser" id="claude-chooser" hidden aria-label="Claude Code 配置">
-          <div class="sources"><div class="sources-head"><h2 class="eyebrow">交给 Claude Code</h2></div><div id="claude-list" role="radiogroup"></div></div>
+
+        <section class="chooser" id="claude-chooser" aria-labelledby="claude-sources-heading" hidden>
+          <div class="sources">
+            <div class="sources-head">
+              <h2 id="claude-sources-heading" class="eyebrow">交给 Claude Code</h2>
+            </div>
+            <div id="claude-list" role="radiogroup" aria-labelledby="claude-sources-heading"></div>
+          </div>
           <div class="card source-panel" id="claude-panel" aria-live="polite"></div>
         </section>
 
@@ -344,7 +362,3 @@
     <script type="module" src="/js/main.js"></script>
   </body>
 </html>
-
-
-
-

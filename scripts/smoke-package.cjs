@@ -76,6 +76,15 @@ const freePort = () =>
       ).buildInfo(Number(process.env.GITHUB_RUN_NUMBER)),
       '发行包构建号与源码不一致',
     );
+    // 页面的每个文件都要进包：漏掉一个模块，整页都打不开，而 release-files.json 要手动登记新文件。
+    const webFiles = fs
+      .readdirSync('web', { recursive: true })
+      .filter((file) => fs.statSync(path.join('web', file)).isFile());
+    assert.deepEqual(
+      webFiles.filter((file) => !fs.existsSync(path.join(app, 'web', file))),
+      [],
+      '发行包缺少页面文件，请登记到 release-files.json',
+    );
     fs.mkdirSync(home);
     fs.mkdirSync(bridge);
     fs.writeFileSync(path.join(home, 'config.toml'), 'model="package-smoke"\n');

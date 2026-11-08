@@ -2,7 +2,8 @@ import { accessTag, tag } from '../ui.js';
 import { accountPlan, accountRemaining, accountWindow, ago, membership, membershipExpired, windowName } from '../views/accounts.js';
 const hue = (text) => [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 
-export function sourceCard(o, { checked, using = null, model, blocked = '', access = null, detail: description, onPick }) {
+// tags 用于不按 Codex 接入方式显示标签的页面（如 Claude Code），传入后替代默认的接入方式和缺少密钥标签。
+export function sourceCard(o, { checked, using = null, model, blocked = '', access = null, detail: description, tags = null, onPick }) {
   const card = document.createElement('button');
   card.type = 'button';
   card.className = 'source-card';
@@ -58,11 +59,17 @@ export function sourceCard(o, { checked, using = null, model, blocked = '', acce
       card.append(side);
     }
   } else if (p) {
-    head.append(access || accessTag(p));
-    if (!access && !p.hasKey && !p.local) head.append(tag('缺少密钥', 'changed'));
+    if (tags) head.append(...tags);
+    else {
+      head.append(access || accessTag(p));
+      if (!access && !p.hasKey && !p.local) head.append(tag('缺少密钥', 'changed'));
+    }
     if (using) head.append(using);
     detail.textContent = blocked || p.baseUrl.replace(/^https?:\/\//, '') + ' · ' + model;
-  } else detail.textContent = '还没有保存的账号，选中后可添加';
+  } else {
+    if (tags) head.append(...tags);
+    detail.textContent = '还没有保存的账号，选中后可添加';
+  }
   if (description !== undefined) detail.textContent = description;
   body.append(head, detail);
   card.onclick = onPick;

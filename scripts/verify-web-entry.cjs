@@ -119,7 +119,7 @@ async function loaded(page, url) {
   assert.equal((await page.locator('#status').innerText()).includes('凭证已过期'), false);
   // 样式表单独加载；类型不对时浏览器会忽略它，页面退回无样式。
   assert.equal(
-    await page.locator('.status-card').evaluate((el) => getComputedStyle(el).borderTopLeftRadius),
+    await page.locator('#codex-status-card').evaluate((el) => getComputedStyle(el).borderTopLeftRadius),
     '14px',
   );
 }
@@ -162,8 +162,10 @@ async function loaded(page, url) {
       await page.locator('#claude-list .source-card').nth(1).waitFor();
       assert.equal(await page.locator('#claude-list .group-label').count(), 3);
       await page.locator('#claude-list .source-card').nth(1).click();
-      await page.getByRole('button', { name: '用于 Claude Code' }).click();
-      await page.waitForTimeout(100);
+      await Promise.all([
+        page.waitForResponse((r) => r.url().endsWith('/api/claudeApply') && r.status() === 200),
+        page.getByRole('button', { name: '用于 Claude Code' }).click(),
+      ]);
       const settings = JSON.parse(fs.readFileSync(path.join(claudeConfig, 'settings.json'), 'utf8'));
       assert.equal(settings.env.ANTHROPIC_BASE_URL, 'https://anthropic.fixture');
       assert.equal(settings.env.ANTHROPIC_MODEL, 'claude-fixture');

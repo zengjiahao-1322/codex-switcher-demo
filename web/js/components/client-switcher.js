@@ -1,39 +1,35 @@
+// 顶部客户端切换：每块显示该客户端当前在用什么。只负责显示和切换，文字由调用方传入。
 import { $ } from '../api.js';
-import { state } from '../store.js';
+
 let selected = globalThis.localStorage?.getItem('selected-client') || 'codex';
 export const selectedClient = () => selected;
-export function renderClientVisibility() {
-  const claude = selected === 'claude';
-  $('codex-status-card').hidden = $('codex-chooser').hidden = claude;
-  $('claude-status-card').hidden = $('claude-chooser').hidden = !claude;
-}
-export function renderClientSwitcher(onChange) {
+
+// tiles: [{ key, label, detail, live }]；key 对应页面上的 <key>-status-card 和 <key>-chooser。
+export function renderClientSwitcher(tiles, onSelect) {
   const root = $('client-switcher');
   root.replaceChildren();
-  const current = state.current;
-  const provider = state.providers.find((item) => item.inUse);
-  const cc = state.claudeCode?.current;
-  for (const [key, label, detail] of [
-    ['codex', 'Codex', (current.official ? '官方登录' : provider?.name || '自定义 API') + (current.model ? ' · ' + current.model : '')],
-    ['claude', 'Claude Code', cc ? cc.label + ' · ' + cc.model : '官方登录（未接管）'],
-  ]) {
-    const button = document.createElement('button'), name = document.createElement('b'), summary = document.createElement('span');
+  for (const tile of tiles) {
+    const button = document.createElement('button'),
+      name = document.createElement('b'),
+      line = document.createElement('span'),
+      dot = document.createElement('span');
     button.type = 'button';
     button.className = 'client-tab';
-    button.dataset.client = key;
-    button.setAttribute('aria-pressed', String(selected === key));
-    name.textContent = label;
-    summary.textContent = detail;
-    button.append(name, summary);
+    button.dataset.client = tile.key;
+    button.setAttribute('aria-pressed', String(selected === tile.key));
+    name.textContent = tile.label;
+    dot.className = 'live' + (tile.live ? '' : ' off');
+    line.append(dot, tile.detail);
+    button.append(name, line);
     button.onclick = () => {
-      selected = key;
-      globalThis.localStorage?.setItem('selected-client', key);
-      renderClientSwitcher(onChange);
-      renderClientVisibility();
-      onChange();
+      selected = tile.key;
+      globalThis.localStorage?.setItem('selected-client', tile.key);
+      onSelect();
     };
     root.append(button);
   }
-  renderClientVisibility();
-  if (selected === 'claude') onChange();
+  for (const tile of tiles) {
+    $(tile.key + '-status-card').hidden = selected !== tile.key;
+    $(tile.key + '-chooser').hidden = selected !== tile.key;
+  }
 }
