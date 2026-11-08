@@ -272,6 +272,16 @@ pub fn write_json(file: &std::path::Path, value: &Value) -> io::Result<()> {
     drop(output);
     fs::rename(&temporary, file)
 }
+fn launch() -> Value {
+    let parent = match platform::parent_process() {
+        Ok((pid, name)) => json!({"pid":pid,"name":name}),
+        Err(error) => json!({"error":error.to_string()}),
+    };
+    json!({
+        "args":env::args().skip(1).collect::<Vec<_>>(),
+        "parent":parent
+    })
+}
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if env::args().nth(1).as_deref() == Some("--switch-job") {
         crate::switching::worker(std::path::Path::new(
@@ -337,28 +347,26 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(bytes) = local.as_ref().or(discovered.as_ref()) {
         let previous: Value = serde_json::from_slice(bytes)?;
         if let Some(url) = previous["url"].as_str()
+            && let Some(pid) = previous["pid"].as_u64().map(|pid| pid as u32)
+            && let Some(port) = url
+                .split_once("/#")
+                .and_then(|(base, _)| base.strip_prefix("http://127.0.0.1:"))
+                .and_then(|port| port.parse::<u16>().ok())
+            && platform::port_pid(port).ok().flatten() == Some(pid)
             && let Ok((status, body)) = local_response(url, "/api/runtime").await
         {
-            let pid = previous["pid"].as_u64().ok_or("Missing old runtime PID")? as u32;
             let old = if status.is_success() {
                 serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null)
             } else {
                 Value::Null
             };
-            let port = url
-                .split_once("/#")
-                .and_then(|(base, _)| base.strip_prefix("http://127.0.0.1:"))
-                .and_then(|port| port.parse::<u16>().ok());
-            let owns_port =
-                port.and_then(|port| platform::port_pid(port).ok().flatten()) == Some(pid);
             let owner = owner_install(pid);
             let installed = owner.as_ref().and_then(|root| install_sequence(root));
             let same_executable = platform::image(pid)
                 .ok()
                 .zip(env::current_exe().ok())
                 .is_some_and(|(image, current)| same_path(&image, &current));
-            let identified =
-                owns_port && (installed.is_some() || (same_executable && verified(pid, &old)));
+            let identified = installed.is_some() || (same_executable && verified(pid, &old));
             let same_build = old["id"]
                 .as_str()
                 .is_some_and(|id| Some(id) == runtime()["id"].as_str());
@@ -375,7 +383,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(directory) = &discovery {
                     write_json(&directory.join("connection.json"), &previous)?;
                 }
-                crate::diagnostics::log(&bridge, "startup", json!({"otherInstall":other_install}))?;
+                crate::diagnostics::log(
+                    &bridge,
+                    "startup",
+                    json!({"otherInstall":other_install,"launch":launch()}),
+                )?;
                 open_url(url)?;
                 println!(
                     "BRIDGE_ALREADY_RUNNING {}",
@@ -489,6 +501,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         "readyMs":started.elapsed().as_millis(),
         "port":app.port,
         "otherInstall":other_install,
+        "launch":launch(),
         "phases":{
             "existing":existing_ms,
             "protectDataDirs":protect_ms,

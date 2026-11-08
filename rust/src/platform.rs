@@ -238,6 +238,39 @@ mod windows {
         }
         result.unwrap_or_else(|error| json!({"ok":false,"error":error.to_string()}))
     }
+    pub fn parent_process() -> io::Result<(u32, String)> {
+        let snapshot = unsafe { CreateToolhelp32Snapshot(2, 0) };
+        if snapshot == (-1isize as Handle) {
+            return Err(io::Error::last_os_error());
+        }
+        let mut row: ProcessEntry = unsafe { mem::zeroed() };
+        row.size = mem::size_of::<ProcessEntry>() as u32;
+        let mut rows = Vec::new();
+        let mut ok = unsafe { Process32FirstW(snapshot, &mut row) };
+        while ok != 0 {
+            let end = row
+                .exe
+                .iter()
+                .position(|value| *value == 0)
+                .unwrap_or(row.exe.len());
+            rows.push((
+                row.pid,
+                row.parent,
+                String::from_utf16_lossy(&row.exe[..end]),
+            ));
+            ok = unsafe { Process32NextW(snapshot, &mut row) };
+        }
+        unsafe { CloseHandle(snapshot) };
+        let parent_pid = rows
+            .iter()
+            .find(|row| row.0 == std::process::id())
+            .map(|row| row.1)
+            .ok_or_else(|| io::Error::other("启动进程不在进程列表中"))?;
+        rows.into_iter()
+            .find(|row| row.0 == parent_pid)
+            .map(|row| (row.0, row.2))
+            .ok_or_else(|| io::Error::other("父进程已退出或不在进程列表中"))
+    }
     pub fn scan() -> io::Result<Value> {
         let snapshot = unsafe { CreateToolhelp32Snapshot(2, 0) };
         if snapshot == (-1isize as Handle) {
@@ -578,9 +611,37 @@ pub use windows::attach_parent_console;
 #[cfg(windows)]
 pub use windows::scan;
 #[cfg(windows)]
-pub use windows::{alive, command, image, terminate};
+pub use windows::{alive, command, image, parent_process, terminate};
 #[cfg(windows)]
 pub use windows::{port_pid, processes, random_bytes};
+#[cfg(not(windows))]
+pub fn parent_process() -> io::Result<(u32, String)> {
+    let output = std::process::Command::new("/bin/ps")
+        .args(["-o", "ppid=,comm=", "-p", &std::process::id().to_string()])
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other("无法读取启动进程的父进程"));
+    }
+    let pid = String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| io::Error::other("启动进程不在进程列表中"))?
+        .parse::<u32>()
+        .map_err(io::Error::other)?;
+    let output = std::process::Command::new("/bin/ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .output()?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err(io::Error::other("父进程已退出或不在进程列表中"));
+    }
+    let command = String::from_utf8_lossy(&output.stdout);
+    let name = std::path::Path::new(command.trim())
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    Ok((pid, name))
+}
 pub fn context_arguments(args: &[String]) -> serde_json::Value {
     let mut result = serde_json::json!({"overrides":{}});
     let mut i = 1;

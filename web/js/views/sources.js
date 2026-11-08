@@ -88,7 +88,7 @@ export function selected(resetModel = true) {
   $('model-fields').hidden = official || !p;
   $('source-context').textContent =
     (official ? '使用 ChatGPT 官方服务和这个账号。' : '通过这个 API 使用所选模型。') +
-    '切换后 Codex 桌面端会重启' +
+    'Codex 桌面端在运行时会重启' +
     ($('reload-editors').checked ? '，已接入的编辑器窗口会重载' : '') +
     '，正在运行的任务会中断；已保存的对话不会被删除。';
   const last = p?.access || {};

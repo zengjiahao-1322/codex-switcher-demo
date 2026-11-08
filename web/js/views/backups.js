@@ -1,6 +1,6 @@
 import { $, api } from '../api.js';
 import { rowButton, status } from '../ui.js';
-import { startSwitch, switchPending } from './sources.js';
+import { confirmSwitchRestart, startSwitch, switchPending } from './sources.js';
 
 // 配置备份：切换器改写本机 Codex 配置前自动保存的副本（不含登录），在设置里查看和恢复。
 const reasons = { switch: '切换前', official: '切回官方前', restore: '恢复备份前' };
@@ -35,15 +35,13 @@ export async function refreshBackups() {
       '恢复',
       async () => {
         if (
-          !confirm(
+          !(await confirmSwitchRestart(
             '把本机 Codex 配置恢复到 ' +
               stamp(b.at) +
               ' 的备份（' +
               b.summary +
-              '）？恢复前会先备份当前配置，登录的账号不变。Codex 桌面端会重启' +
-              ($('reload-editors').checked ? '，已接入的编辑器窗口会重载' : '') +
-              '，正在运行的任务会中断。',
-          )
+              '）？恢复前会先备份当前配置，登录的账号不变。',
+          ))
         )
           return;
         status('正在恢复配置备份…');

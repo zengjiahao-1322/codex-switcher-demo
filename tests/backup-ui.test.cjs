@@ -3,7 +3,7 @@ const test = require('node:test'),
   assert = require('node:assert/strict');
 const { runPage } = require('./fake-page.cjs');
 
-function backend(calls) {
+function backend(calls, clients = []) {
   return async (route, body) => {
     if (route === 'state')
       return {
@@ -21,7 +21,7 @@ function backend(calls) {
       return {
         body: {
           home: '',
-          clients: [],
+          clients,
           auxiliary: [],
           editors: [],
           connectedEditors: 0,
@@ -34,7 +34,7 @@ function backend(calls) {
 const created = (page, tag, pred = () => true) =>
   page.created.filter((c) => c.tag === tag && pred(c.node)).map((c) => c.node);
 
-test('打开设置读取配置备份；恢复要确认，确认后按切换流程发 restoreBackup', async () => {
+test('打开设置读取配置备份；没有桌面端时直接发 restoreBackup，不弹确认框', async () => {
   let asked = '';
   const page = await runPage({
     confirm: (text) => ((asked = text), true),
@@ -63,6 +63,23 @@ test('打开设置读取配置备份；恢复要确认，确认后按切换流�
     .at(-1)
     .onclick();
   await page.settle();
-  assert.match(asked, /恢复前会先备份当前配置，登录的账号不变/);
+  assert.equal(asked, '');
   assert.deepEqual(page.calls('restoreBackup')[0].body.id, 'b2');
+});
+
+test('共享桌面端恢复备份时确认；取消后不发 restoreBackup', async () => {
+  let asked = '';
+  const page = await runPage({
+    confirm: (text) => ((asked = text), false),
+    respond: backend({
+      backups: () => ({ body: { items: [{ id: 'b2', at: '2026-10-25T10:00:00Z', reason: 'switch', summary: 'Direct API · gpt-6.1-sol' }] } }),
+    }, [{ kind: 'desktop', confirmed: true, shared: true }]),
+  });
+  page.byId('tab-settings').onclick();
+  await page.settle();
+  await created(page, 'button', (n) => n.textContent === '恢复').at(-1).onclick();
+  await page.settle();
+  assert.match(asked, /恢复前会先备份当前配置，登录的账号不变/);
+  assert.match(asked, /Codex 桌面端会重启/);
+  assert.equal(page.calls('restoreBackup').length, 0);
 });

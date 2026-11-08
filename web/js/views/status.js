@@ -27,7 +27,12 @@ export function renderSwitchProgress() {
     (running ? '切换中' : job.status === 'error' ? '切换未完成' : '切换步骤已执行') +
     ' · ' +
     seconds +
-    ' 秒';
+    ' 秒' +
+    (!running && job.finishedAt
+      ? ' · ' + new Date(job.finishedAt).toLocaleString('zh-CN', {
+          month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+        })
+      : '');
   $('switch-steps').replaceChildren();
   for (const step of job.steps) {
     const line = document.createElement('p');
