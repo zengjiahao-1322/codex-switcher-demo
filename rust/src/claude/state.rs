@@ -63,23 +63,31 @@ pub fn state(bridge: &Path) -> io::Result<Value> {
         read(&current_file(bridge))?.and_then(|s| serde_json::from_str::<Value>(&s).ok());
     let mut original_state = Value::Null;
     let mut changed = false;
+    let mut drift_message = None;
     if let Some(saved) = &mut current {
         if let Some(snapshot) = read(&original_file(bridge))? {
             original_state = original(&parse(Some(&snapshot))?)?;
         }
-        let root = parse(read(&settings_file())?.as_deref())?;
         if let Some(provider) = rows.iter().find(|p| p["id"] == saved["providerId"]) {
             let access = access::local(provider);
             saved["access"] = json!(access.name());
             let adapter = config_store::read_json(&bridge.join("adapter.json"))?;
-            changed = matches!(access, Access::Unavailable(_))
-                || drift(&root, &expected(provider, saved, &adapter)?);
+            match parse(read(&settings_file())?.as_deref()) {
+                Ok(root) => {
+                    changed = matches!(access, Access::Unavailable(_))
+                        || drift(&root, &expected(provider, saved, &adapter)?);
+                }
+                Err(_) => {
+                    changed = true;
+                    drift_message = Some("Claude Code 配置文件无法解析，请检查后重新选择。");
+                }
+            }
         } else {
             changed = true;
         }
     }
     Ok(
-        json!({"configDir":config_dir(),"current":if changed {None} else {current},"original":original_state,"drift":if changed {Some("Claude Code 配置已被外部修改，请重新选择。")} else {None},"autostart":crate::integration::startup_file().exists(),"providers":providers}),
+        json!({"configDir":config_dir(),"current":if changed {None} else {current},"original":original_state,"drift":if changed {Some(drift_message.unwrap_or("Claude Code 配置已被外部修改，请重新选择。"))} else {None},"autostart":crate::integration::startup_file().exists(),"providers":providers}),
     )
 }
 

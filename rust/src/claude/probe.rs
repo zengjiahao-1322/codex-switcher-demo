@@ -17,15 +17,7 @@ async fn direct(provider: &Value, payload: &Value) -> Result<(), Failure> {
         .no_proxy()
         .timeout(Duration::from_secs(30))
         .build()
-        .map_err(|error| Failure {
-            status: 0,
-            message: if error.is_timeout() {
-                "timeout".into()
-            } else {
-                "connect".into()
-            },
-            upstream: false,
-        })?
+        .map_err(|_| Failure::unsupported())?
         .post(format!(
             "{}/v1/messages",
             normalized_base(provider["baseUrl"].as_str().unwrap_or(""))
@@ -35,7 +27,15 @@ async fn direct(provider: &Value, payload: &Value) -> Result<(), Failure> {
         .json(payload)
         .send()
         .await
-        .map_err(|_| Failure::unsupported())?;
+        .map_err(|error| Failure {
+            status: 0,
+            message: if error.is_timeout() {
+                "timeout".into()
+            } else {
+                "connect".into()
+            },
+            upstream: false,
+        })?;
     let status = response.status().as_u16();
     if !(200..300).contains(&status) {
         return Err(Failure {

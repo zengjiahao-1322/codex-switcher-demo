@@ -87,6 +87,12 @@ test('Claude Code v2 黑盒：直连 apply、模型记忆、provider 同步、re
   const current = await state(f);
   assert.equal(current.providers.find((p) => p.id === 'missing').reason, '缺少密钥');
   assert.equal((await api(f, 'claudeApply', { id: 'missing', model: 'main' }, 400)).error, '请先在 API 配置中填写密钥');
+  fs.writeFileSync(path.join(f.environment.CLAUDE_CONFIG_DIR, 'settings.json'), '{"env":,');
+  const unreadable = await state(f);
+  assert.equal(unreadable.current, null);
+  assert.equal(unreadable.drift, 'Claude Code 配置文件无法解析，请检查后重新选择。');
+  const removable = await add(f, provider('Removable', f.upstream.url + '/v1', 'anthropic_messages', 'remove-key'));
+  await api(f, 'providerRemove', { id: removable.id });
 });
 
 test('Claude Code v2 黑盒：转换 apply 需要保持后台，直连和转换 probe 走正确的上游路径', rustOnly, async (t) => {
