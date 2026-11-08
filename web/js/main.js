@@ -12,7 +12,7 @@ import { refreshClients, renderDiagnosis } from './views/diagnostics.js';
 import { renderProviderList } from './views/providers.js';
 import { renderService } from './views/settings.js';
 import { renderSelect, switchPending } from './clients/codex/sources.js';
-import { renderClientSwitcher, renderClientVisibility, selectedClient } from './components/client-switcher.js';
+import { renderClientSwitcher } from './components/client-switcher.js';
 import { renderClaude } from './clients/claude/list.js';
 import { renderEffect, renderSummary } from './views/status.js';
 import { checkUpdate, renderUpdate } from './views/update.js';
@@ -20,9 +20,7 @@ import { checkUpdate, renderUpdate } from './views/update.js';
 // 页面入口：各分区的渲染和事件在 views/ 下，共享数据在 store.js，请求与会话在 api.js。
 export async function refresh() {
   setState(await api('state'));
-  renderClientSwitcher(() => { renderClientVisibility(); renderClaude(state.claudeCode, state.providers, refresh); });
-  renderClientVisibility();
-  if (selectedClient() === 'claude') renderClaude(state.claudeCode || {}, state.providers || [], refresh);
+  renderClientSwitcher(() => renderClaude(state.claudeCode || {}, state.providers, refresh));
   $('app-version').textContent = state.build
     ? '版本 ' + state.build.version + ' · 构建 ' + state.build.id
     : '后台构建未知，请重新启动新版切换器';

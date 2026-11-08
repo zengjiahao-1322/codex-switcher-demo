@@ -2,7 +2,7 @@ import { accessTag, tag } from '../ui.js';
 import { accountPlan, accountRemaining, accountWindow, ago, membership, membershipExpired, windowName } from '../views/accounts.js';
 const hue = (text) => [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 
-export function sourceCard(o, { checked, using = null, model, blocked = '', onPick }) {
+export function sourceCard(o, { checked, using = null, model, blocked = '', access = null, detail: description, onPick }) {
   const card = document.createElement('button');
   card.type = 'button';
   card.className = 'source-card';
@@ -58,11 +58,12 @@ export function sourceCard(o, { checked, using = null, model, blocked = '', onPi
       card.append(side);
     }
   } else if (p) {
-    head.append(accessTag(p));
-    if (!p.hasKey && !p.local) head.append(tag('缺少密钥', 'changed'));
+    head.append(access || accessTag(p));
+    if (!access && !p.hasKey && !p.local) head.append(tag('缺少密钥', 'changed'));
     if (using) head.append(using);
     detail.textContent = blocked || p.baseUrl.replace(/^https?:\/\//, '') + ' · ' + model;
   } else detail.textContent = '还没有保存的账号，选中后可添加';
+  if (description !== undefined) detail.textContent = description;
   body.append(head, detail);
   card.onclick = onPick;
   return card;

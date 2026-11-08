@@ -39,6 +39,15 @@ const providerId = require('../src/config/providers.cjs').add(bridge, {
   apiKey: 'fixture-key',
 });
 fs.writeFileSync(path.join(bridge, 'current.json'), JSON.stringify({ providerId }));
+const claudeConfig = path.join(root, 'claude');
+fs.mkdirSync(claudeConfig, { recursive: true });
+fs.writeFileSync(path.join(claudeConfig, 'settings.json'), JSON.stringify({ env: { KEEP: 'fixture' } }));
+if (isRust) {
+  const providersFile = path.join(bridge, 'providers.json');
+  const providers = JSON.parse(fs.readFileSync(providersFile));
+  providers.providers.push({ id: 'claude-fixture', name: 'Claude fixture', baseUrl: 'https://anthropic.fixture/v1', apiMode: 'anthropic_messages', apiKey: 'fixture-claude-key', model: 'claude-fixture', models: ['claude-fixture'] });
+  fs.writeFileSync(providersFile, JSON.stringify(providers));
+}
 let browser, server, port;
 let native;
 let fixtureJob = null;
@@ -95,7 +104,7 @@ async function start(token) {
         },
       },
     },
-    { codexHome: home, bridgeHome: bridge, env: native?.env },
+    { codexHome: home, bridgeHome: bridge, env: { ...native?.env, CLAUDE_CONFIG_DIR: claudeConfig } },
   );
   await new Promise((resolve) => server.listen(port || 0, '127.0.0.1', resolve));
   port = server.address().port;
@@ -148,6 +157,19 @@ async function loaded(page, url) {
     await loaded(page, base + '/#fixture-session-one');
     assert.equal(new URL(page.url()).hash, '');
     checked('current-launch-token-establishes-session');
+    if (isRust) {
+      await page.locator('#client-switcher button').nth(1).click();
+      await page.locator('#claude-list .source-card').nth(1).waitFor();
+      assert.equal(await page.locator('#claude-list .group-label').count(), 3);
+      await page.locator('#claude-list .source-card').nth(1).click();
+      await page.getByRole('button', { name: '用于 Claude Code' }).click();
+      await page.waitForTimeout(100);
+      const settings = JSON.parse(fs.readFileSync(path.join(claudeConfig, 'settings.json'), 'utf8'));
+      assert.equal(settings.env.ANTHROPIC_BASE_URL, 'https://anthropic.fixture');
+      assert.equal(settings.env.ANTHROPIC_MODEL, 'claude-fixture');
+      checked('claude-view-apply-writes-settings');
+      await page.locator('#client-switcher button').first().click();
+    }
     assert.equal(await page.locator('#migration-notice').isVisible(), true);
     assert.equal(
       await page.locator('#migration-text').innerText(),

@@ -1,38 +1,39 @@
+import { $ } from '../api.js';
 import { state } from '../store.js';
-const $ = (id) => document.getElementById(id);
-const storage = typeof localStorage === 'undefined' ? { getItem: () => null, setItem: () => {} } : localStorage;
-
-export function selectedClient() {
-  return storage.getItem('selected-client') || 'codex';
+let selected = globalThis.localStorage?.getItem('selected-client') || 'codex';
+export const selectedClient = () => selected;
+export function renderClientVisibility() {
+  const claude = selected === 'claude';
+  $('codex-status-card').hidden = $('codex-chooser').hidden = claude;
+  $('claude-status-card').hidden = $('claude-chooser').hidden = !claude;
 }
-
-export function renderClientSwitcher(onChange = () => {}) {
+export function renderClientSwitcher(onChange) {
   const root = $('client-switcher');
-  if (!root) return;
-  const active = selectedClient();
   root.replaceChildren();
-  const codex = document.createElement('button');
-  codex.type = 'button';
-  codex.className = 'client-tab';
-  codex.setAttribute('aria-pressed', String(active === 'codex'));
-  codex.innerHTML = '<b>Codex</b><span>' + (state?.current?.model || '官方登录') + '</span>';
-  const claude = document.createElement('button');
-  claude.type = 'button';
-  claude.className = 'client-tab';
-  claude.setAttribute('aria-pressed', String(active === 'claude'));
-  claude.innerHTML = '<b>Claude Code</b><span>' + (state?.claudeCode?.current?.label || '官方登录（未接管）') + '</span>';
-  for (const [button, key] of [[codex, 'codex'], [claude, 'claude']]) {
+  const current = state.current;
+  const provider = state.providers.find((item) => item.inUse);
+  const cc = state.claudeCode?.current;
+  for (const [key, label, detail] of [
+    ['codex', 'Codex', (current.official ? '官方登录' : provider?.name || '自定义 API') + (current.model ? ' · ' + current.model : '')],
+    ['claude', 'Claude Code', cc ? cc.label + ' · ' + cc.model : '官方登录（未接管）'],
+  ]) {
+    const button = document.createElement('button'), name = document.createElement('b'), summary = document.createElement('span');
+    button.type = 'button';
+    button.className = 'client-tab';
+    button.dataset.client = key;
+    button.setAttribute('aria-pressed', String(selected === key));
+    name.textContent = label;
+    summary.textContent = detail;
+    button.append(name, summary);
     button.onclick = () => {
-      storage.setItem('selected-client', key);
+      selected = key;
+      globalThis.localStorage?.setItem('selected-client', key);
       renderClientSwitcher(onChange);
-      onChange(key);
+      renderClientVisibility();
+      onChange();
     };
     root.append(button);
   }
-}
-
-export function renderClientVisibility() {
-  const claude = selectedClient() === 'claude';
-  for (const id of ['codex-status-card', 'codex-chooser']) if ($(id)) $(id).hidden = claude;
-  for (const id of ['claude-status-card', 'claude-chooser']) if ($(id)) $(id).hidden = !claude;
+  renderClientVisibility();
+  if (selected === 'claude') onChange();
 }
