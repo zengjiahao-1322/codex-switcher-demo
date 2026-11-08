@@ -2,7 +2,7 @@ import { $, api } from '../api.js';
 import { accountData, modelCache, state } from '../store.js';
 import { busy, merge, tag } from '../ui.js';
 import { accountFacts, quotaNode } from './accounts.js';
-import { sourceCard } from './sources.js';
+import { sourceCard } from '../components/source-card.js';
 
 // 远程服务器：Remote-SSH 窗口里的 Codex 读写服务器自己的 CODEX_HOME，和本机切换互不跟随。
 // 账号和 API 与本机共用同一份列表；每台服务器一张切换卡，单独应用。
@@ -42,9 +42,12 @@ const blockedReason = (p) =>
     ? '需要本机转换，服务器用不了'
     : !p.hasKey
       ? '缺少密钥，先在“API 配置”里填写'
-      : p.access?.mode !== 'direct'
+      : p.apiMode === 'anthropic_messages' || p.access?.mode === 'direct'
+        ? ''
+        : p.access?.mode !== 'direct'
         ? '还没检测为直连，先在“API 配置”里检测'
         : '';
+const remoteAccess = (p) => state.claudeCode?.providers?.find((item) => item.id === p.id);
 const official = (r) => !r.current?.modelProvider || r.current.modelProvider === 'openai';
 const usingAccount = (rows, a) => rows.some((r) => official(r) && r.account?.id === a.id);
 const usingApi = (rows, p) =>
@@ -206,7 +209,11 @@ function chooser(authority, host, rows) {
     ...apis.map((p) => ({ value: p.id, name: p.name, provider: p })),
   ];
   const inUse = (o) => (o.account ? usingAccount(rows, o.account) : usingApi(rows, o.provider));
-  const unselectable = (o) => o.provider && o.provider.apiMode === 'anthropic_messages' && o.provider.hasKey ? '' : (o.provider ? blockedReason(o.provider) : '');
+  const unselectable = (o) => {
+    if (!o.provider) return '';
+    const remote = remoteAccess(o.provider);
+    return remote ? (remote.remote === 'unavailable' ? remote.remoteReason : '') : blockedReason(o.provider);
+  };
   const draft = drafts.get(authority) || {};
   const picked =
     options.find((o) => o.value === draft.source) ||
@@ -320,9 +327,9 @@ function detail(panel, authority, host, rows, o, draft) {
   apply.type = 'button';
   apply.className = 'primary';
   apply.textContent = '应用到这台服务器';
-  if (p && (p.apiMode === 'anthropic_messages' || blockedReason(p))) {
+  if (p && (p.apiMode === 'anthropic_messages' || (remoteAccess(p) ? remoteAccess(p).remote === 'unavailable' : Boolean(blockedReason(p))))) {
     apply.disabled = true;
-    apply.title = '此配置不能用于远程 Codex';
+    apply.title = remoteAccess(p)?.remoteReason || blockedReason(p) || '此配置不能用于远程 Codex';
   }
   apply.onclick = () =>
     busy(
@@ -395,8 +402,10 @@ function detail(panel, authority, host, rows, o, draft) {
   claudeApply.className = claudeRestore.className = 'link';
   claudeApply.textContent = '用于 Claude Code';
   claudeRestore.textContent = '恢复官方';
-  claudeApply.disabled = !supported || !p || p.apiMode !== 'anthropic_messages' || !p.hasKey;
-  claudeApply.title = !supported ? '请更新远端代理' : p && p.apiMode !== 'anthropic_messages' ? '远程服务器只支持 Anthropic 协议的 API' : '';
+  const remoteClaude = p && state.claudeCode?.providers?.find((item) => item.id === p.id);
+  const legacyClaudeAllowed = p?.apiMode === 'anthropic_messages' && p?.hasKey === true;
+  claudeApply.disabled = Boolean(!supported || !p || (remoteClaude ? remoteClaude.remote !== 'direct' : !legacyClaudeAllowed));
+  claudeApply.title = !supported ? '请更新远端代理' : remoteClaude?.remoteReason || '';
   claudeRestore.disabled = !supported || !rows.some((r) => r.claudeCanRestore);
   claudeRestore.title = !supported ? '请更新远端代理' : '';
   const changeClaude = (button, action, data) => busy(button, async () => {
@@ -423,3 +432,4 @@ function detail(panel, authority, host, rows, o, draft) {
   }
   panel.append(claude);
 }
+

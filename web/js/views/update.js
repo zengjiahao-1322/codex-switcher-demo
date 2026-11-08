@@ -105,3 +105,4 @@ $('companions-update').onclick = () =>
     if ((clients.companion?.editors || []).some((e) => e.disabled?.disabled === true))
       status('伴随扩展已被禁用，请在 VS Code 扩展面板启用后重载窗口。');
   });
+

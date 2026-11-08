@@ -12,7 +12,7 @@ import {
   rowButton,
   tag,
 } from '../ui.js';
-import { selected } from './sources.js';
+import { selected } from '../clients/codex/sources.js';
 
 export let editing = null,
   formModels = [];
@@ -212,3 +212,4 @@ $('provider-form').onsubmit = (e) => {
     providerStatus,
   );
 };
+

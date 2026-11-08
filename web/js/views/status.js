@@ -8,7 +8,7 @@ import {
   watchAccounts,
   windowName,
 } from './accounts.js';
-import { switchPending } from './sources.js';
+import { switchPending } from '../clients/codex/sources.js';
 
 export let progressJob = null;
 export function renderSwitchProgress() {
@@ -153,3 +153,4 @@ $('threads-resume').onclick = () =>
     watchAccounts();
     await refreshAccounts();
   });
+

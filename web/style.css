@@ -1200,3 +1200,20 @@ footer {
     align-items: flex-start;
   }
 }
+
+/* Claude Code */
+.clients { display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:5px; margin-bottom:14px; background:#e9e9e7; border-radius:14px; }
+.client-tab { padding:10px 14px; border-radius:10px; text-align:left; background:transparent; color:var(--muted); }
+.client-tab[aria-pressed="true"] { background:var(--surface); color:var(--ink); box-shadow:0 1px 2px rgba(24,24,27,.1); }
+.client-tab b,.client-tab span { display:block; }
+.client-tab span { font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#claude-chooser { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+#claude-list { display:grid; gap:4px; padding:6px; }
+#claude-list .source-card { display:flex; align-items:center; gap:10px; width:100%; padding:10px; border:0; text-align:left; background:transparent; border-radius:9px; }
+#claude-list .source-card[aria-checked="true"] { background:var(--sunken); box-shadow:inset 0 0 0 1px var(--ink); }
+#claude-list .source-card .name { font-weight:600; flex:1; }
+#claude-list .source-card small { flex:1; color:var(--muted); }
+#claude-panel { display:flex; flex-direction:column; gap:10px; padding:24px 26px; }
+#claude-panel input { min-height:38px; padding:0 10px; border:1px solid var(--field); border-radius:8px; }
+#claude-panel button { align-self:flex-start; padding:8px 14px; border-radius:8px; }
+@media (max-width: 860px) { #claude-chooser { grid-template-columns:1fr; } }

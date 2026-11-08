@@ -12,7 +12,7 @@ import {
   selectedAccount,
   startSwitch,
   switchPending,
-} from './sources.js';
+} from '../clients/codex/sources.js';
 import { renderSummary, renderSwitchProgress } from './status.js';
 
 // 保存的账号只在管理区维护，所有使用操作统一到来源选择器。
@@ -582,3 +582,4 @@ $('login-cancel').onclick = () =>
     },
     accountStatus,
   );
+

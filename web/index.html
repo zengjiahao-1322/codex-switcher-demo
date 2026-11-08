@@ -38,7 +38,8 @@
       <div id="quota-notice" class="hint warn" role="status" hidden></div>
       <div id="usage-notice" class="hint warn" role="note" hidden></div>
       <div class="workspace">
-        <section class="card status-card" aria-labelledby="status-heading">
+        <div class="clients" id="client-switcher" role="group" aria-label="要配置的客户端"></div>
+        <section class="card status-card" id="codex-status-card" aria-labelledby="status-heading">
           <div class="status-main">
             <h2 id="status-heading" class="eyebrow"><span class="live"></span>正在使用</h2>
             <div id="summary">正在读取本机配置…</div>
@@ -58,7 +59,7 @@
           </details>
         </section>
 
-        <section class="chooser" aria-labelledby="sources-heading">
+        <section class="chooser" id="codex-chooser" aria-labelledby="sources-heading">
           <div class="sources">
             <div class="sources-head">
               <h2 id="sources-heading" class="eyebrow">切换到</h2>
@@ -93,14 +94,17 @@
             <small id="mode-hint" class="hint" hidden></small>
             <div class="actions">
               <button id="switch" class="primary" disabled>切换到这里</button>
-              <button type="button" id="claude-apply" disabled>用于 Claude Code</button>
               <button id="probe" disabled hidden>检测 API</button>
             </div>
-            <p class="editor-line">
-              <span id="claude-status">Claude Code：官方</span>
-              <button type="button" id="claude-restore" class="link" hidden>恢复官方</button>
-            </p>
           </div>
+        </section>
+
+        <section class="card" id="claude-status-card" hidden aria-label="Claude Code 状态">
+          <div class="status-main"><h2 class="eyebrow"><span class="live"></span>Claude Code</h2><div id="claude-summary">官方登录（未接管）</div></div>
+        </section>
+        <section class="chooser" id="claude-chooser" hidden aria-label="Claude Code 配置">
+          <div class="sources"><div class="sources-head"><h2 class="eyebrow">交给 Claude Code</h2></div><div id="claude-list" role="radiogroup"></div></div>
+          <div class="card source-panel" id="claude-panel" aria-live="polite"></div>
         </section>
 
         <nav class="tabs" role="tablist" aria-label="管理">
@@ -340,3 +344,7 @@
     <script type="module" src="/js/main.js"></script>
   </body>
 </html>
+
+
+
+

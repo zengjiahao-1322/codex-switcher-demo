@@ -5,7 +5,7 @@ import { activeTab, showTab } from '../tabs.js';
 import { busy, rowButton, status, tag } from '../ui.js';
 import { beginLogin, refreshAccounts } from './accounts.js';
 import { renderRemotes } from './remotes.js';
-import { chooseSource } from './sources.js';
+import { chooseSource } from '../clients/codex/sources.js';
 
 export function renderDiagnosis() {
   if (activeTab === 'editors' && $('diagnosis-details').open) runDiagnosis();
@@ -388,3 +388,4 @@ $('threads-refresh').onclick = () =>
   });
 $('diagnosis-thread').onchange = runDiagnosis;
 $('diagnosis-run').onclick = runDiagnosis;
+

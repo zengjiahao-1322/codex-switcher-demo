@@ -64,3 +64,4 @@ $('app-uninstall').onclick = () => {
   actions['append'](confirmButton, cancel);
   panel.append(text, label, actions);
 };
+

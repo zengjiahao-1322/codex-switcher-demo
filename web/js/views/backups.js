@@ -1,6 +1,6 @@
 import { $, api } from '../api.js';
 import { rowButton, status } from '../ui.js';
-import { confirmSwitchRestart, startSwitch, switchPending } from './sources.js';
+import { confirmSwitchRestart, startSwitch, switchPending } from '../clients/codex/sources.js';
 
 // 配置备份：切换器改写本机 Codex 配置前自动保存的副本（不含登录），在设置里查看和恢复。
 const reasons = { switch: '切换前', official: '切回官方前', restore: '恢复备份前' };
@@ -58,3 +58,4 @@ export async function refreshBackups() {
     list.append(row);
   }
 }
+
