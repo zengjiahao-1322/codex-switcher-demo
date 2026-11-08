@@ -684,7 +684,13 @@ pub async fn action(app: &std::sync::Arc<App>, action: &str, input: &Value) -> i
     };
     match action {
         "providerAdd" => store::add(&app.bridge, input),
-        "providerUpdate" => store::update(&app.bridge, input),
+        "providerUpdate" => {
+            let mut result = store::update(&app.bridge, input)?;
+            if crate::claude::on_provider_changed(app, input["id"].as_str().unwrap_or(""))? {
+                result["message"] = json!(format!("{}已同步到 Claude Code。", result["message"].as_str().unwrap()));
+            }
+            Ok(result)
+        },
         "providerRemove" => store::remove(&app.bridge, &home, &input["id"]),
         "backups" => backups(&app.bridge),
         "importHermes" => {

@@ -1,12 +1,12 @@
 //! Claude Code settings transforms and isolated file storage.
-use crate::config_ops;
+use crate::{config_ops, config_store};
 use serde_json::{Map, Value, json};
 use std::{
     env, fs, io,
     path::{Path, PathBuf},
 };
 
-const KEYS: [&str; 7] = [
+pub(super) const KEYS: [&str; 7] = [
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_API_KEY",
@@ -29,6 +29,29 @@ pub(super) fn current_file(bridge: &Path) -> PathBuf {
 }
 pub(super) fn original_file(bridge: &Path) -> PathBuf {
     bridge.join("claude-original.json")
+}
+pub(super) fn models(bridge: &Path) -> io::Result<Value> {
+    let value = config_store::read_json(&bridge.join("claude-models.json"))?;
+    Ok(if value.is_null() { json!({}) } else { value })
+}
+pub(super) fn remember_model(
+    bridge: &Path,
+    id: &str,
+    model: &str,
+    fast_model: Option<&str>,
+) -> io::Result<()> {
+    let mut value = models(bridge)?;
+    value[id] = json!({"model":model,"fastModel":fast_model});
+    config_ops::atomic(&bridge.join("claude-models.json"), &pretty(&value)?, None)
+}
+pub(super) fn forget_model(bridge: &Path, id: &str) -> io::Result<()> {
+    let file = bridge.join("claude-models.json");
+    if file.exists() {
+        let mut value = models(bridge)?;
+        value.as_object_mut().unwrap().remove(id);
+        config_ops::atomic(&file, &pretty(&value)?, None)?;
+    }
+    Ok(())
 }
 
 pub(super) fn read(path: &Path) -> io::Result<Option<String>> {
@@ -101,6 +124,7 @@ pub(crate) fn transform_apply(
     base: &str,
     token: Value,
     model: &str,
+    fast_model: Option<&str>,
 ) -> io::Result<(String, String)> {
     let mut root = parse(text)?;
     if !root.is_object() || root.get("env").is_some_and(|env| !env.is_object()) {
@@ -118,10 +142,13 @@ pub(crate) fn transform_apply(
         "ANTHROPIC_MODEL",
         "ANTHROPIC_DEFAULT_SONNET_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
     ] {
         env.insert(key.into(), json!(model));
     }
+    env.insert(
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL".into(),
+        json!(fast_model.unwrap_or(model)),
+    );
     Ok((pretty(&root)?, snapshot))
 }
 pub(crate) fn transform_restore(text: Option<&str>, snapshot: &str) -> io::Result<String> {
@@ -163,6 +190,7 @@ mod tests {
             "https://fixture.invalid",
             json!("fake"),
             "model",
+            None,
         )
         .unwrap();
         let restored = transform_restore(Some(&changed), &snapshot).unwrap();
@@ -170,5 +198,32 @@ mod tests {
             serde_json::from_str::<Value>(&restored).unwrap(),
             serde_json::from_str::<Value>(original).unwrap()
         );
+    }
+
+    #[test]
+    fn fast_model_only_changes_haiku_and_defaults_to_main() {
+        for fast in [Some("fast"), None] {
+            let (text, _) = transform_apply(
+                None,
+                None,
+                "https://fixture.invalid/v1",
+                json!("fixture-key"),
+                "main",
+                fast,
+            )
+            .unwrap();
+            let value = parse(Some(&text)).unwrap();
+            for key in [
+                "ANTHROPIC_MODEL",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            ] {
+                assert_eq!(value["env"][key], "main");
+            }
+            assert_eq!(
+                value["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+                fast.unwrap_or("main")
+            );
+        }
     }
 }

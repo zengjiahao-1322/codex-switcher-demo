@@ -169,6 +169,7 @@ const ACTIONS: &[&str] = &[
     "claudeApply",
     "claudeRestore",
     "claudeState",
+    "claudeProbe",
 ];
 fn same_secret(left: &str, right: &str) -> bool {
     left.len() == right.len()

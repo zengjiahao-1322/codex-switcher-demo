@@ -1,59 +1,74 @@
-//! Isolated custom Anthropic API settings for Claude Code.
+//! Claude Code actions and provider lifecycle integration.
+pub(crate) mod access;
 pub(crate) mod adapter;
+mod probe;
 pub(crate) mod settings;
 mod state;
 use crate::{config_ops, config_store, server::App};
+use access::Access;
 use serde_json::{Value, json};
 use settings::*;
 pub use state::{is_current, state};
 use std::{fs, io, path::Path};
 
-pub async fn apply(app: &App, input: &Value) -> io::Result<Value> {
-    let store = config_store::load(&app.bridge)?;
-    let provider = store["providers"]
+pub(super) fn provider(bridge: &Path, id: &Value) -> io::Result<Value> {
+    config_store::load(bridge)?["providers"]
         .as_array()
-        .and_then(|rows| rows.iter().find(|p| p["id"] == input["id"]))
-        .ok_or_else(|| io::Error::other("配置不存在，请刷新"))?;
-    if provider["apiMode"] != "anthropic_messages" {
-        crate::adapter::local_provider(app, provider).await?;
+        .and_then(|rows| rows.iter().find(|p| p["id"] == *id))
+        .cloned()
+        .ok_or_else(|| io::Error::other("配置不存在，请刷新"))
+}
+fn usable(provider: &Value) -> io::Result<Access> {
+    match access::local(provider) {
+        Access::Unavailable(_) => Err(io::Error::other("请先在 API 配置中填写密钥")),
+        access => Ok(access),
+    }
+}
+pub async fn apply(app: &App, input: &Value) -> io::Result<Value> {
+    let provider = provider(&app.bridge, &input["id"])?;
+    if usable(&provider)? == Access::Adapter {
+        crate::adapter::local_provider(app, &provider).await?;
     }
     apply_at(app, input, &config_dir())
 }
 fn apply_at(app: &App, input: &Value, dir: &Path) -> io::Result<Value> {
     let _operation = config_ops::operation(&app.bridge)?;
+    write_apply(app, input, dir)
+}
+fn write_apply(app: &App, input: &Value, dir: &Path) -> io::Result<Value> {
     let id = input["id"].as_str().unwrap_or("");
     let model = input["model"]
         .as_str()
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| io::Error::other("请选择 Claude Code 模型"))?;
-    let provider = config_store::load(&app.bridge)?["providers"]
-        .as_array()
-        .and_then(|rows| rows.iter().find(|p| p["id"] == id))
-        .cloned()
-        .ok_or_else(|| io::Error::other("配置不存在，请刷新"))?;
-    let adapter = provider["apiMode"] != "anthropic_messages";
+    let fast_model = input["fastModel"].as_str().filter(|s| !s.trim().is_empty());
+    let provider = provider(&app.bridge, &input["id"])?;
+    let access = usable(&provider)?;
+    let adapter = access == Access::Adapter;
     let settings = if adapter {
         Some(crate::adapter::settings(app)?)
     } else {
         None
     };
+    let base = if let Some(settings) = &settings {
+        format!("http://127.0.0.1:{}", settings["port"])
+    } else {
+        normalized_base(provider["baseUrl"].as_str().unwrap_or(""))
+    };
+    let token = settings
+        .as_ref()
+        .map(|s| s["token"].clone())
+        .unwrap_or_else(|| provider["apiKey"].clone());
     let file = dir.join("settings.json");
     let original_text = read(&file)?;
     let snapshot = read(&original_file(&app.bridge))?;
     let (next, snapshot_text) = transform_apply(
         original_text.as_deref(),
         snapshot.as_deref(),
-        if let Some(settings) = &settings {
-            format!("http://127.0.0.1:{}", settings["port"])
-        } else {
-            normalized_base(provider["baseUrl"].as_str().unwrap_or(""))
-        }
-        .as_str(),
-        settings
-            .as_ref()
-            .map(|s| s["token"].clone())
-            .unwrap_or_else(|| provider["apiKey"].clone()),
+        &base,
+        token,
         model,
+        fast_model,
     )?;
     backup(&app.bridge, original_text.as_deref().unwrap_or("{}"))?;
     fs::create_dir_all(dir)?;
@@ -61,22 +76,11 @@ fn apply_at(app: &App, input: &Value, dir: &Path) -> io::Result<Value> {
         atomic(&original_file(&app.bridge), &snapshot_text, None)?;
     }
     atomic(&file, &next, original_text.as_deref())?;
-    let current = json!({"providerId":id,"model":model,"label":provider["name"]});
+    let current = json!({"providerId":id,"model":model,"fastModel":fast_model,"access":access.name(),"label":provider["name"]});
     config_ops::atomic(&current_file(&app.bridge), &pretty(&current)?, None)?;
-    let mut note = "";
-    if let Some(settings) = &settings {
-        if input["autostart"] != false
-            && settings["autostartDecided"] != true
-            && !crate::integration::startup_file().exists()
-        {
-            crate::integration::autostart(true, &app.bridge)?;
-            note = "已开启开机自启转换服务。";
-        } else if !crate::integration::startup_file().exists() {
-            note = "注意：未开启开机自启，重启后需先打开切换器。";
-        }
-    }
+    remember_model(&app.bridge, id, model, fast_model)?;
     Ok(
-        json!({"message":format!("已让 Claude Code 使用{}（{}）。{}{}新开的 Claude Code 会话生效（CLI、VS Code、桌面版 Code），已打开的会话需重开。官方登录凭据未改动。", provider["name"].as_str().unwrap_or("配置"), model, if adapter {"经本机转换，需保持切换器运行。"} else {""}, note)}),
+        json!({"message":format!("已让 Claude Code 使用{}（{}）。{}新开的 Claude Code 会话生效（CLI、VS Code、桌面版 Code），已打开的会话需重开。官方登录凭据未改动。", provider["name"].as_str().unwrap_or("配置"), model, if adapter {"经本机转换，需保持切换器运行。"} else {""}),"needsAutostart":adapter && !crate::integration::startup_file().exists()}),
     )
 }
 pub fn restore(app: &App) -> io::Result<Value> {
@@ -84,28 +88,52 @@ pub fn restore(app: &App) -> io::Result<Value> {
 }
 fn restore_at(app: &App, dir: &Path) -> io::Result<Value> {
     let _operation = config_ops::operation(&app.bridge)?;
-    if !original_file(&app.bridge).exists() {
-        return Err(io::Error::other("没有可恢复的 Claude Code 原始配置"));
-    }
-    let original = read(&original_file(&app.bridge))?.unwrap();
+    let original = read(&original_file(&app.bridge))?
+        .ok_or_else(|| io::Error::other("没有可恢复的 Claude Code 原始配置"))?;
+    let destination = state::original(&parse(Some(&original))?)?;
     let file = dir.join("settings.json");
     let current_text = read(&file)?;
     let next = transform_restore(current_text.as_deref(), &original)?;
     atomic(&file, &next, current_text.as_deref())?;
-    if original_file(&app.bridge).exists() {
-        fs::remove_file(original_file(&app.bridge))?;
-    }
+    fs::remove_file(original_file(&app.bridge))?;
     if current_file(&app.bridge).exists() {
         fs::remove_file(current_file(&app.bridge))?;
     }
-    Ok(json!({"message":"已恢复官方。官方登录凭据未改动。"}))
+    let message = if destination["kind"] == "official" {
+        "已恢复官方登录。".to_owned()
+    } else {
+        format!(
+            "已恢复接管前的配置（{}）。",
+            destination["host"].as_str().unwrap_or("")
+        )
+    };
+    Ok(json!({"message":format!("{message}登录凭据未改动。"),"restoredTo":destination["kind"]}))
 }
-pub const ACTIONS: &[&str] = &["claudeApply", "claudeRestore", "claudeState"];
+pub fn on_provider_changed(app: &App, id: &str) -> io::Result<bool> {
+    let current = config_store::read_json(&current_file(&app.bridge))?;
+    if current["providerId"] != id {
+        return Ok(false);
+    }
+    let provider = provider(&app.bridge, &json!(id))?;
+    let remembered = models(&app.bridge)?;
+    let model = remembered[id]["model"]
+        .as_str()
+        .or(provider["model"].as_str())
+        .unwrap_or("");
+    let input = json!({"id":id,"model":model,"fastModel":remembered[id]["fastModel"]});
+    write_apply(app, &input, &config_dir())?;
+    Ok(true)
+}
+pub fn on_provider_removed(bridge: &Path, id: &str) -> io::Result<()> {
+    forget_model(bridge, id)
+}
+pub const ACTIONS: &[&str] = &["claudeApply", "claudeRestore", "claudeState", "claudeProbe"];
 pub async fn action(app: &App, action: &str, input: &Value) -> io::Result<Value> {
     match action {
         "claudeApply" => apply(app, input).await,
         "claudeRestore" => restore(app),
         "claudeState" => state(&app.bridge),
+        "claudeProbe" => probe::probe(app, input).await,
         _ => Err(io::Error::other("Unknown Claude Code action")),
     }
 }

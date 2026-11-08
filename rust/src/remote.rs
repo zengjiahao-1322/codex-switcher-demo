@@ -127,11 +127,11 @@ pub async fn claude(app: Arc<App>, input: &Value, restore: bool) -> io::Result<V
             .and_then(|rows| rows.iter().find(|p| p["id"] == input["providerId"]))
             .cloned()
             .ok_or_else(|| io::Error::other("配置不存在"))?;
-        if provider["apiMode"] != "anthropic_messages" {
-            return Err(io::Error::other("远程服务器只支持 Anthropic 协议的 API"));
+        if let crate::claude::access::Access::Unavailable(reason) = crate::claude::access::remote(&provider) {
+            return Err(io::Error::other(reason));
         }
-        if text(&provider["apiKey"]).is_empty() || text(&input["model"]).trim().is_empty() {
-            return Err(io::Error::other("请选择密钥和模型"));
+        if text(&input["model"]).trim().is_empty() {
+            return Err(io::Error::other("请选择 Claude Code 模型"));
         }
         provider
     };
@@ -146,7 +146,7 @@ pub async fn claude(app: Arc<App>, input: &Value, restore: bool) -> io::Result<V
             let snapshot = existing["snapshot"].as_str().ok_or_else(|| io::Error::other("没有可恢复的 Claude Code 原始配置"))?;
             crate::claude::settings::transform_restore(source, snapshot)?
         } else {
-            let (next, snapshot) = crate::claude::settings::transform_apply(source, existing["snapshot"].as_str(), text(&provider["baseUrl"]), provider["apiKey"].clone(), text(&input["model"]))?;
+            let (next, snapshot) = crate::claude::settings::transform_apply(source, existing["snapshot"].as_str(), text(&provider["baseUrl"]), provider["apiKey"].clone(), text(&input["model"]), input["fastModel"].as_str())?;
             std::fs::create_dir_all(file.parent().unwrap())?;
             let saved = json!({"snapshot":snapshot,"current":existing["current"]});
             crate::config_ops::atomic(&file, &serde_json::to_string_pretty(&saved).unwrap(), None)?;

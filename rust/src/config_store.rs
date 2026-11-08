@@ -217,6 +217,7 @@ pub fn remove(bridge: &Path, home: &Path, id: &Value) -> io::Result<Value> {
         adapter["target"] = Value::Null;
         write_json(&bridge.join("adapter.json"), &adapter)?;
     }
+    crate::claude::on_provider_removed(bridge, id.as_str().unwrap_or(""))?;
     Ok(
         json!({"message":format!("已删除配置。{}",if targeted{"之前经它转换建立的 Codex 对话将无法继续。"}else{""})}),
     )

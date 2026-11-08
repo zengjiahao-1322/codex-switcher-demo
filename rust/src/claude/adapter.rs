@@ -213,7 +213,7 @@ fn sse(body: Body) -> Response<Body> {
         .body(body)
         .unwrap()
 }
-type Upstream = Pin<Box<dyn Future<Output = Result<Value, Failure>> + Send>>;
+pub(super) type Upstream = Pin<Box<dyn Future<Output = Result<Value, Failure>> + Send>>;
 fn upstream_error(status: u16, body: &str) -> String {
     let parsed = serde_json::from_str::<Value>(body).ok();
     let detail = parsed
@@ -253,6 +253,43 @@ async fn request(provider: Value, payload: Value) -> Result<Value, Failure> {
     }
     response.json().await.map_err(|_| Failure::unsupported())
 }
+pub(super) fn exchange(
+    provider: Value,
+    source: &Value,
+    message_id: String,
+) -> Result<Upstream, Failure> {
+    let model = text(&source["model"]).to_owned();
+    let response_input = to_responses(source)?;
+    let prepared = if provider["apiMode"] == "chat_completions" {
+        Some(adapter_convert::prepare(
+            &response_input,
+            &provider,
+            &model,
+        )?)
+    } else {
+        None
+    };
+    let payload = prepared
+        .as_ref()
+        .map(|p| p.payload.clone())
+        .unwrap_or(response_input);
+    let timeout = provider["timeoutMs"]
+        .as_u64()
+        .filter(|n| *n > 0)
+        .unwrap_or(600000);
+    Ok(Box::pin(async move {
+        let reply =
+            tokio::time::timeout(Duration::from_millis(timeout), request(provider, payload))
+                .await
+                .map_err(|_| Failure::unsupported())??;
+        let normalized = if let Some(p) = prepared {
+            adapter_convert::complete(reply, &p)?
+        } else {
+            reply
+        };
+        to_anthropic(&normalized, &model, &message_id)
+    }))
+}
 pub async fn handle(req: Request<Incoming>, app: Arc<App>, _settings: Value) -> Response<Body> {
     let current = crate::config_store::read_json(&app.bridge.join("claude-current.json"))
         .unwrap_or(Value::Null);
@@ -290,39 +327,10 @@ pub async fn handle(req: Request<Incoming>, app: Arc<App>, _settings: Value) -> 
     let message_id = format!("msg_{}", crate::editors::uuid().unwrap());
     let start = json!({"type":"message_start","message":{"id":message_id,"type":"message","role":"assistant","model":model,"content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}});
     let stream = source["stream"] == true;
-    let response_input = match to_responses(&source) {
-        Ok(v) => v,
+    let mut future = match exchange(provider, &source, message_id) {
+        Ok(future) => future,
         Err(e) => return error(e.status, &e.message),
     };
-    let is_chat = provider["apiMode"] == "chat_completions";
-    let prepared = if is_chat {
-        match adapter_convert::prepare(&response_input, &provider, &model) {
-            Ok(p) => Some(p),
-            Err(e) => return error(e.status, &e.message),
-        }
-    } else {
-        None
-    };
-    let payload = prepared
-        .as_ref()
-        .map(|p| p.payload.clone())
-        .unwrap_or(response_input);
-    let timeout = provider["timeoutMs"]
-        .as_u64()
-        .filter(|n| *n > 0)
-        .unwrap_or(600000);
-    let mut future: Upstream = Box::pin(async move {
-        let reply =
-            tokio::time::timeout(Duration::from_millis(timeout), request(provider, payload))
-                .await
-                .map_err(|_| Failure::unsupported())??;
-        let normalized = if let Some(p) = prepared {
-            adapter_convert::complete(reply, &p)?
-        } else {
-            reply
-        };
-        to_anthropic(&normalized, &model, &message_id)
-    });
     if !stream {
         return match future.await {
             Ok(v) => response(200, "application/json", serde_json::to_vec(&v).unwrap()),
