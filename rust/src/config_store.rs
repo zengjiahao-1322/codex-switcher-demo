@@ -176,7 +176,7 @@ pub fn remove(bridge: &Path, home: &Path, id: &Value) -> io::Result<Value> {
     if id == "official" {
         return Err(io::Error::other("官方登录配置不能删除"));
     }
-    if crate::claude_code::is_current(bridge, id.as_str().unwrap_or(""))? {
+    if crate::claude::is_current(bridge, id.as_str().unwrap_or(""))? {
         return Err(io::Error::other(
             "该配置正在被 Claude Code 使用。请先恢复官方或换一个配置，再删除。",
         ));

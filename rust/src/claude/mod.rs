@@ -1,190 +1,13 @@
 //! Isolated custom Anthropic API settings for Claude Code.
+pub(crate) mod adapter;
+pub(crate) mod settings;
+mod state;
 use crate::{config_ops, config_store, server::App};
-use serde_json::{Map, Value, json};
-use std::{
-    env, fs, io,
-    path::{Path, PathBuf},
-};
+use serde_json::{Value, json};
+use settings::*;
+pub use state::{is_current, state};
+use std::{fs, io, path::Path};
 
-const KEYS: [&str; 7] = [
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_MODEL",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-];
-
-fn config_dir() -> PathBuf {
-    env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| crate::platform::user_home().join(".claude"))
-}
-fn settings_file() -> PathBuf {
-    config_dir().join("settings.json")
-}
-fn current_file(bridge: &Path) -> PathBuf {
-    bridge.join("claude-current.json")
-}
-fn original_file(bridge: &Path) -> PathBuf {
-    bridge.join("claude-original.json")
-}
-
-fn read(path: &Path) -> io::Result<Option<String>> {
-    match fs::read_to_string(path) {
-        Ok(value) => Ok(Some(value)),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e),
-    }
-}
-fn parse(text: Option<&str>) -> io::Result<Value> {
-    serde_json::from_str(text.unwrap_or("{}"))
-        .map_err(|_| io::Error::other("Claude Code settings.json 无法解析"))
-}
-fn pretty(value: &Value) -> io::Result<String> {
-    serde_json::to_string_pretty(value).map_err(io::Error::other)
-}
-fn atomic(file: &Path, value: &str, expected: Option<&str>) -> io::Result<()> {
-    config_ops::atomic(file, value, Some(expected))
-}
-fn env_object(value: &mut Value) -> io::Result<&mut Map<String, Value>> {
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| io::Error::other("Claude Code settings.json 顶层必须是对象"))?;
-    if !object.contains_key("env") {
-        object.insert("env".into(), Value::Object(Map::new()));
-    }
-    object
-        .get_mut("env")
-        .and_then(Value::as_object_mut)
-        .ok_or_else(|| io::Error::other("Claude Code settings.json 的 env 必须是对象"))
-}
-fn backup(bridge: &Path, text: &str) -> io::Result<()> {
-    let dir = bridge.join("backups/claude-settings");
-    fs::create_dir_all(&dir)?;
-    let stamp = crate::diagnostics::now().replace([':', '.', '+'], "");
-    let random = crate::platform::random_bytes()?;
-    let suffix = random[..4]
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
-    config_ops::atomic(&dir.join(format!("{stamp}-{suffix}.json")), text, None)?;
-    let mut entries = fs::read_dir(&dir)?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
-    entries.sort_by_key(|e| e.file_name());
-    while entries.len() > 10 {
-        fs::remove_file(entries.remove(0).path())?;
-    }
-    Ok(())
-}
-fn original_snapshot(env: Option<&Map<String, Value>>) -> Value {
-    let mut out = Map::new();
-    for key in KEYS {
-        if let Some(value) = env.and_then(|e| e.get(key)) {
-            out.insert(key.into(), value.clone());
-        }
-    }
-    json!({"values":out,"envPresent":env.is_some(),"envOrder":env.map(|e| e.keys().cloned().collect::<Vec<_>>()).unwrap_or_default()})
-}
-fn normalized_base(value: &str) -> String {
-    let mut value = value.trim_end_matches('/').to_owned();
-    if value.ends_with("/v1") {
-        value.truncate(value.len() - 3);
-    }
-    value.trim_end_matches('/').to_owned()
-}
-pub(crate) fn transform_apply(
-    text: Option<&str>,
-    snapshot: Option<&str>,
-    base: &str,
-    token: Value,
-    model: &str,
-) -> io::Result<(String, String)> {
-    let mut root = parse(text)?;
-    if !root.is_object() || root.get("env").is_some_and(|env| !env.is_object()) {
-        return Err(io::Error::other("Claude Code settings.json 格式无效"));
-    }
-    let snapshot = match snapshot {
-        Some(value) => value.to_owned(),
-        None => pretty(&original_snapshot(root["env"].as_object()))?,
-    };
-    let env = env_object(&mut root)?;
-    env.insert("ANTHROPIC_BASE_URL".into(), json!(normalized_base(base)));
-    env.insert("ANTHROPIC_AUTH_TOKEN".into(), token);
-    env.shift_remove("ANTHROPIC_API_KEY");
-    for key in [
-        "ANTHROPIC_MODEL",
-        "ANTHROPIC_DEFAULT_SONNET_MODEL",
-        "ANTHROPIC_DEFAULT_OPUS_MODEL",
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-    ] {
-        env.insert(key.into(), json!(model));
-    }
-    Ok((pretty(&root)?, snapshot))
-}
-pub(crate) fn transform_restore(text: Option<&str>, snapshot: &str) -> io::Result<String> {
-    let original = parse(Some(snapshot))?;
-    let mut root = parse(text)?;
-    let env = env_object(&mut root)?;
-    for key in KEYS {
-        env.shift_remove(key);
-    }
-    let mut ordered = Map::new();
-    if let Some(order) = original["envOrder"].as_array() {
-        for key in order.iter().filter_map(Value::as_str) {
-            if KEYS.contains(&key) {
-                if let Some(value) = original["values"].get(key) {
-                    ordered.insert(key.into(), value.clone());
-                }
-            } else if let Some(value) = env.shift_remove(key) {
-                ordered.insert(key.into(), value);
-            }
-        }
-    }
-    ordered.extend(std::mem::take(env));
-    *env = ordered;
-    if env.is_empty() && original["envPresent"] != true {
-        root.as_object_mut().unwrap().shift_remove("env");
-    }
-    pretty(&root)
-}
-pub fn is_current(bridge: &Path, id: &str) -> io::Result<bool> {
-    Ok(state(bridge)?["current"]["providerId"] == id)
-}
-pub fn state(bridge: &Path) -> io::Result<Value> {
-    let dir = config_dir();
-    let current = read(&current_file(bridge))?.and_then(|s| serde_json::from_str::<Value>(&s).ok());
-    if current.is_none() {
-        return Ok(json!({"configDir":dir,"current":null,"notice":null}));
-    }
-    let settings = read(&settings_file())?;
-    let root = parse(settings.as_deref())?;
-    let providers = config_store::load(bridge)?;
-    let changed = current.as_ref().is_some_and(|v| {
-        let expected = providers["providers"]
-            .as_array()
-            .and_then(|rows| rows.iter().find(|p| p["id"] == v["providerId"]))
-            .and_then(|p| {
-                if p["apiMode"] == "anthropic_messages" {
-                    p["baseUrl"].as_str().map(normalized_base)
-                } else {
-                    config_store::read_json(&bridge.join("adapter.json"))
-                        .ok()
-                        .and_then(|s| s["port"].as_u64())
-                        .map(|port| format!("http://127.0.0.1:{port}"))
-                }
-            });
-        !root["env"]["ANTHROPIC_BASE_URL"]
-            .as_str()
-            .zip(expected)
-            .is_some_and(|(actual, expected)| normalized_base(actual) == expected)
-    });
-    Ok(
-        json!({"configDir":dir,"current":if changed { None } else { current },"notice":if changed { Some("Claude Code 配置已被外部修改，请重新选择。") } else { None }}),
-    )
-}
 pub async fn apply(app: &App, input: &Value) -> io::Result<Value> {
     let store = config_store::load(&app.bridge)?;
     let provider = store["providers"]
@@ -292,27 +115,11 @@ mod tests {
     use super::*;
     use std::{
         collections::HashMap,
+        env,
+        path::PathBuf,
         sync::{Mutex, atomic::AtomicBool},
         time::Instant,
     };
-
-    #[test]
-    fn restore_keeps_an_originally_empty_env_object() {
-        let original = r#"{"env":{},"other":true}"#;
-        let (changed, snapshot) = transform_apply(
-            Some(original),
-            None,
-            "https://fixture.invalid",
-            json!("fake"),
-            "model",
-        )
-        .unwrap();
-        let restored = transform_restore(Some(&changed), &snapshot).unwrap();
-        assert_eq!(
-            serde_json::from_str::<Value>(&restored).unwrap(),
-            serde_json::from_str::<Value>(original).unwrap()
-        );
-    }
 
     fn fixture() -> (App, PathBuf) {
         let random = crate::platform::random_bytes().unwrap();

@@ -144,9 +144,9 @@ pub async fn claude(app: Arc<App>, input: &Value, restore: bool) -> io::Result<V
         let source = if raw.is_empty() { None } else { Some(raw) };
         let next = if restore {
             let snapshot = existing["snapshot"].as_str().ok_or_else(|| io::Error::other("没有可恢复的 Claude Code 原始配置"))?;
-            crate::claude_code::transform_restore(source, snapshot)?
+            crate::claude::settings::transform_restore(source, snapshot)?
         } else {
-            let (next, snapshot) = crate::claude_code::transform_apply(source, existing["snapshot"].as_str(), text(&provider["baseUrl"]), provider["apiKey"].clone(), text(&input["model"]))?;
+            let (next, snapshot) = crate::claude::settings::transform_apply(source, existing["snapshot"].as_str(), text(&provider["baseUrl"]), provider["apiKey"].clone(), text(&input["model"]))?;
             std::fs::create_dir_all(file.parent().unwrap())?;
             let saved = json!({"snapshot":snapshot,"current":existing["current"]});
             crate::config_ops::atomic(&file, &serde_json::to_string_pretty(&saved).unwrap(), None)?;
