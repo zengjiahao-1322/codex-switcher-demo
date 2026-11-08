@@ -37,6 +37,20 @@ fn string(value: &Value) -> String {
         _ => value.to_string(),
     }
 }
+pub fn is_local(base_url: &str) -> bool {
+    let host = base_url
+        .split("://")
+        .nth(1)
+        .unwrap_or("")
+        .split('/')
+        .next()
+        .unwrap_or("");
+    host == "localhost"
+        || host.starts_with("localhost:")
+        || host == "127.0.0.1"
+        || host.starts_with("127.0.0.1:")
+        || host.starts_with("[::1]")
+}
 pub fn clean(input: &Value, previous: &Value, allow_empty: bool) -> io::Result<Value> {
     let field = |key: &str| {
         input

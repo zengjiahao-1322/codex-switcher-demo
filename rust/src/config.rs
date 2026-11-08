@@ -196,23 +196,11 @@ impl App {
                 json!(provider == "hermes_bridge" && p["id"] == selected["providerId"]),
             );
             object.insert("access".into(), access);
-            let base = p["baseUrl"].as_str().unwrap_or("");
-            let host = base
-                .split("://")
-                .nth(1)
-                .unwrap_or("")
-                .split('/')
-                .next()
-                .unwrap_or("");
             object.insert(
                 "local".into(),
-                json!(
-                    host == "localhost"
-                        || host.starts_with("localhost:")
-                        || host == "127.0.0.1"
-                        || host.starts_with("127.0.0.1:")
-                        || host.starts_with("[::1]")
-                ),
+                json!(crate::config_store::is_local(
+                    p["baseUrl"].as_str().unwrap_or("")
+                )),
             );
             providers.push(public);
         }

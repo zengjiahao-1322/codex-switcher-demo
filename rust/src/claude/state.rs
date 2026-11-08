@@ -14,8 +14,12 @@ pub(super) fn original(snapshot: &Value) -> io::Result<Value> {
     match snapshot["values"].get("ANTHROPIC_BASE_URL") {
         None => Ok(json!({"kind":"official","host":null})),
         Some(base) => {
-            let url = reqwest::Url::parse(base.as_str().unwrap_or("")).map_err(io::Error::other)?;
-            Ok(json!({"kind":"custom","host":url.host_str()}))
+            let raw = base.as_str().unwrap_or("").trim();
+            let host = reqwest::Url::parse(raw)
+                .ok()
+                .and_then(|url| url.host_str().map(str::to_owned))
+                .unwrap_or_else(|| raw.to_owned());
+            Ok(json!({"kind":"custom","host":host}))
         }
     }
 }
@@ -104,6 +108,10 @@ mod tests {
             original(&json!({"values":{"ANTHROPIC_BASE_URL":"https://original.invalid/claude"}}))
                 .unwrap(),
             json!({"kind":"custom","host":"original.invalid"})
+        );
+        assert_eq!(
+            original(&json!({"values":{"ANTHROPIC_BASE_URL":"api.example.com/claude"}})).unwrap(),
+            json!({"kind":"custom","host":"api.example.com/claude"})
         );
     }
 }

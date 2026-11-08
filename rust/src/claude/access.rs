@@ -23,19 +23,7 @@ impl Access {
     }
 }
 pub fn local(provider: &Value) -> Access {
-    let base = provider["baseUrl"].as_str().unwrap_or("");
-    let host = base
-        .split("://")
-        .nth(1)
-        .unwrap_or("")
-        .split('/')
-        .next()
-        .unwrap_or("");
-    let local = host == "localhost"
-        || host.starts_with("localhost:")
-        || host == "127.0.0.1"
-        || host.starts_with("127.0.0.1:")
-        || host.starts_with("[::1]");
+    let local = crate::config_store::is_local(provider["baseUrl"].as_str().unwrap_or(""));
     if !local && provider["apiKey"].as_str().is_none_or(str::is_empty) {
         Access::Unavailable("缺少密钥")
     } else if provider["apiMode"] == "anthropic_messages" {

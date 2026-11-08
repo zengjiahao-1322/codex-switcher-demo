@@ -109,10 +109,10 @@ fn restore_at(app: &App, dir: &Path) -> io::Result<Value> {
     };
     Ok(json!({"message":format!("{message}登录凭据未改动。"),"restoredTo":destination["kind"]}))
 }
-pub fn on_provider_changed(app: &App, id: &str) -> io::Result<bool> {
+pub fn on_provider_changed(app: &App, id: &str) -> io::Result<Option<String>> {
     let current = config_store::read_json(&current_file(&app.bridge))?;
     if current["providerId"] != id {
-        return Ok(false);
+        return Ok(None);
     }
     let provider = provider(&app.bridge, &json!(id))?;
     let remembered = models(&app.bridge)?;
@@ -121,8 +121,13 @@ pub fn on_provider_changed(app: &App, id: &str) -> io::Result<bool> {
         .or(provider["model"].as_str())
         .unwrap_or("");
     let input = json!({"id":id,"model":model,"fastModel":remembered[id]["fastModel"]});
-    write_apply(app, &input, &config_dir())?;
-    Ok(true)
+    Ok(Some(match write_apply(app, &input, &config_dir()) {
+        Ok(_) => "已同步到 Claude Code。".to_owned(),
+        Err(error) => format!(
+            "未能同步到 Claude Code：{}，请到 Claude Code 页重新应用。",
+            error
+        ),
+    }))
 }
 pub fn on_provider_removed(bridge: &Path, id: &str) -> io::Result<()> {
     forget_model(bridge, id)

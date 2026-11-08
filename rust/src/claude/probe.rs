@@ -17,7 +17,15 @@ async fn direct(provider: &Value, payload: &Value) -> Result<(), Failure> {
         .no_proxy()
         .timeout(Duration::from_secs(30))
         .build()
-        .map_err(|_| Failure::unsupported())?
+        .map_err(|error| Failure {
+            status: 0,
+            message: if error.is_timeout() {
+                "timeout".into()
+            } else {
+                "connect".into()
+            },
+            upstream: false,
+        })?
         .post(format!(
             "{}/v1/messages",
             normalized_base(provider["baseUrl"].as_str().unwrap_or(""))
@@ -61,9 +69,17 @@ pub(super) async fn probe(app: &App, input: &Value) -> io::Result<Value> {
         }
     })
     .await
-    .unwrap_or_else(|_| Err(Failure::unsupported()));
+    .unwrap_or_else(|_| {
+        Err(Failure {
+            status: 0,
+            message: "timeout".into(),
+            upstream: false,
+        })
+    });
     let message = match &result {
         Ok(()) => "连接正常".to_owned(),
+        Err(error) if error.message == "timeout" => "连接超时（30 秒）".to_owned(),
+        Err(error) if !error.upstream => "无法连接上游，或返回内容无法识别".to_owned(),
         Err(error) => {
             let kind = match error.status {
                 400 => "invalid_request_error",
