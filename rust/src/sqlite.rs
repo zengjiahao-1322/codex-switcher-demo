@@ -1,4 +1,4 @@
-//! Read-only SQLite using the OS library, without another bundled runtime.
+//! SQLite using the OS library. User databases open read-only; usage opens read-write.
 use serde_json::{Map, Value, json};
 use std::{
     ffi::{CStr, CString, c_char, c_void},
@@ -29,6 +29,7 @@ unsafe extern "C" {
         destructor: Option<unsafe extern "C" fn(Handle)>,
     ) -> i32;
     fn sqlite3_bind_int64(stmt: Handle, index: i32, value: i64) -> i32;
+    fn sqlite3_bind_null(stmt: Handle, index: i32) -> i32;
     fn sqlite3_step(stmt: Handle) -> i32;
     fn sqlite3_column_count(stmt: Handle) -> i32;
     fn sqlite3_column_name(stmt: Handle, column: i32) -> *const c_char;
@@ -99,6 +100,7 @@ mod native {
         ) -> i32
     );
     api!(sqlite3_bind_int64(stmt: Handle, index: i32, value: i64) -> i32);
+    api!(sqlite3_bind_null(stmt: Handle, index: i32) -> i32);
     api!(sqlite3_step(stmt: Handle) -> i32);
     api!(sqlite3_column_count(stmt: Handle) -> i32);
     api!(sqlite3_column_name(stmt: Handle, column: i32) -> *const c_char);
@@ -128,9 +130,15 @@ impl Drop for Statement {
 }
 impl Database {
     pub fn open(path: &Path) -> io::Result<Self> {
+        Self::open_flags(path, 1)
+    }
+    pub fn writable(path: &Path) -> io::Result<Self> {
+        Self::open_flags(path, 2 | 4)
+    }
+    fn open_flags(path: &Path, flags: i32) -> io::Result<Self> {
         let file = CString::new(crate::platform::display_path(path)).map_err(io::Error::other)?;
         let mut db = std::ptr::null_mut();
-        let status = unsafe { sqlite3_open_v2(file.as_ptr(), &mut db, 1, std::ptr::null()) };
+        let status = unsafe { sqlite3_open_v2(file.as_ptr(), &mut db, flags, std::ptr::null()) };
         if status != 0 {
             let error = if db.is_null() {
                 "SQLite open failed".into()
@@ -159,6 +167,19 @@ impl Database {
         )
     }
     pub fn query(&self, sql: &str, parameters: &[Value]) -> io::Result<Vec<Value>> {
+        let mut rows = Vec::new();
+        self.query_each(sql, parameters, |row| {
+            rows.push(row);
+            Ok(())
+        })?;
+        Ok(rows)
+    }
+    pub fn query_each(
+        &self,
+        sql: &str,
+        parameters: &[Value],
+        mut visit: impl FnMut(Value) -> io::Result<()>,
+    ) -> io::Result<()> {
         let text = CString::new(sql).map_err(io::Error::other)?;
         let mut statement = std::ptr::null_mut();
         if unsafe {
@@ -179,7 +200,9 @@ impl Database {
             .map(|v| CString::new(v.as_str().unwrap_or("")).map_err(io::Error::other))
             .collect::<Result<_, _>>()?;
         for (index, value) in parameters.iter().enumerate() {
-            let status = if let Some(number) = value.as_i64() {
+            let status = if value.is_null() {
+                unsafe { sqlite3_bind_null(statement.0, index as i32 + 1) }
+            } else if let Some(number) = value.as_i64() {
                 unsafe { sqlite3_bind_int64(statement.0, index as i32 + 1, number) }
             } else {
                 unsafe {
@@ -196,7 +219,6 @@ impl Database {
                 return Err(self.error());
             }
         }
-        let mut rows = Vec::new();
         loop {
             match unsafe { sqlite3_step(statement.0) } {
                 100 => {
@@ -219,9 +241,9 @@ impl Database {
                         };
                         row.insert(name, value);
                     }
-                    rows.push(Value::Object(row));
+                    visit(Value::Object(row))?;
                 }
-                101 => return Ok(rows),
+                101 => return Ok(()),
                 _ => return Err(self.error()),
             }
         }

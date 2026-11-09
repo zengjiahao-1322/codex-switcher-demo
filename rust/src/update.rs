@@ -132,6 +132,11 @@ struct Fetch {
     fallback: Option<Value>,
 }
 
+pub async fn public_json(app: &App, url: &str) -> io::Result<Value> {
+    let bytes = curl_once(app, url, None, false).await.map_err(|e| io::Error::other(e.message))?;
+    serde_json::from_slice(&bytes).map_err(io::Error::other)
+}
+
 #[allow(clippy::result_large_err)]
 async fn curl_once(
     app: &App,

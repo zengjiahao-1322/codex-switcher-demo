@@ -175,6 +175,8 @@ impl App {
             for key in ["apiKey", "createdAt", "updatedAt", "origin"] {
                 object.remove(key);
             }
+            object.insert("pricing".into(), p.get("pricing").filter(|v| !v.is_null()).cloned().unwrap_or_else(|| json!({"mode":"official"})));
+            object.insert("usageUrl".into(), p["usageUrl"].clone());
             let probe = &probes[p["id"].as_str().unwrap_or("")];
             let signature = format!(
                 "{:x}",

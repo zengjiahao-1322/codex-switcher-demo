@@ -124,8 +124,30 @@ pub fn clean(input: &Value, previous: &Value, allow_empty: bool) -> io::Result<V
     {
         return Err(io::Error::other("API 密钥必填，且不能含空白字符"));
     }
+    let pricing = input.get("pricing").or(previous.get("pricing")).filter(|v| !v.is_null()).cloned().unwrap_or_else(|| json!({"mode":"official"}));
+    match pricing["mode"].as_str() {
+        Some("official" | "free") => {},
+        Some("multiplier") => {
+            if !pricing["multiplier"].as_f64().is_some_and(|n| n.is_finite() && n > 0.0) {
+                return Err(io::Error::other("计价倍率必须为大于0的数字"));
+            }
+            if !matches!(pricing["currency"].as_str(), Some("USD" | "CNY")) {
+                return Err(io::Error::other("计价币种必须为USD或CNY"));
+            }
+        },
+        _ => return Err(io::Error::other("计价mode必须为official、multiplier或free")),
+    }
+    let usage_url = input.get("usageUrl").unwrap_or(&previous["usageUrl"]);
+    if !usage_url.is_null() && !usage_url.is_string() { return Err(io::Error::other("用量面板地址必须是http或https地址")); }
+    let usage_url = usage_url.as_str().unwrap_or("").trim();
+    if !usage_url.is_empty() {
+        let parsed = reqwest::Url::parse(usage_url).map_err(|_| io::Error::other("用量面板地址必须是http或https地址"))?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+            return Err(io::Error::other("用量面板地址必须是http或https地址"));
+        }
+    }
     Ok(
-        json!({"name":name,"baseUrl":base,"apiMode":mode,"model":model,"models":models,"apiKey":key}),
+        json!({"name":name,"baseUrl":base,"apiMode":mode,"model":model,"models":models,"apiKey":key,"pricing":pricing,"usageUrl":if usage_url.is_empty(){Value::Null}else{json!(usage_url)}}),
     )
 }
 fn unique(state: &Value, name: &Value, except: &Value) -> io::Result<()> {

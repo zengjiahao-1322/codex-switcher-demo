@@ -439,6 +439,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     crate::adapter::settings(&app)?;
     crate::mcp::migrate(&app)?;
+    crate::usage::initialize(&app)?;
     let service_ms = service_started.elapsed().as_millis();
     let mut handover = json!({});
     let listen_started = Instant::now();

@@ -27,6 +27,7 @@ mod sqlite;
 mod switching;
 mod thread_routing;
 mod update;
+mod usage;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

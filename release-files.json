@@ -83,6 +83,11 @@
   "web/js/store.js",
   "web/js/tabs.js",
   "web/js/ui.js",
+  "web/js/usage/actions.js",
+  "web/js/usage/chart.js",
+  "web/js/usage/model.js",
+  "web/js/usage/tables.js",
+  "web/js/usage/view.js",
   "web/js/views/accounts.js",
   "web/js/views/backups.js",
   "web/js/views/diagnostics.js",
@@ -91,5 +96,7 @@
   "web/js/views/settings.js",
   "web/js/views/status.js",
   "web/js/views/update.js",
-  "web/style.css"
+  "web/style.css",
+  "data/prices-overrides.json",
+  "data/price-snapshot.json"
 ]

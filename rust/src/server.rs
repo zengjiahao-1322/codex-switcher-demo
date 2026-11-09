@@ -170,6 +170,9 @@ const ACTIONS: &[&str] = &[
     "claudeRestore",
     "claudeState",
     "claudeProbe",
+    "usage",
+    "usageRequests",
+    "usagePrices",
 ];
 fn same_secret(left: &str, right: &str) -> bool {
     left.len() == right.len()
@@ -404,6 +407,13 @@ pub(crate) async fn serve(
                         companion_reject(&app, "400: Invalid JSON", &Value::Null);
                     }
                     return Ok(error(400, "Invalid JSON"));
+                }
+                if matches!(action, "usage" | "usageRequests" | "usagePrices") {
+                    let value = crate::usage::action(app.clone(), action, input.unwrap()).await;
+                    return Ok(match value {
+                        Ok(value) => response(200, "application/json; charset=utf-8", serde_json::to_vec(&value).unwrap()),
+                        Err(error_value) => error(400, &error_value.to_string()),
+                    });
                 }
                 if ["companionPackage", "remoteAgentPackage"].contains(&action) {
                     let remote = action == "remoteAgentPackage";

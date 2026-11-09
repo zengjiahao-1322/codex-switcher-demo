@@ -80,6 +80,7 @@ fn write_apply(app: &App, input: &Value, dir: &Path) -> io::Result<Value> {
     let current = json!({"providerId":id,"model":model,"fastModel":fast_model,"access":access.name(),"label":provider["name"]});
     config_ops::atomic(&current_file(&app.bridge), &pretty(&current)?, None)?;
     remember_model(&app.bridge, id, model, fast_model)?;
+    crate::usage::record(app, "claude", "api", id, provider["name"].as_str().unwrap_or(""), Some(model))?;
     Ok(
         json!({"message":format!("已让 Claude Code 使用{}（{}）。{}新开的 Claude Code 会话生效（CLI、VS Code、桌面版 Code），已打开的会话需重开。官方登录凭据未改动。", provider["name"].as_str().unwrap_or("配置"), model, if adapter {"经本机转换，需保持切换器运行。"} else {""}),"needsAutostart":adapter && !crate::integration::startup_file().exists()}),
     )
@@ -108,6 +109,7 @@ fn restore_at(app: &App, dir: &Path) -> io::Result<Value> {
             destination["host"].as_str().unwrap_or("")
         )
     };
+    crate::usage::record(app, "claude", if destination["kind"] == "official" { "official" } else { "api" }, if destination["kind"] == "official" { "claude" } else { "external" }, if destination["kind"] == "official" { "Claude 官方登录" } else { "接管前的配置" }, None)?;
     Ok(json!({"message":format!("{message}登录凭据未改动。"),"restoredTo":destination["kind"]}))
 }
 pub fn on_provider_changed(app: &App, id: &str) -> io::Result<Option<String>> {

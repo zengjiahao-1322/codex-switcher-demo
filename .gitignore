@@ -23,6 +23,8 @@
 !/src/**
 !/web/
 !/web/**
+!/data/
+!/data/**
 !/tests/
 !/tests/**
 !/scripts/

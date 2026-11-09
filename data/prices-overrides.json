@@ -1,0 +1,11 @@
+{
+  "aliases": {
+    "claude-sonnet-4-5-20250929": {
+      "id": "anthropic/claude-sonnet-4.5",
+      "source": "https://platform.claude.com/docs/en/about-claude/models/overview"
+    }
+  },
+  "prices": {},
+  "tiers": {},
+  "longContext": {}
+}

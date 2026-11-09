@@ -22,6 +22,12 @@ export async function busy(button, fn, report = status) {
     hooks.afterBusy();
   }
 }
+export function el(name, className, text) {
+  const node = document.createElement(name);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
 export function tag(text, cls) {
   const t = document.createElement('span');
   t.className = 'tag' + (cls ? ' ' + cls : '');

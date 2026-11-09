@@ -31,7 +31,7 @@ function entries(prefix, sequence, target, arch, binaryDir) {
   const build = require('./rust-build-info.cjs').buildInfo(sequence);
   const names = require('../release-files.json').filter(
     (name) =>
-      /^(web|vscode-companion|vscode-remote-agent)\//.test(name) ||
+      /^(web|vscode-companion|vscode-remote-agent|data)\//.test(name) ||
       [
         'LICENSE',
         'README.md',

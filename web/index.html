@@ -165,6 +165,15 @@
           <button
             type="button"
             role="tab"
+            id="tab-usage"
+            aria-controls="usage-panel"
+            aria-selected="false"
+          >
+            用量
+          </button>
+          <button
+            type="button"
+            role="tab"
             id="tab-settings"
             aria-controls="settings-panel"
             aria-selected="false"
@@ -241,6 +250,22 @@
               >其他可选模型（逗号分隔；也可在上方列表中勾选）——决定 Codex
               模型下拉显示哪些：填写则只显示“默认模型 + 这些”，留空则显示供应商的全部对话模型</label
             ><input id="pf-models" />
+            <label for="pf-pricing">计价方式（用量页估算费用时用）</label
+            ><select id="pf-pricing">
+              <option value="official" selected>按官方价</option>
+              <option value="multiplier">按倍率</option>
+              <option value="free">不计费</option>
+            </select>
+            <div class="inline" id="pf-multiplier-row" hidden>
+              <input id="pf-multiplier" type="number" min="0" step="0.01" aria-label="倍率" />
+              <select id="pf-currency" aria-label="币种">
+                <option value="CNY" selected>人民币 ¥</option>
+                <option value="USD">美元 US$</option>
+              </select>
+            </div>
+            <small class="note form-note" id="pf-pricing-note"></small>
+            <label for="pf-usage-url">用量面板地址（可选）</label
+            ><input id="pf-usage-url" placeholder="网关自己的用量面板，比如 CPA 的面板地址" />
             <div class="actions">
               <button type="submit" class="primary" id="pf-save">保存配置</button
               ><button type="button" id="pf-cancel" hidden>取消编辑</button>
@@ -318,6 +343,59 @@
             服务器连不到，不能选。
           </p>
           <div id="remote-list"></div>
+        </section>
+
+        <section
+          class="card tab-panel usage"
+          role="tabpanel"
+          id="usage-panel"
+          aria-labelledby="tab-usage"
+          hidden
+        >
+          <div class="usage-bar">
+            <div class="seg" id="usage-client" role="group" aria-label="客户端"></div>
+            <div class="seg" id="usage-range" role="group" aria-label="时间范围"></div>
+            <small class="usage-book" id="usage-pricebook"></small>
+            <button type="button" id="usage-prices">更新价格</button>
+          </div>
+          <div id="usage-status" class="hint warn" role="status" hidden></div>
+          <div id="usage-hints"></div>
+          <p id="usage-empty" class="usage-empty" hidden></p>
+          <div id="usage-content" hidden>
+            <div class="usage-tiles" id="usage-tiles"></div>
+            <div class="usage-head">
+              <h3>Token 趋势</h3>
+              <small id="usage-grain"></small>
+              <div class="usage-legend" id="usage-legend"></div>
+            </div>
+            <div class="usage-chart" id="usage-chart"></div>
+            <div class="usage-two">
+              <div>
+                <div class="usage-head"><h3>按来源</h3><small>归属以切换记录为准</small></div>
+                <div class="usage-scroll" id="usage-sources"></div>
+              </div>
+              <div>
+                <div class="usage-head"><h3>按模型</h3><small>按 token 占比</small></div>
+                <div class="usage-share" id="usage-models"></div>
+              </div>
+            </div>
+            <div class="usage-head">
+              <h3>请求明细</h3>
+              <small>从新到旧</small>
+              <div class="usage-filters">
+                <select id="req-source" aria-label="来源"></select>
+                <select id="req-model" aria-label="模型"></select>
+                <select id="req-result" aria-label="结果"></select>
+              </div>
+            </div>
+            <div class="usage-scroll" id="usage-requests"></div>
+            <div class="usage-pager">
+              <small id="req-range"></small>
+              <button type="button" id="req-prev">上一页</button>
+              <button type="button" id="req-next">下一页</button>
+            </div>
+            <p class="note usage-foot" id="usage-foot"></p>
+          </div>
         </section>
 
         <section

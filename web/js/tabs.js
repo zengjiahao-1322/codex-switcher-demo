@@ -3,6 +3,7 @@ import { accountData } from './store.js';
 import { accountStatus, refreshQuota } from './views/accounts.js';
 import { refreshBackups } from './views/backups.js';
 import { refreshClients } from './views/diagnostics.js';
+import { openUsage } from './usage/view.js';
 
 // 管理分页默认收起，打开时才读取对应数据；再次点击当前分页收起。
 export const tabPanels = {
@@ -10,6 +11,7 @@ export const tabPanels = {
   apis: 'api-manager',
   editors: 'client-details',
   remotes: 'remote-panel',
+  usage: 'usage-panel',
   settings: 'settings-panel',
 };
 export let activeTab = null,
@@ -29,6 +31,8 @@ export function showTab(name, toggle = false) {
     refreshClients();
     clientsTimer = setInterval(() => document.hidden || refreshClients(), 5000);
   }
+  // 用量只在打开时读取：后台这时才增量扫描本机记录，价格簿过期也是这时才去更新。
+  if (next === 'usage') openUsage();
   // 备份列表只在打开设置时读取。
   if (next === 'settings')
     refreshBackups().catch((e) => ($('backup-list').textContent = '读取备份失败：' + e.message));

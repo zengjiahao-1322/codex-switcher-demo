@@ -111,11 +111,30 @@ export function resetPicker() {
   $('pf-picker').hidden = true;
   $('pf-filter').value = '';
 }
+// 计价方式：倍率只在“按倍率”时显示；说明文字随所选方式变化。
+const pricingNotes = {
+  official: '按 OpenAI、Anthropic 等官方价格估算，官方价格每天自动同步。',
+  multiplier: '中转站一般标“x 倍率”或“¥1 = $1 额度”。比如 0.3 倍、按人民币扣费，就填 0.3 并选人民币。',
+  free: '本地模型、自建网关这类不花钱的选这个，用量页只统计 token，不算费用。',
+};
+function syncPricing() {
+  const mode = $('pf-pricing').value;
+  $('pf-multiplier-row').hidden = mode !== 'multiplier';
+  $('pf-pricing-note').textContent = pricingNotes[mode];
+}
+$('pf-pricing').onchange = syncPricing;
+syncPricing();
+function pricingData() {
+  const mode = $('pf-pricing').value;
+  if (mode !== 'multiplier') return { mode };
+  return { mode, multiplier: Number($('pf-multiplier').value), currency: $('pf-currency').value };
+}
 export function resetForm() {
   providerStatus('');
   resetPicker();
   editing = null;
   $('provider-form').reset();
+  syncPricing();
   $('form-title').textContent = '新增配置';
   $('pf-key').placeholder = '';
   $('pf-cancel').hidden = true;
@@ -134,6 +153,11 @@ export function startEdit(p) {
   $('pf-mode').value = p.apiMode;
   $('pf-model').value = p.model;
   $('pf-models').value = (p.models || []).filter((m) => m !== p.model).join(', ');
+  $('pf-pricing').value = p.pricing.mode;
+  $('pf-multiplier').value = p.pricing.multiplier ?? '';
+  $('pf-currency').value = p.pricing.currency ?? 'CNY';
+  $('pf-usage-url').value = p.usageUrl ?? '';
+  syncPricing();
   $('pf-key').value = '';
   $('pf-key').placeholder = p.hasKey ? '留空则保留原密钥' : '尚未填写密钥';
   $('pf-cancel').hidden = false;
@@ -193,6 +217,8 @@ $('provider-form').onsubmit = (e) => {
         model: $('pf-model').value,
         models: $('pf-models').value,
         apiKey: $('pf-key').value,
+        pricing: pricingData(),
+        usageUrl: $('pf-usage-url').value.trim() || null,
       };
       if (!editing && !data.apiKey) throw Error('请填写 API 密钥');
       const r = editing

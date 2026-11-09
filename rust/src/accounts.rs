@@ -203,6 +203,7 @@ pub async fn apply_saved(
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
     }
+    crate::usage::record_current(app, "codex")?;
     Ok(json!({"id":id,"email":row["email"],"label":row["label"]}))
 }
 pub async fn login_active(app: &App) -> bool {

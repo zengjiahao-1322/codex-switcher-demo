@@ -1298,3 +1298,295 @@ label small {
   font-size: 12.5px;
   color: var(--muted);
 }
+
+/* API 表单里的计价设置 */
+.form-note {
+  display: block;
+  margin: -10px 0 18px;
+  color: var(--muted);
+}
+
+/* 用量分页 */
+.usage {
+  --c-input: #52525b;
+  --c-cached: #a1a1aa;
+  --c-write: #d4b483;
+  --c-output: var(--live);
+}
+.usage select {
+  width: auto;
+  height: 32px;
+  padding: 0 28px 0 10px;
+  font-size: 13px;
+}
+.usage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.usage-book {
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.usage-book.warn {
+  color: var(--warn);
+}
+.usage-bar button,
+.usage-pager button {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+#usage-status,
+#usage-hints .hint {
+  margin: 12px 0 0;
+}
+.usage-empty {
+  margin: 0;
+  padding: 44px 20px;
+  text-align: center;
+  color: var(--muted);
+}
+.usage-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.usage-tile {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--sunken);
+}
+.usage-tile small {
+  display: block;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.usage-tile b {
+  display: block;
+  margin: 2px 0;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.usage-tile span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.usage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 22px 0 8px;
+}
+.usage-head h3 {
+  font-size: 14.5px;
+  white-space: nowrap;
+}
+.usage-head > small {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.usage-legend,
+.usage-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+.usage-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  border-radius: 2px;
+}
+.usage-swatch.input,
+.usage-piece.input {
+  background: var(--c-input);
+}
+.usage-swatch.cachedInput,
+.usage-piece.cachedInput {
+  background: var(--c-cached);
+}
+.usage-swatch.cacheWrite,
+.usage-piece.cacheWrite {
+  background: var(--c-write);
+}
+.usage-swatch.output,
+.usage-piece.output {
+  background: var(--c-output);
+}
+.usage-chart {
+  padding-left: 44px;
+}
+.usage-plot {
+  position: relative;
+  height: 160px;
+}
+.usage-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--hairline);
+}
+.usage-grid span {
+  position: absolute;
+  right: calc(100% + 6px);
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--faint);
+}
+.usage-bars,
+.usage-axis {
+  display: flex;
+  gap: 3px;
+}
+.usage-bars {
+  position: absolute;
+  inset: 0;
+  align-items: flex-end;
+}
+.usage-bar-col {
+  display: flex;
+  flex: 1;
+  flex-direction: column-reverse;
+  height: 100%;
+  min-width: 0;
+}
+.usage-bar-col:hover .usage-piece {
+  filter: brightness(0.9);
+}
+.usage-piece {
+  display: block;
+  flex: none;
+}
+.usage-axis span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--faint);
+}
+.usage-two {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 14px;
+}
+.usage-scroll {
+  overflow-x: auto;
+}
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.usage-table th {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.usage-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+.usage-table tr:last-child td {
+  border-bottom: 0;
+}
+.usage-table .num {
+  text-align: right;
+}
+.usage-table .tag {
+  margin-left: 6px;
+}
+.usage-muted {
+  color: var(--muted);
+}
+.usage-error {
+  display: inline-block;
+  max-width: 180px;
+  margin-left: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  font-size: 12px;
+  color: var(--muted);
+}
+.usage-link {
+  margin-left: 8px;
+  font-size: 12.5px;
+  color: var(--info);
+}
+.usage-share {
+  display: grid;
+  gap: 10px;
+}
+.usage-share-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  font-size: 13px;
+}
+.usage-share-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-share-row small {
+  color: var(--muted);
+}
+.usage-track {
+  grid-column: 1 / -1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--sunken);
+}
+.usage-track i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--ink-2);
+}
+.usage-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.usage-foot {
+  margin: 18px 0 0;
+  color: var(--muted);
+}
+@media (max-width: 760px) {
+  .usage-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .usage-two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .usage-book {
+    width: 100%;
+    margin-left: 0;
+  }
+  .usage-tile b {
+    font-size: 19px;
+  }
+}

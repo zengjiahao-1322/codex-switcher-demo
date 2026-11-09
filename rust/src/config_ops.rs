@@ -428,6 +428,7 @@ impl Prepared {
             }
         }
         effect(&home, &app.bridge)?;
+        crate::usage::record_current(app, "codex")?;
         let mode = self.current["mode"].as_str().unwrap_or("direct");
         let message = format!(
             "已切换到「{}」（{}，模型 {}）。{catalog_note}{note}官方登录凭据未改动。{EFFECT}\n\n当前为 API 模式，适用于 Codex。聊天 / Work 或部分官方旧会话无法加载时，请选择官方账号并切换。",
@@ -856,6 +857,7 @@ pub async fn official(app: &App, input: &Value, restore: bool) -> io::Result<Val
     atomic(&file, &next, Some(current.as_deref()))?;
     remove_optional(&app.bridge.join("current.json"))?;
     effect(&home, &app.bridge)?;
+    crate::usage::record_current(app, "codex")?;
     drop(_lock);
     let threads = crate::thread_routing::synchronize(
         app,

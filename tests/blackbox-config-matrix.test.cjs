@@ -4,6 +4,7 @@ const assert = require('node:assert/strict'),
   fs = require('node:fs'),
   path = require('node:path');
 const { startBackend } = require('./backend-process.cjs');
+const { isRust } = require('./backend.cjs');
 const provider = {
   name: 'Mine',
   baseUrl: 'https://api.example.com/v1/',
@@ -42,6 +43,7 @@ test('配置对照/providers：add, edit (blank key keeps old), delete custom pr
         id,
         origin: 'custom',
         createdAt: p.createdAt,
+        ...(isRust ? { pricing: { mode: 'official' }, usageUrl: null } : {}),
       },
     ],
     hermesImported: false,
@@ -63,6 +65,7 @@ test('配置对照/providers：add, edit (blank key keeps old), delete custom pr
       origin: 'custom',
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
+      ...(isRust ? { pricing: { mode: 'official' }, usageUrl: null } : {}),
     },
   ]);
   assert.deepEqual([p.apiKey, p.name], ['sk-1', 'Mine2']);
