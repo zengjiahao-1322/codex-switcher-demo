@@ -1,6 +1,6 @@
 {
   "source": "openrouter",
-  "fetchedAt": "2026-11-09T06:44:35.984Z",
+  "fetchedAt": "2026-11-09T08:11:39.104Z",
   "version": 1,
   "models": [
     {
@@ -1724,9 +1724,9 @@
     {
       "id": "openai/gpt-oss-20b",
       "pricing": {
-        "prompt": "0.000000018",
-        "completion": "0.00000009",
-        "input_cache_read": "0.000000009"
+        "prompt": "0.00000003",
+        "completion": "0.00000013",
+        "input_cache_read": "0.00000003"
       }
     },
     {
