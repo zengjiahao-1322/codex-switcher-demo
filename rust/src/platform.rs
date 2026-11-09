@@ -643,10 +643,17 @@ pub fn parent_process() -> io::Result<(u32, String)> {
     Ok((pid, name))
 }
 pub fn context_arguments(args: &[String]) -> serde_json::Value {
-    let mut result = serde_json::json!({"overrides":{}});
+    let mut result = serde_json::json!({"overrides":{},"subcommand":null});
     let mut i = 1;
     while i < args.len() {
         let arg = &args[i];
+        if !arg.starts_with('-') {
+            if result["subcommand"].is_null() {
+                result["subcommand"] = serde_json::json!(arg);
+            }
+            i += 1;
+            continue;
+        }
         let (flag, value) = if let Some((flag, value)) = arg.split_once('=') {
             (flag, value.to_owned())
         } else if ["--profile", "-p", "--model", "-m", "--config", "-c"].contains(&arg.as_str())
@@ -1105,6 +1112,40 @@ pub fn trusted_codex(file: &std::path::Path) -> bool {
     }
     false
 }
+pub fn clean_client_records(bridge: &std::path::Path) -> std::io::Result<()> {
+    let dir = bridge.join("clients");
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.path().extension().is_some_and(|s| s == "json")
+            && entry
+                .metadata()?
+                .modified()?
+                .elapsed()
+                .is_ok_and(|age| age > std::time::Duration::from_secs(7 * 24 * 3600))
+        {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+fn registered_codex_paths(bridge: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>> {
+    let mut records = crate::editors::records(bridge)?;
+    records.retain(|row| !row["remote"].is_string() && row["remote"] != true && row["wsl"] != true);
+    records.sort_by_key(|row| std::cmp::Reverse(row["seenAt"].as_u64()));
+    let mut candidates = Vec::new();
+    for row in records {
+        if let Some(exe) = row["codexExe"].as_str() {
+            candidates.push(std::path::PathBuf::from(exe));
+        }
+        if let Some(extension) = row["extensionPath"].as_str() {
+            candidates.extend(extension_paths(std::path::Path::new(extension)));
+        }
+    }
+    Ok(candidates)
+}
 pub fn codex_path(bridge: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
     use std::{fs, path::PathBuf};
     let name = if cfg!(windows) { "codex.exe" } else { "codex" };
@@ -1129,26 +1170,7 @@ pub fn codex_path(bridge: &std::path::Path) -> std::io::Result<std::path::PathBu
         return Ok(path);
     }
     let mut candidates = Vec::new();
-    let clients = bridge.join("clients");
-    if clients.is_dir() {
-        for entry in fs::read_dir(clients)? {
-            let file = entry?.path();
-            if file.extension().is_none_or(|e| e != "json") {
-                continue;
-            }
-            let value: serde_json::Value =
-                serde_json::from_slice(&fs::read(file)?).map_err(std::io::Error::other)?;
-            if value["remote"] == true || value["wsl"] == true {
-                continue;
-            }
-            if let Some(exe) = value["codexExe"].as_str() {
-                candidates.push(PathBuf::from(exe));
-            }
-            if let Some(extension) = value["extensionPath"].as_str() {
-                candidates.extend(extension_paths(std::path::Path::new(extension)));
-            }
-        }
-    }
+    candidates.extend(registered_codex_paths(bridge)?);
     let mut extensions_candidates = Vec::new();
     for editor in [".vscode", ".vscode-insiders", ".cursor", ".windsurf"] {
         let extensions = user_home().join(editor).join("extensions");
@@ -1713,6 +1735,102 @@ pub fn random_bytes() -> io::Result<[u8; 32]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn client_records_select_recent_and_clean_seven_day_files() {
+        use std::{
+            fs,
+            time::{Duration, SystemTime},
+        };
+        let root =
+            std::env::temp_dir().join(format!("r1-records-{}", crate::editors::uuid().unwrap()));
+        let dir = root.join("clients");
+        fs::create_dir_all(&dir).unwrap();
+        let now = crate::editors::millis();
+        for (name, age, seen) in [
+            ("a", 1, now - 1000),
+            ("z", 2, now),
+            ("stale", 0, now - 16000),
+            ("expired", 8 * 86400, now - 8 * 86400000),
+        ] {
+            let file = dir.join(format!("{name}.json"));
+            fs::write(
+                &file,
+                serde_json::json!({"seenAt": seen, "codexExe": name}).to_string(),
+            )
+            .unwrap();
+            fs::File::options()
+                .write(true)
+                .open(file)
+                .unwrap()
+                .set_modified(SystemTime::now() - Duration::from_secs(age))
+                .unwrap();
+        }
+        for fields in [
+            serde_json::json!({"remote": "ssh-remote+fixture"}),
+            serde_json::json!({"wsl": true}),
+        ] {
+            let mut row = serde_json::json!({"seenAt": now, "codexExe": "remote"});
+            row.as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            fs::write(
+                dir.join(format!("remote-{}.json", row["wsl"] == true)),
+                row.to_string(),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            registered_codex_paths(&root).unwrap(),
+            vec![std::path::PathBuf::from("z"), std::path::PathBuf::from("a")]
+        );
+        clean_client_records(&root).unwrap();
+        assert!(!dir.join("expired.json").exists());
+        assert!(dir.join("stale.json").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn desktop_app_server_and_exec_server_are_not_two_clients() {
+        let root =
+            std::env::temp_dir().join(format!("r1-client-{}", crate::editors::uuid().unwrap()));
+        std::fs::create_dir_all(&root).unwrap();
+        let rows = ["app-server", "exec-server"]
+            .iter()
+            .enumerate()
+            .map(|(i, cmd)| {
+                let mut ctx = context_arguments(
+                    &[
+                        "codex.exe",
+                        "-c",
+                        "features.code_mode_host=true",
+                        cmd,
+                        "--analytics-default-enabled",
+                    ]
+                    .map(str::to_owned),
+                );
+                assert_eq!(ctx["subcommand"], *cmd);
+                ctx["home"] = serde_json::json!(root);
+                ctx["ok"] = serde_json::json!(true);
+                serde_json::json!({
+                    "pid": i + 2,
+                    "parentPid": 1,
+                    "exe": "codex.exe",
+                    "context": ctx
+                })
+            })
+            .collect::<Vec<_>>();
+        let inventory = serde_json::json!({
+            "processes": rows,
+            "ancestry": [{
+                "pid": 1,
+                "name": "Codex.exe",
+                "exe": "C:/OpenAI.Codex_fixture/app/Codex.exe"
+            }]
+        });
+        let result = crate::editors::snapshot(&root, &root, &inventory).unwrap();
+        assert_eq!(result["clients"].as_array().unwrap().len(), 1);
+        assert_eq!(result["clients"][0]["kind"], "desktop");
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn protection_failure_is_reported_and_other_directories_are_protected() {
         let name = random_bytes()

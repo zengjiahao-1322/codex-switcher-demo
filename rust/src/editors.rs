@@ -219,6 +219,9 @@ pub fn snapshot(home: &Path, bridge: &Path, inventory: &Value) -> io::Result<Val
             id = parent["parentPid"].as_u64();
         }
         let context = &p["context"];
+        if context["subcommand"] == "exec-server" {
+            continue;
+        }
         let exe = text(&p["exe"]);
         let cwd = text(&context["cwd"]);
         let tool = tool_pattern.is_match(cwd);

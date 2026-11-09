@@ -1,9 +1,9 @@
-//! Buffered Anthropic Messages to OpenAI adapter for Claude Code.
+//! Anthropic Messages adapter with incremental upstream streaming.
 use crate::{
     adapter_convert::{self, Failure},
     server::{App, Body, response},
 };
-use http_body_util::{BodyExt, Full};
+use http_body_util::BodyExt;
 use hyper::{
     Request, Response,
     body::{Bytes, Frame, Incoming},
@@ -19,13 +19,13 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-fn error(status: u16, message: &str) -> Response<Body> {
+pub(super) fn error(status: u16, message: &str) -> Response<Body> {
     response(status, "application/json", serde_json::to_vec(&json!({"type":"error","error":{"type":match status {400=>"invalid_request_error",401=>"authentication_error",404=>"not_found_error",429=>"rate_limit_error",_=>"api_error"},"message":message}})).unwrap())
 }
 pub fn reject(status: u16, message: &str) -> Response<Body> {
     error(status, message)
 }
-fn log_failure(app: &App, failure: &Failure) {
+pub(super) fn log_failure(app: &App, failure: &Failure) {
     if failure.upstream {
         crate::adapter::log(
             app,
@@ -39,7 +39,7 @@ fn log_failure(app: &App, failure: &Failure) {
         crate::adapter::log(app, failure);
     }
 }
-fn text(value: &Value) -> &str {
+pub(super) fn text(value: &Value) -> &str {
     value.as_str().unwrap_or("")
 }
 fn block_text(value: &Value) -> String {
@@ -54,7 +54,7 @@ fn block_text(value: &Value) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
-fn to_responses(body: &Value) -> Result<Value, Failure> {
+pub(super) fn to_responses(body: &Value) -> Result<Value, Failure> {
     let mut input = Vec::new();
     for msg in body["messages"]
         .as_array()
@@ -154,39 +154,16 @@ fn to_anthropic(reply: &Value, model: &str, id: &str) -> Result<Value, Failure> 
         json!({"id":id,"type":"message","role":"assistant","model":model,"content":content,"stop_reason":stop,"stop_sequence":null,"usage":{"input_tokens":reply["usage"]["input_tokens"].as_u64().unwrap_or(0),"output_tokens":reply["usage"]["output_tokens"].as_u64().unwrap_or(0)}}),
     )
 }
-fn events(message: &Value) -> Vec<Value> {
-    let mut result = vec![
-        json!({"type":"message_start","message":{"id":message["id"],"type":"message","role":"assistant","model":message["model"],"content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":message["usage"]["input_tokens"],"output_tokens":0}}}),
-    ];
-    for (index, block) in message["content"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .enumerate()
-    {
-        if block["type"] == "text" {
-            result.push(json!({"type":"content_block_start","index":index,"content_block":{"type":"text","text":""}}));
-            result.push(json!({"type":"content_block_delta","index":index,"delta":{"type":"text_delta","text":block["text"]}}));
-        } else {
-            result.push(json!({"type":"content_block_start","index":index,"content_block":{"type":"tool_use","id":block["id"],"name":block["name"],"input":{}}}));
-            result.push(json!({"type":"content_block_delta","index":index,"delta":{"type":"input_json_delta","partial_json":block["input"].to_string()}}));
-        }
-        result.push(json!({"type":"content_block_stop","index":index}));
-    }
-    result.push(json!({"type":"message_delta","delta":{"stop_reason":message["stop_reason"],"stop_sequence":null},"usage":{"input_tokens":message["usage"]["input_tokens"],"output_tokens":message["usage"]["output_tokens"]}}));
-    result.push(json!({"type":"message_stop"}));
-    result
-}
-fn encode(value: &Value) -> Bytes {
+pub(super) fn encode(value: &Value) -> Bytes {
     Bytes::from(format!(
         "event: {}\ndata: {}\n\n",
         text(&value["type"]),
         value
     ))
 }
-struct StreamingBody {
-    receiver: mpsc::Receiver<Bytes>,
-    task: tokio::task::AbortHandle,
+pub(super) struct StreamingBody {
+    pub(super) receiver: mpsc::Receiver<Bytes>,
+    pub(super) task: tokio::task::AbortHandle,
 }
 impl Drop for StreamingBody {
     fn drop(&mut self) {
@@ -205,7 +182,7 @@ impl hyper::body::Body for StreamingBody {
             .map(|v| v.map(|b| Ok(Frame::data(b))))
     }
 }
-fn sse(body: Body) -> Response<Body> {
+pub(super) fn sse(body: Body) -> Response<Body> {
     Response::builder()
         .status(200)
         .header("content-type", "text/event-stream; charset=utf-8")
@@ -223,7 +200,10 @@ fn upstream_error(status: u16, body: &str) -> String {
         .unwrap_or_else(|| body.chars().take(300).collect());
     format!("上游 HTTP {status}：{detail}")
 }
-async fn request(provider: Value, payload: Value) -> Result<Value, Failure> {
+pub(super) async fn request_headers(
+    provider: &Value,
+    payload: &Value,
+) -> Result<reqwest::Response, Failure> {
     let mode = text(&provider["apiMode"]);
     let suffix = if mode == "responses" {
         "/responses"
@@ -251,7 +231,7 @@ async fn request(provider: Value, payload: Value) -> Result<Value, Failure> {
             upstream: true,
         });
     }
-    response.json().await.map_err(|_| Failure::unsupported())
+    Ok(response)
 }
 pub(super) fn exchange(
     provider: Value,
@@ -278,10 +258,15 @@ pub(super) fn exchange(
         .filter(|n| *n > 0)
         .unwrap_or(600000);
     Ok(Box::pin(async move {
-        let reply =
-            tokio::time::timeout(Duration::from_millis(timeout), request(provider, payload))
+        let reply = tokio::time::timeout(Duration::from_millis(timeout), async {
+            request_headers(&provider, &payload)
+                .await?
+                .json()
                 .await
-                .map_err(|_| Failure::unsupported())??;
+                .map_err(|_| Failure::unsupported())
+        })
+        .await
+        .map_err(|_| Failure::unsupported())??;
         let normalized = if let Some(p) = prepared {
             adapter_convert::complete(reply, &p)?
         } else {
@@ -323,49 +308,19 @@ pub async fn handle(req: Request<Incoming>, app: Arc<App>, _settings: Value) -> 
     if !source["model"].is_string() || text(&source["model"]).is_empty() {
         return error(400, "model 为必填项");
     }
-    let model = text(&source["model"]).to_owned();
     let message_id = format!("msg_{}", crate::editors::uuid().unwrap());
-    let start = json!({"type":"message_start","message":{"id":message_id,"type":"message","role":"assistant","model":model,"content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}});
-    let stream = source["stream"] == true;
-    let mut future = match exchange(provider, &source, message_id) {
+    if source["stream"] == true {
+        return super::streaming::handle(provider, source, message_id, app).await;
+    }
+    let future = match exchange(provider, &source, message_id) {
         Ok(future) => future,
         Err(e) => return error(e.status, &e.message),
     };
-    if !stream {
-        return match future.await {
-            Ok(v) => response(200, "application/json", serde_json::to_vec(&v).unwrap()),
-            Err(e) => {
-                log_failure(&app, &e);
-                error(e.status, &e.message)
-            }
-        };
-    }
-    tokio::select! {
-        result = &mut future => match result {
-            Ok(v) => sse(Full::new(Bytes::from(events(&v).iter().flat_map(|v| encode(v).to_vec()).collect::<Vec<_>>())).boxed_unsync()),
-            Err(e) => { log_failure(&app, &e); error(e.status, &e.message) }
-        },
-        _ = tokio::time::sleep(Duration::from_secs(5)) => {
-            let (sender, receiver) = mpsc::channel(2);
-            let task = tokio::spawn(async move {
-                if sender.send(encode(&start)).await.is_err() { return; }
-                let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + Duration::from_secs(10), Duration::from_secs(10));
-                loop {
-                    tokio::select! {
-                        _ = sender.closed() => return,
-                        _ = ping.tick() => if sender.send(encode(&json!({"type":"ping"}))).await.is_err() { return; },
-                        result = &mut future => {
-                            let values = match result {
-                                Ok(v) => events(&v).into_iter().skip(1).collect(),
-                                Err(e) => { log_failure(&app, &e); vec![json!({"type":"error","error":{"type":"api_error","message":e.message}})] }
-                            };
-                            for value in values { if sender.send(encode(&value)).await.is_err() { return; } }
-                            return;
-                        }
-                    }
-                }
-            });
-            sse(StreamingBody { receiver, task: task.abort_handle() }.boxed_unsync())
+    match future.await {
+        Ok(v) => response(200, "application/json", serde_json::to_vec(&v).unwrap()),
+        Err(e) => {
+            log_failure(&app, &e);
+            error(e.status, &e.message)
         }
     }
 }
@@ -424,28 +379,11 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_response_and_stream_events_have_anthropic_shape() {
+    fn tool_call_response_has_anthropic_shape() {
         let reply = json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]},{"type":"function_call","call_id":"call1","name":"Read","arguments":"{\"path\":\"x\"}"}],"usage":{"input_tokens":7,"output_tokens":4}});
         let message = to_anthropic(&reply, "fixture", "msg_fixture").unwrap();
         assert_eq!(message["stop_reason"], "tool_use");
         assert_eq!(message["content"][1]["input"]["path"], "x");
         assert_eq!(message["usage"]["input_tokens"], 7);
-        let rows = events(&message);
-        let names = rows.iter().map(|v| text(&v["type"])).collect::<Vec<_>>();
-        assert_eq!(
-            names,
-            [
-                "message_start",
-                "content_block_start",
-                "content_block_delta",
-                "content_block_stop",
-                "content_block_start",
-                "content_block_delta",
-                "content_block_stop",
-                "message_delta",
-                "message_stop"
-            ]
-        );
-        assert_eq!(rows[5]["delta"]["type"], "input_json_delta");
     }
 }

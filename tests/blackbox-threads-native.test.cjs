@@ -6,6 +6,7 @@ const assert = require('node:assert/strict'),
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { DatabaseSync } = require('node:sqlite');
+const { isRust } = require('./backend.cjs');
 const { startBackend } = require('./backend-process.cjs');
 const { api, isolatedEditor, serve, responseTool } = require('./config-blackbox-helpers.cjs');
 const { auth, accountId, until } = require('./official-blackbox-helpers.cjs');
@@ -70,7 +71,7 @@ test(
         .execFileSync(process.env.CODEX_EXE, ['--version'], { encoding: 'utf8' })
         .trim(),
       version = versionOutput.match(/\b(\d+)\.(\d+)/),
-      providerBoundSemantics = version && Number(version[1]) * 1000 + Number(version[2]) >= 166,
+      providerBoundSemantics = isRust || version && Number(version[1]) * 1000 + Number(version[2]) >= 166,
       expected = {
         first: providerBoundSemantics ? { updated: 0, kept: 1 } : { updated: 1, kept: 0 },
         custom: providerBoundSemantics ? { updated: 0, kept: 7 } : { updated: 7, kept: 0 },

@@ -1,5 +1,6 @@
-//! Only official RPC changes conversation settings. SQLite is read-only and
-//! cold thread/read verifies persistence; visible chat/tool records stay intact.
+//! Only official RPC changes model settings. Codex 0.167 binds a rollout to
+//! its original provider, so conversations from another provider stay there;
+//! only conversations already on the active provider may change model.
 use crate::{editors::text, official_session::Session, server::App};
 use serde_json::{Value, json};
 use std::{
@@ -218,10 +219,8 @@ pub async fn synchronize(
     let provider = config["model_provider"].as_str().unwrap_or("openai");
     let mut sessions = vec![];
     let mut total = 0usize;
+    let mut provider_kept = 0u64;
     let result = async {
-        let first = Session::threads(&app.bridge, &home, &config).map_err(rpc_error)?;
-        sessions.push(first.clone());
-        initialize(&first).await?;
         let mut rows = pending(&home)?;
         rows.retain(|row| {
             let keep = mode != "matching" || row["model_provider"].as_str() == previous;
@@ -234,6 +233,25 @@ pub async fn synchronize(
         if total == 0 {
             return Ok(());
         }
+        // A provider-bound conversation must never be sent to thread/resume.
+        // This also avoids starting an app-server session when all rows are kept.
+        let mut same_provider = Vec::with_capacity(rows.len());
+        for row in rows {
+            if row["model_provider"].as_str() != Some(provider) {
+                counts["kept"] = json!(counts["kept"].as_u64().unwrap_or(0) + 1);
+            } else {
+                same_provider.push(row);
+            }
+        }
+        rows = same_provider;
+        provider_kept = counts["kept"].as_u64().unwrap_or(0);
+        total = rows.len();
+        if total == 0 {
+            return Ok(());
+        }
+        let first = Session::threads(&app.bridge, &home, &config).map_err(rpc_error)?;
+        sessions.push(first.clone());
+        initialize(&first).await?;
         let mut model = config["model"].as_str().map(str::to_owned);
         let mut models = vec![];
         if let Some(catalog) = config["model_catalog_json"].as_str() {
@@ -276,7 +294,7 @@ pub async fn synchronize(
                 json!(model)
             };
             row["nextModel"] = target.clone();
-            let keep = row["model_provider"] != provider || row["model"] != target;
+            let keep = row["model"] != target;
             if !keep {
                 counts["skipped"] = json!(counts["skipped"].as_u64().unwrap() + 1);
             }
@@ -387,7 +405,7 @@ pub async fn synchronize(
         Err(error) => {
             counts["failed"] = json!(total
                 .saturating_sub(counts["updated"].as_u64().unwrap_or(0) as usize)
-                .saturating_sub(counts["kept"].as_u64().unwrap_or(0) as usize));
+                .saturating_sub((counts["kept"].as_u64().unwrap_or(0) - provider_kept) as usize));
             Err((error, counts))
         }
     }

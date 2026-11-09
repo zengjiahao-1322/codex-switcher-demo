@@ -352,7 +352,7 @@ test('旧对话失败黑盒：失败保持未完成并恢复编辑器，继续�
   );
   db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?)').run(
     'thread-1',
-    'other',
+    isRust ? 'openai' : 'other',
     'old-model',
     rollout,
     0,
@@ -420,6 +420,8 @@ test('旧对话供应商绑定拒绝时保留原来源并完成切换', { skip: 
   const result = await finish(f);
   assert.equal(result.status, 'done', JSON.stringify(result));
   assert.equal(result.threads.kept, 1);
+  assert.equal(f.rpc().filter((r) => r.method === 'thread/resume').length, 0);
+  assert.equal(f.rpc().filter((r) => r.method === 'initialize' && r.params?.clientInfo?.name === 'codex-switcher-routing').length, 0);
   assert.equal(result.threads.failed, 0);
   assert.equal(result.threads.updated, 0);
 });

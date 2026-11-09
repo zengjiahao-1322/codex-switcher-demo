@@ -4,6 +4,7 @@ pub(crate) mod adapter;
 mod probe;
 pub(crate) mod settings;
 mod state;
+mod streaming;
 use crate::{config_ops, config_store, server::App};
 use access::Access;
 use serde_json::{Value, json};

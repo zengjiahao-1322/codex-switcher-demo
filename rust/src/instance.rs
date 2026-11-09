@@ -352,6 +352,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .split_once("/#")
                 .and_then(|(base, _)| base.strip_prefix("http://127.0.0.1:"))
                 .and_then(|port| port.parse::<u16>().ok())
+            && platform::running(pid)?
             && platform::port_pid(port).ok().flatten() == Some(pid)
             && let Ok((status, body)) = local_response(url, "/api/runtime").await
         {
@@ -488,6 +489,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Err(error) => return Err(error.into()),
     };
     app.port = listener.local_addr()?.port();
+    platform::clean_client_records(&app.bridge)?;
     let connection = json!({"pid":std::process::id(),"url":format!("http://127.0.0.1:{}/#{}",app.port,app.token),"build":runtime()});
     write_json(&running_path, &connection)?;
     if let Some(path) = legacy_bridge_handover(raw_bridge.as_deref()) {
