@@ -1,8 +1,8 @@
 # Codex API 切换器当前架构
 
-这份图按当前源码整理，重点说明“切换配置”和“官方账号/额度”两条路径如何汇合到本地 Codex。
+本文按当前源码整理。重点说明“切换配置”和“官方账号/额度”两条路径怎样汇合到本地 Codex，以及 Claude Code 切换和用量统计各自的边界。
 
-后端是 `rust/` 下的单个原生程序，按职责分为账号、配置、编辑器、远程、切换、诊断、更新和平台模块。页面在 `web/`，两个 VS Code 扩展在 `vscode-companion/` 和 `vscode-remote-agent/`，它们仍是 JavaScript。发布包不含 Node 后台；包里的 `main.cjs`、`scripts/update-worker.cjs`、`src/platform/build-info.cjs` 是打包时生成的占位文件，`runtime/node.exe` 实际是 Rust 升级桥，都只为旧版一键升级保留。
+后端是 `rust/` 下的单个原生程序，按职责分为账号、配置、编辑器、远程、切换、Claude Code（`claude/`）、用量（`usage/`）、诊断、更新和平台模块。页面在 `web/`，价格快照和修正表在 `data/`。两个 VS Code 扩展在 `vscode-companion/` 和 `vscode-remote-agent/`，仍是 JavaScript。发布包不含 Node 后台；包里的 `main.cjs`、`scripts/update-worker.cjs`、`src/platform/build-info.cjs` 是打包时生成的占位文件，`runtime/node.exe` 实际是 Rust 升级桥，都只为旧版一键升级保留。
 
 仓库里的 `src/`、根目录 `main.cjs`、`cli.cjs` 和 `mcp-server.cjs` 是已冻结的 Node 后台，只作行为对照和测试支撑，不再修改。
 
@@ -38,8 +38,12 @@ flowchart LR
   IDE[VS Code / Cursor 等\n官方 Codex 扩展]
   EXT[伴随扩展\nvscode-companion]
   CLIENT[客户端发现与重载\neditors.rs]
-  THREAD[旧会话来源同步\nthread_routing.rs]
+  THREAD[旧会话模型同步\nthread_routing.rs]
   DIAG[会话/凭证诊断\ndiagnostics.rs]
+  CLAUDE[Claude Code 切换与转换\nclaude/]
+  CSET[(Claude Code\nsettings.json)]
+  USAGE[用量统计\nusage/]
+  LOGS[(Codex rollout\nClaude transcript)]
 
   UI -->|/api 请求| S --> H
   H -->|选择 API / 官方账号| CORE
@@ -60,6 +64,11 @@ flowchart LR
   H --> DIAG
   DIAG --> STORE
   DIAG --> ACC
+  H -->|应用、恢复、检测| CLAUDE
+  CLAUDE -->|改写 env 字段| CSET
+  CLAUDE -->|本机转换| PROV
+  H -->|usage 接口| USAGE
+  USAGE -->|只读用量字段| LOGS
 ```
 
 ## 配置备份与编辑器快捷切换（0.1.5）
@@ -73,7 +82,7 @@ flowchart LR
 1. 页面把账号 id 发给 `rust/src/server.rs`。
 2. `rust/src/accounts.rs` 准备账号登录；需要续期或验证时，通过 `rust/src/official_session.rs` 调用独立的 Codex `app-server` 做 `account/read(refreshToken=true)`，并检查编辑器重载通道。
 3. 关闭目标桌面端，并由 `rust/src/editors.rs` 停止共用配置的旧编辑器后端；停止前保留窗口身份，以便后端退出后仍能发送重载。
-4. 重新保存退出时更新的当前登录，再由 `rust/src/accounts.rs` 写入所选账号凭证、`rust/src/config_ops.rs` 恢复官方配置，最后通过 `rust/src/thread_routing.rs` 同步并核对旧会话来源。
+4. 重新保存退出时更新的当前登录，再由 `rust/src/accounts.rs` 写入所选账号凭证、`rust/src/config_ops.rs` 恢复官方配置，最后由 `rust/src/thread_routing.rs` 处理旧会话：来源不同的留在原处，同一来源下的更新模型并核对。
 5. 重新打开目标桌面端，并向已连接的伴随扩展发送编辑器窗口重载请求。
 
 准备阶段并行执行账号/API 验证与编辑器归属检查，全部收尾且通过后才能关闭客户端和应用配置；任一检查失败都保留配置。Windows 由 `rust/src/platform.rs` 直接调用 Toolhelp32、QueryFullProcessImageNameW 和目标进程内存读取完成扫描，等待期间不阻塞登录 RPC。关闭阶段复用该阶段新取得的进程树，按已确认进程的退出信号等待，共享两秒保存时限，强制停止后仍确认实际退出。后台切换进程在父进程完成锁交接、写入排队状态并通过 IPC 发出开始消息后执行，不再固定等待 1.5 秒。这些优化不依赖缩短账号校验或使用旧验证结果。
@@ -82,7 +91,12 @@ flowchart LR
 
 添加账号时，每次登录使用 `accounts/login/<随机标识>/` 独立目录。登录完成通知必须匹配本次 `loginId`；通知早于 start 响应时先暂存，收到响应后处理。成功状态先提交再关闭登录进程，旧通知不覆盖结果；失败时保留已写入的凭证和脱敏原因，方便恢复。
 
-旧对话按目标供应商和模型筛选；未指定模型时先解析默认模型，再跳过已经匹配的会话。速度设置从历史末尾按 64 KiB 块读取，不解析聊天正文。超过四条的批次由两个官方后端动态分担，总在途数仍最多四条，失败后停止派发并等待在途任务结束；更新后仍重新启动后端逐条核对持久结果。Windows 进程扫描按 PID 查询父进程，关闭桌面时只查询目标进程，保留真实退出确认和独立配置隔离。10 秒是常见切换场景的优化目标，耗时仍受账号服务、历史大小和客户端退出速度影响。
+旧对话的处理以 Codex 的来源绑定为准。从 0.166 起，Codex 把每个对话绑定在 rollout 开头记录的来源上；0.167 连追加的移动记录也不认，用 0.164 移动过的对话同样会被拒绝。所以：
+
+- **来源不同的对话**：一律留在原处，计入 `kept`，不发任何 RPC。只剩这类对话时，不启动 app-server。
+- **同一来源下模型不可用的对话**：用 `thread/resume` 换成目标模型。所有第三方 API 共用 `hermes_bridge` 这个来源名，从一个 API 切到另一个时，这一步仍然需要。
+
+需要换模型时，未指定模型的先解析默认模型，再跳过已经匹配的会话。速度设置从历史末尾按 64 KiB 块读取，不解析聊天正文。超过四条的批次由两个官方后端动态分担，总在途数最多四条；失败后停止派发，等在途任务结束。更新完成后，仍重新启动后端逐条核对持久结果。Windows 进程扫描按 PID 查询父进程，关闭桌面时只查询目标进程，保留真实退出确认和独立配置隔离。10 秒是常见切换场景的优化目标，耗时仍受账号服务、历史大小和客户端退出速度影响。
 
 ## 独立的远程服务器切换（0.1.4，待实机验收）
 
@@ -110,6 +124,48 @@ flowchart LR
 6. 失败时保留上次成功时间，但界面不再显示旧额度数字，只显示失败原因和结构化错误类型。
 
 账号状态每次读取各账号已保存的 `auth.json`，由访问令牌声明解析套餐，由 ID 令牌声明解析订阅到期与最近检查时间，并返回 `last_refresh` 的时间。额度刷新时另读官方 `accounts/check`，`membership_status` 按官方账单页的优先级得出会员状态：付款异常、计划变更、优惠未开始、优惠或试用生效中、普通续费、不续费、到期。优惠结束日取自 `entitlement.discount.discount_expires_at`，软件不做日期计算。额度刷新后，页面通过既有账号接口合并该账号的最新显示字段，不下发令牌，也不覆盖其他账号或模型草稿。
+
+## Claude Code 切换（0.1.7）
+
+`rust/src/claude/` 按职责拆分：
+
+| 文件 | 职责 |
+| --- | --- |
+| `mod.rs` | 接口 `claudeApply`、`claudeRestore`、`claudeState`、`claudeProbe`；在用的 API 被修改或删除时同步 Claude Code |
+| `access.rs` | 判断每个 API 怎么接入：Anthropic 协议直连，OpenAI 协议经本机转换，缺密钥等情况不可用并给出原因。本机地址的判断和 Codex 共用 `config_store::is_local` |
+| `settings.rs` | 只改写 `settings.json` 的 `env` 里几个固定的键（地址、令牌、主模型和三档别名），其余内容原样保留；快速模型写入 Haiku 别名，没设时与主模型相同；按 API 记住上次选的模型 |
+| `state.rs` | 接管前的原值、外部改动检测（7 个键）、开机自启状态，以及每个 API 的接入方式和原因；`settings.json` 解析失败按“被外部改动”处理，不报错 |
+| `probe.rs` | 检测连接：直连时向 `/v1/messages` 发最短请求；经转换时在进程内走转换路径；分别报告超时、连不上和上游 HTTP 错误 |
+| `adapter.rs` | 把 Anthropic Messages 转成 OpenAI 请求（Responses，或经 `adapter_convert` 转成 chat completions），非流式请求整段转换回来 |
+| `streaming.rs` | 流式请求：上游也用流式，文字和思考过程逐段转发；工具调用先攒齐再按顺序发出，因为 chat 上游的并行调用可能交错；流中出错时发带原因的 `error` 事件；空闲 10 秒发一次 ping |
+
+“恢复接管前的配置”按记录的原值逐键恢复，接管前用的是别的网关就恢复成那个网关；官方登录凭据始终不改动。Codex 和 Claude Code 的页面互不引用，规则只来自后端。
+
+## 用量统计（0.1.7）
+
+`rust/src/usage.rs` 提供 `usage`、`usageRequests`、`usagePrices` 三个接口，`usage/` 下分为三个文件：
+
+- `scan.rs`：读记录、归属来源；
+- `prices.rs`：价格簿和计费；
+- `calendar.rs`：按本机时区把时间分到小时和天。
+
+**来源归属**：每次 Codex 切换和 Claude Code 应用或恢复成功后，往 `usage/sources.jsonl` 追加一行。一条请求的来源，取同一客户端在它之前最后一行记录；更早的请求归为“切换记录开始之前”。
+
+**读记录**：只在调用接口时增量扫描，不常驻，不定时。按需挑字段解析，对话正文不进内存，也不入库。
+- Codex（0.167 起）：每条 `token_usage_record` 算一次请求，按 `thread_id + response_id` 去重。
+- Codex 旧 rollout：按 `token_count` 累计值的增长计数，用量取差值。
+- Claude Code：按 `message.id` 去重；`isApiErrorMessage` 的行算失败，模型记为空。
+- `.jsonl.zst` 也能读。
+
+**索引**：存在切换器自己的 `usage.sqlite`，这是唯一以读写方式打开的数据库，其余都只读。文件没变就跳过；变长了从上次的偏移接着读；变短或被替换时整份重读。
+
+**接口字段**：两个客户端统一，`input` 是未缓存的输入，`cachedInput` 是缓存读，`cacheWrite` 是缓存写，`output` 已含推理。
+
+**价格簿**：
+- 来自 OpenRouter 公开模型列表里的主流官方厂商。超过 24 小时，由接口触发一次临时更新；失败就继续用旧价格簿，并返回原因。
+- 发布包带 `data/price-snapshot.json` 和 `data/prices-overrides.json`。前者是发布前用 `scripts/update-price-snapshot.cjs` 生成的快照；后者只收有出处的模型别名和修正。
+- 费用在查询时用当前价格簿算，不入库。Codex 的缓存写只计数量，不单独计价。失败的请求不计价。
+- 每个 API 的 `pricing`（官方价、倍率、不计费）和 `usageUrl` 存在 `providers.json`，保存时校验。
 
 ## 凭证状态的判断边界
 
@@ -146,7 +202,23 @@ Mac 的心跳与客户端列表通过异步 `ps` 枚举进程，再并行调用�
 
 校验完成后，把当前程序复制到暂存目录，以 `--update-worker` 启动独立更新进程。独立进程就绪后旧后台退出，升级进程等待它结束，再备份并替换：Windows 按发行清单及运行时目录处理；Mac 通过应用包改名替换，账号数据仍留在 Application Support。健康检查在 30 秒内验证新后台的 `/api/runtime` 构建号，失败恢复旧版并重新启动。新后台收到的 `BRIDGE_HOME` 若就是默认数据目录，仍按默认安装处理，继续刷新发现文件和桌面快捷方式。数据目录的 `updates/previous/` 只保留一份备份，诊断日志记录检查、下载、安装和回滚。
 
-页面由 `web/style.css` 与原生 `web/js/` ES 模块组成。`api.js` 处理会话，`store.js` 保存共享状态，各 `views/` 模块负责分区交互；`main.js` 编排首屏读取。服务仅提供 `.js`、`.css` 和主页，保持同源 CSP。升级状态通过轮询更新，旧后台退出后提示使用新打开的会话页面。
+页面由 `web/style.css` 与原生 `web/js/` ES 模块组成，不需要构建。
+
+| 目录或文件 | 职责 |
+| --- | --- |
+| `api.js` | 会话 |
+| `store.js` | 共享状态 |
+| `main.js` | 编排首屏读取 |
+| `tabs.js` | 管理分页，打开时才读取对应数据 |
+| `components/` | 共用的来源卡片和顶部客户端切换 |
+| `clients/codex/` | Codex 页 |
+| `clients/claude/` | Claude Code 页（数据、请求、列表、详情、状态卡、组织） |
+| `usage/` | 用量分页（数据换算、请求、趋势图、表格、组织） |
+| `views/` | 账号、API、编辑器、远程、设置、更新等分区 |
+
+`clients/codex` 和 `clients/claude` 互不引用；`components/` 不引用任何客户端，文字由调用方传入。
+
+服务只提供 `.js`、`.css` 和主页，保持同源 CSP。新增页面文件要登记进 `release-files.json`，否则 `smoke-package` 会报缺文件。升级状态通过轮询更新，旧后台退出后提示使用新打开的会话页面。
 
 ## 代码入口
 
@@ -159,11 +231,13 @@ Mac 的心跳与客户端列表通过异步 `ps` 枚举进程，再并行调用�
 | 官方账号 | `rust/src/accounts.rs`、`rust/src/official_session.rs`                   | 登录、账号切换、额度、订阅状态和 app-server |
 | 编辑器   | `rust/src/editors.rs`、`rust/src/editor_integration.rs`、`vscode-companion/` | 窗口登记、归属确认、重载和扩展安装       |
 | 远程     | `rust/src/remote.rs`、`vscode-remote-agent/`                             | 远程切换、代理更新和登录同步             |
-| 旧对话   | `rust/src/thread_routing.rs`                                             | 切换后同步旧会话来源                     |
+| 旧对话   | `rust/src/thread_routing.rs`                                             | 来源不同的旧会话留在原处，同一来源下更新模型 |
+| Claude Code | `rust/src/claude/`                                                    | Claude Code 设置接管与恢复、接入判断、检测连接、Anthropic 转换（含流式） |
+| 用量     | `rust/src/usage.rs`、`rust/src/usage/`、`data/`                          | 来源记录、记录扫描与索引、价格簿和计费   |
 | 诊断     | `rust/src/diagnostics.rs`                                                | 日志脱敏、轮换和诊断导出                 |
 | 更新     | `rust/src/update.rs`、`rust/src/bin/upgrade-bridge.rs`                   | 发布查询、校验替换、回滚和旧版升级桥     |
 | 迁移     | `rust/src/migration.rs`                                                  | 旧安装数据导入和默认数据目录             |
 | 平台     | `rust/src/platform.rs`、`rust/src/integration.rs`、`rust/src/lifecycle.rs` | 进程、权限、代理、快捷方式、自启和卸载   |
 | 接口     | `rust/src/mcp.rs`、`rust/src/adapter*.rs`                                | MCP 服务和 API 转换                      |
-| 页面     | `web/index.html`、`web/js/`                                              | 来源选择、账号列表、额度和客户端状态展示 |
+| 页面     | `web/index.html`、`web/js/`                                              | 两个客户端的来源选择、账号与 API 管理、额度、用量和客户端状态 |
 | 打包     | `scripts/build-release.cjs`、`scripts/rust-release.cjs`                  | 发布包、占位文件、VSIX 和 Windows 图标   |
