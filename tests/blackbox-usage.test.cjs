@@ -63,7 +63,8 @@ test('价格与provider：格式校验/state回填、公开价格过滤和失败
  await api(f,'providerUpdate',{id:p.id,pricing:{mode:'multiplier',multiplier:0.3,currency:'CNY'},usageUrl:null});state=await api(f,'state');assert.equal(state.providers.find(v=>v.id===p.id).pricing.currency,'CNY');assert.equal(state.providers.find(v=>v.id===p.id).usageUrl,null);
  const price=await api(f,'usagePrices',{});assert.equal(price.source,'openrouter');const stored=JSON.parse(fs.readFileSync(path.join(f.bridge,'usage/prices.json')));assert.equal(stored.models.length,2);fail=true;const bad=await api(f,'usagePrices',{});assert.ok(bad.error);assert.ok(bad.errorAt);const after=JSON.parse(fs.readFileSync(path.join(f.bridge,'usage/prices.json')));assert.deepEqual(after.models,stored.models);assert.equal(after.version,stored.version);
 });
-test('Windows用量：1GiB混合jsonl/zst含数据库写入和无变化调用性能',{skip:(!isRust||process.platform!=='win32')&&'本例采样Windows峰值工作集'},async t=>{
+// 1 GiB 基准只在本机门禁跑：CI 机器性能波动大（同一份代码本机首次约 6 秒，CI 上 12 秒），计数正确性由上面的用例覆盖。
+test('Windows用量：1GiB混合jsonl/zst含数据库写入和无变化调用性能',{skip:(!isRust||process.platform!=='win32'||process.env.GITHUB_ACTIONS==='true')&&'本例只在本机 Windows 门禁采样性能'},async t=>{
  let logicalBytes=0;const f=await fixture(t,{setup({home}){
  const dir=path.join(home,'sessions');fs.mkdirSync(dir,{recursive:true});
  const record=JSON.stringify(event(recent,'event_msg',{type:'token_count',info:{total_token_usage:usage(),last_token_usage:usage()}}))+'\n';const block=Buffer.from(record.repeat(Math.floor(1048576/Buffer.byteLength(record))));
