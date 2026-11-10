@@ -1231,26 +1231,7 @@ async fn wait_exit(pid: u32, timeout: Duration) -> io::Result<()> {
     Ok(())
 }
 async fn launch(job: &Job, adapter_port: Option<u16>) -> io::Result<u32> {
-    let native = executable(&job.target);
-    let mut command = if native.exists() {
-        Command::new(native)
-    } else {
-        let node = if cfg!(windows) {
-            job.target.join("runtime/node.exe")
-        } else {
-            job.target.join(format!(
-                "runtime/{}/node",
-                if cfg!(target_arch = "aarch64") {
-                    "arm64"
-                } else {
-                    "x64"
-                }
-            ))
-        };
-        let mut command = Command::new(node);
-        command.arg(job.target.join("main.cjs"));
-        command
-    };
+    let mut command = Command::new(executable(&job.target));
     command
         .current_dir(&job.target)
         .stdin(Stdio::null())
@@ -1262,7 +1243,6 @@ async fn launch(job: &Job, adapter_port: Option<u16>) -> io::Result<u32> {
     command
         .env("BRIDGE_HOME", &job.bridge_home)
         .env("BRIDGE_CODEX_HOME", &job.codex_home)
-        .env("BRIDGE_LEGACY_HANDOVER", "1")
         .env("SWITCHER_WEB_ROOT", job.target.join("web"));
     if let Some(port) = adapter_port {
         command.env("BRIDGE_PORT", port.to_string());
@@ -1293,7 +1273,10 @@ async fn stop_adapter(job: &Job) -> io::Result<Option<u16>> {
     if pid == job.pid {
         return Ok(None);
     }
-    let image = crate::platform::image(pid)?;
+    // The owner has exited and its socket lives on in inherited handles: not ours to stop.
+    let Ok(image) = crate::platform::image(pid) else {
+        return Ok(None);
+    };
     let same = |a: &Path, b: &Path| -> bool {
         match (fs::canonicalize(a), fs::canonicalize(b)) {
             (Ok(a), Ok(b)) => crate::platform::display_path(&a)
@@ -1301,11 +1284,7 @@ async fn stop_adapter(job: &Job) -> io::Result<Option<u16>> {
             _ => false,
         }
     };
-    let owned = same(&image, &job.target.join("codex-switcher.exe"))
-        || (same(&image, &job.target.join("runtime/node.exe"))
-            && crate::platform::command(pid)?
-                .to_lowercase()
-                .contains(&job.target.join("main.cjs").to_string_lossy().to_lowercase()));
+    let owned = same(&image, &job.target.join("codex-switcher.exe"));
     if !owned {
         return Ok(None);
     }

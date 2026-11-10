@@ -979,7 +979,7 @@ test('adapter HTTP保持5秒首心跳/10秒后续心跳，等待完整JSON且记
   assert.doesNotMatch(text, /response.output_text.delta/);
   t.diagnostic(
     JSON.stringify({
-      backend: process.env.SWITCHER_BACKEND || 'node',
+      backend: 'rust',
       idleWaitMs: elapsed,
       cpuMs: cpu,
       heartbeatAtMs: times,

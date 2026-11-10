@@ -12,7 +12,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-15, macos-15-intel]
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,7 +31,16 @@ jobs:
         run: CODEX_NPM_ROOT="$(npm root -g)" node scripts/ci-setup.cjs
       - name: Prepare real VS Code integration checks
         run: npm install --prefix .build-cache/editor-check --no-package-lock --ignore-scripts @vscode/test-electron@2.5.2
-      - run: node scripts/verify-editor-reload.cjs
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+          rustup override set stable
+      - name: Compile native release
+        run: cargo build --locked --release --manifest-path rust/Cargo.toml --target ${{ matrix.target }}
+      - name: Verify real editor reload against Rust
+        env:          SWITCHER_RUST_EXE: ${{ github.workspace }}/rust/target/${{ matrix.target }}/release/codex-switcher${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: node scripts/verify-editor-reload.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

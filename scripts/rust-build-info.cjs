@@ -14,7 +14,6 @@ function buildInfo(sequence) {
     path.join(project, 'package.json'),
     path.join(root, 'Cargo.toml'),
     path.join(root, 'Cargo.lock'),
-    path.join(root, 'src/bin/upgrade-bridge.rs'),
   );
   const hash = crypto.createHash('sha256');
   for (const file of files.sort())

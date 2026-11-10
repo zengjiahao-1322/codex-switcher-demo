@@ -153,21 +153,9 @@ pub fn clean_records(app: &App) -> io::Result<()> {
                 .is_none()
                 .then(|| crate::platform::user_home().join(".codex-api-switcher"))
         });
-    let legacy = (env::var("BRIDGE_LEGACY_HANDOVER").as_deref() == Ok("1"))
-        .then(|| env::var_os("BRIDGE_HOME"))
-        .flatten()
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from)
-        .filter(|p| {
-            p.file_name()
-                .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("private"))
-                && crate::migration::configured_home().is_none()
-        })
-        .map(|p| p.join("running.json"));
     for file in [
         Some(app.bridge.join("running.json")),
         discovery.map(|p| p.join("connection.json")),
-        legacy,
     ]
     .into_iter()
     .flatten()
@@ -320,7 +308,7 @@ pub async fn cli(app: &App, action: &str) -> io::Result<String> {
     }
     if !["restore", "cleanup"].contains(&action) {
         return Err(io::Error::other(
-            "usage: node cli.cjs status|restore|cleanup",
+            "usage: codex-switcher --cli status|restore|cleanup",
         ));
     }
     check(app).map_err(|_| io::Error::other("账号切换正在进行，请稍后"))?;

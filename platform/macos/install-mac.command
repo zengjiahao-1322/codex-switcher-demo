@@ -14,28 +14,10 @@ mkdir -p "$HOME/Applications"
 if [ ! -d "$SOURCE" ]; then echo 'Missing Codex Switcher.app beside installer'; exit 1; fi
 DATA="$HOME/Library/Application Support/CodexApiSwitcher"
 if [ -f "$DATA/running.json" ]; then
-  if [ -x "$SOURCE/Contents/Resources/codex-switcher" ]; then
-    "$SOURCE/Contents/Resources/codex-switcher" --stop-installed "$DATA/running.json" "$TARGET/Contents/Resources"
-  else
-  NODE="$SOURCE/Contents/Resources/runtime/$ARCH/node"
-  "$NODE" - "$DATA/running.json" <<'JS'
-const fs = require('fs');
-const cp = require('child_process');
-try {
-  const running = JSON.parse(fs.readFileSync(process.argv[2]));
-  const command = cp.execFileSync('/bin/ps', ['-p', String(running.pid), '-o', 'command='], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
-  if (command.includes('/Codex Switcher.app/Contents/Resources/main.cjs')) {
-    process.kill(running.pid, 'SIGTERM');
-  }
-} catch {
-  // 旧服务已退出或运行记录失效时，继续安装。
-}
-JS
-  fi
+  "$SOURCE/Contents/Resources/codex-switcher" --stop-installed "$DATA/running.json" "$TARGET/Contents/Resources"
 fi
+# 0.1.3-0.1.5 (Node) backends keep running from the old app bundle.
+/usr/bin/pkill -f "$TARGET/Contents/Resources/main.cjs" || true
 /usr/bin/ditto "$SOURCE" "$TARGET"
 # ditto can preserve the quarantine flag and make the installed app run from
 # AppTranslocation. The attribute may not exist, so do not fail the install.

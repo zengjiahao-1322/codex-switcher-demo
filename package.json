@@ -11,13 +11,10 @@
   "engines": {
     "node": ">=22"
   },
-  "main": "main.cjs",
   "scripts": {
-    "start": "node main.cjs",
     "test": "node scripts/test-all.cjs"
   },
   "dependencies": {
-    "smol-toml": "1.9.1",
-    "yaml": "2.9.1"
+    "smol-toml": "1.9.1"
   }
 }

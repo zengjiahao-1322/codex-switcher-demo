@@ -10,11 +10,10 @@ try {
 } catch {
   ({ chromium } = require('../.build-cache/browser-check/node_modules/playwright'));
 }
-const { createServer, isRust } = require('../tests/backend.cjs');
+const { createServer } = require('../tests/backend.cjs');
 const { auth, accountId } = require('../tests/official-blackbox-helpers.cjs');
 const slowId = accountId('ui-slow'),
   fastId = accountId('ui-fast');
-const { createService } = require('../src/server/service.cjs');
 
 // 运行发行包使用的同一份 HTML / CSS / ES 模块，验证刷新时的真实 DOM 状态。
 // 此处仅控制测试浏览器，不接触用户桌面或个人账号。
@@ -41,24 +40,12 @@ let officialMode = false,
       path.join(codexHome, 'config.toml'),
       'model="fixture-api"\nmodel_provider="hermes_bridge"\n',
     );
-    const providerId = require('../src/config/providers.cjs').add(bridgeHome, {
-      name: 'UI fixture API',
-      baseUrl: 'http://127.0.0.1:1/v1',
-      apiMode: 'responses',
-      model: 'fixture-api',
-      apiKey: 'fixture-key',
-    });
-    fs.writeFileSync(path.join(bridgeHome, 'current.json'), JSON.stringify({ providerId }));
-    const service = createService({ codexHome, bridgeHome });
-    const slowGate = new Promise((resolve) => {
-      releaseSlow = resolve;
-    });
+    let providerId;
     const accounts = [
       { id: slowId, label: 'Slow account', email: 'slow@example.test', plan: 'plus' },
       { id: fastId, label: 'Fast account', email: 'fast@example.test', plan: 'plus' },
     ];
     const syncNative = () => {
-      if (!native) return;
       native.write(
         path.join(bridgeHome, 'accounts/index.json'),
         accounts.map(({ quota, ...row }) => row),
@@ -80,88 +67,52 @@ let officialMode = false,
         native.write(path.join(bridgeHome, 'current.json'), { providerId });
       }
     };
-    if (isRust) {
-      native = await require('../tests/browser-native-fixture.cjs').prepare(
-        root,
-        codexHome,
-        bridgeHome,
-      );
-      for (const [id, user, remaining] of [
-        [slowId, 'ui-slow', 80],
-        [fastId, 'ui-fast', 65],
-      ]) {
-        native.write(path.join(bridgeHome, 'accounts', id, 'auth.json'), auth(user));
-        native.data.profiles[id] = {
-          methods: {
-            'account/rateLimits/read': {
-              ...(id === slowId ? { waitFile: 'release-slow' } : {}),
-              result: {
-                rateLimits: {
-                  limitId: 'codex',
-                  planType: 'plus',
-                  primary: {
-                    usedPercent: 100 - remaining,
-                    windowDurationMins: 300,
-                    resetsAt: 2000000000,
-                  },
+    native = await require('../tests/browser-native-fixture.cjs').prepare(
+      root,
+      codexHome,
+      bridgeHome,
+    );
+    for (const [id, user, remaining] of [
+      [slowId, 'ui-slow', 80],
+      [fastId, 'ui-fast', 65],
+    ]) {
+      native.write(path.join(bridgeHome, 'accounts', id, 'auth.json'), auth(user));
+      native.data.profiles[id] = {
+        methods: {
+          'account/rateLimits/read': {
+            ...(id === slowId ? { waitFile: 'release-slow' } : {}),
+            result: {
+              rateLimits: {
+                limitId: 'codex',
+                planType: 'plus',
+                primary: {
+                  usedPercent: 100 - remaining,
+                  windowDurationMins: 300,
+                  resetsAt: 2000000000,
                 },
               },
             },
           },
-        };
-      }
-      native.save();
-      syncNative();
-      const release = releaseSlow;
-      releaseSlow = () => {
-        release();
-        native.write(path.join(root, 'release-slow'), 'ready');
+        },
       };
     }
-    let calls = 0;
-    server = createServer(
-      {
-        token: 'fixture-ui-token',
-        getState: async () => {
-          const state = await service.state();
-          if (officialMode) state.current.official = true;
-          return state;
-        },
-        actions: {
-          ...service.actions,
-          accounts: async () => ({ items: accounts }),
-          // 不访问 GitHub。
-          checkUpdate: async () => ({
-            current: { version: '0.1.3', build: 'fixture' },
-            latest: null,
-            checkedAt: null,
-            status: 'idle',
-          }),
-          accountSwitch: async () => {
-            switches++;
-            return {};
-          },
-          accountQuota: async ({ id }) => {
-            calls++;
-            if (id === slowId) await slowGate;
-            const row = accounts.find((account) => account.id === id);
-            row.quota = {
-              status: 'ok',
-              checkedAt: new Date().toISOString(),
-              buckets: [
-                {
-                  id: 'codex',
-                  windows: [{ minutes: 300, remainingPercent: id === slowId ? 80 : 65 }],
-                },
-              ],
-            };
-            return { items: [{ id, ...row.quota }] };
-          },
-        },
-      },
-      { codexHome, bridgeHome, env: native?.env },
-    );
+    native.save();
+    releaseSlow = () => native.write(path.join(root, 'release-slow'), 'ready');
+    server = createServer({ token: 'fixture-ui-token' }, {
+      codexHome, bridgeHome, env: native.env,
+    });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const url = new URL(server.url);
+    const response = await fetch(url.origin + '/api/providerAdd', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + url.hash.slice(1), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'UI fixture API', baseUrl: native.baseUrl,
+        apiMode: 'responses', model: 'fixture-api', apiKey: 'fixture-key' }),
+    });
+    const value = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(value));
+    providerId = value.id;
+    syncNative();
     browser = await chromium.launch({
       headless: true,
       ...(process.env.SWITCHER_BROWSER_CHANNEL
@@ -169,10 +120,9 @@ let officialMode = false,
         : {}),
     });
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
-    if (isRust)
-      page.on('request', (request) => {
-        if (request.url().endsWith('/api/accountSwitch')) switches++;
-      });
+    page.on('request', (request) => {
+      if (request.url().endsWith('/api/accountSwitch')) switches++;
+    });
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/#fixture-ui-token`);
@@ -216,7 +166,7 @@ let officialMode = false,
     report.checks.push('slow-account-does-not-lock-source-model-or-other-account');
 
     const quotaCalls = () =>
-      isRust ? native.rpc().filter((x) => x.method === 'account/rateLimits/read').length : calls;
+      native.rpc().filter((x) => x.method === 'account/rateLimits/read').length;
     const before = quotaCalls();
     await Promise.all([
       page.waitForResponse((response) => response.url().endsWith('/api/accountQuota')),
@@ -237,11 +187,10 @@ let officialMode = false,
     await page.getByRole('button', { name: '刷新全部额度', exact: true }).waitFor();
     assert.deepEqual(errors, []);
     report.checks.push('each-account-renders-own-result-without-script-errors');
-    if (isRust)
-      for (const account of accounts)
-        account.quota = JSON.parse(
-          fs.readFileSync(path.join(bridgeHome, 'accounts', account.id, 'quota.json')),
-        );
+    for (const account of accounts)
+      account.quota = JSON.parse(
+        fs.readFileSync(path.join(bridgeHome, 'accounts', account.id, 'quota.json')),
+      );
     officialMode = true;
     accounts[0].current = true;
     accounts[0].quota.buckets[0].windows[0].remainingPercent = 10;

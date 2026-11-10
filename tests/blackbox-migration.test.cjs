@@ -59,21 +59,7 @@ async function completed(file) {
 function setup({ root, home, environment }) {
   const volumes = path.join(root, 'volumes');
   const install = path.join(volumes, 'one');
-  for (const relative of require('../release-files.json')) {
-    const target = path.join(install, relative);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(path.join(project, relative), target);
-  }
-  fs.symlinkSync(
-    path.join(project, 'node_modules'),
-    path.join(install, 'node_modules'),
-    'junction',
-  );
-  fs.mkdirSync(path.join(install, 'bin'));
-  fs.copyFileSync(
-    path.join(project, 'bin/process-context.exe'),
-    path.join(install, 'bin/process-context.exe'),
-  );
+  fs.mkdirSync(install, { recursive: true });
   oldCopy(install, ['a', 'shared'], '01', 'first');
   // Restore the real package metadata after constructing the old-data fixture.
   fs.copyFileSync(path.join(project, 'package.json'), path.join(install, 'package.json'));
@@ -191,7 +177,7 @@ for (const { legacyDefault, badCopy } of [{}, { legacyDefault: true }, { badCopy
         );
         second.stdout.on('data', (chunk) => {
           output += chunk;
-          if (output.includes('BRIDGE_READY') || output.includes('"event":"ready"')) {
+          if (output.includes('"event":"ready"')) {
             clearTimeout(timeout);
             resolve();
           }
@@ -207,7 +193,7 @@ for (const { legacyDefault, badCopy } of [{}, { legacyDefault: true }, { badCopy
       );
       console.log(
         JSON.stringify({
-          backend: process.env.SWITCHER_BACKEND || 'node',
+          backend: 'rust',
           durationMs: result.durationMs,
           cpuMs: result.cpuMs,
           skipped: result.skipped,
@@ -256,7 +242,7 @@ test(
       const timeout = setTimeout(() => reject(Error('Second startup timed out: ' + output)), 12000);
       second.stdout.on('data', (chunk) => {
         output += chunk;
-        if (output.includes('BRIDGE_READY') || output.includes('"event":"ready"')) {
+        if (output.includes('"event":"ready"')) {
           clearTimeout(timeout);
           resolve();
         }
@@ -301,7 +287,7 @@ test(
       const timeout = setTimeout(() => reject(Error('Second startup timed out: ' + output)), 12000);
       second.stdout.on('data', (chunk) => {
         output += chunk;
-        if (output.includes('BRIDGE_READY') || output.includes('"event":"ready"')) {
+        if (output.includes('"event":"ready"')) {
           clearTimeout(timeout);
           resolve();
         }
@@ -350,7 +336,7 @@ test(
       const timeout = setTimeout(() => reject(Error('Second startup timed out: ' + output)), 12000);
       second.stdout.on('data', (chunk) => {
         output += chunk;
-        if (output.includes('BRIDGE_READY') || output.includes('"event":"ready"')) {
+        if (output.includes('"event":"ready"')) {
           clearTimeout(timeout);
           resolve();
         }

@@ -6,44 +6,49 @@ const { test } = require('node:test'),
   http = require('node:http'),
   crypto = require('node:crypto');
 const { spawn, execFileSync } = require('node:child_process');
-const { isRust, rustBinary } = require('./backend.cjs');
+const { rustBinary } = require('./backend.cjs');
 const { startBackend, launchBackend } = require('./backend-process.cjs');
 const { api, serve, responseTool } = require('./config-blackbox-helpers.cjs');
 const { packageFixture, snapshot, until, write } = require('./fixtures/batch6-package.cjs');
 const project = path.resolve(__dirname, '..');
 async function occupyRuntime(f) {
-  if (process.platform !== 'win32' || (!isRust && !fs.existsSync(rustBinary()))) return null;
+  if (process.platform !== 'win32' || false) return null;
   const node = path.join(f.target, 'runtime/node.exe');
   if (!fs.existsSync(node)) fs.copyFileSync(process.execPath, node);
-  const child = spawn(node, [path.join(f.target, 'mcp-server.cjs')], {
-    cwd: f.root,
-    env: f.environment,
-    windowsHide: true,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  // This fixture only needs a loaded node.exe image, not the frozen Node backend.
+  const child = spawn(
+    node,
+    ['-e', 'process.stdout.write("image-ready\\n");setInterval(()=>{},1000)'],
+    {
+      cwd: f.root,
+      env: f.environment,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+  );
   f.track(child);
   const closed = require('node:events').once(child, 'close');
   let error = '';
   child.stderr.on('data', (chunk) => (error += chunk));
   const ready = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(Error('TEMP MCP did not initialize: ' + error)), 10000);
+    const timer = setTimeout(
+      () => reject(Error('TEMP image holder did not initialize: ' + error)),
+      10000,
+    );
     child.stdout.on('data', (chunk) => {
-      if (String(chunk).includes('"serverInfo"')) {
+      if (String(chunk).includes('image-ready')) {
         clearTimeout(timer);
         resolve();
       }
     });
   });
-  child.stdin.write(
-    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"fixture","version":"1"}}}\n',
-  );
   await ready;
   assert.throws(() => fs.unlinkSync(node), { code: 'EPERM' });
   return { child, closed };
 }
 async function verifyOldCleanup(f, record, occupant) {
   if (!occupant) return record;
-  assert.equal(occupant.child.exitCode, null, 'the MCP must survive replacement');
+  assert.equal(occupant.child.exitCode, null, 'the loaded image must survive replacement');
   assert.equal(occupant.child.signalCode, null);
   const parked = fs
     .readdirSync(path.join(f.target, 'runtime'))
@@ -74,7 +79,7 @@ async function verifyOldCleanup(f, record, occupant) {
   console.log(
     JSON.stringify({
       event: 'occupied-runtime-preserved-and-cleaned',
-      backend: isRust ? 'rust' : 'node',
+      backend: 'rust',
       occupantPid: occupant.child.pid,
       oldFiles: parked.length,
       restartedPid: next.pid,
@@ -123,8 +128,7 @@ async function packageArchive(f, modify = () => {}) {
   });
   return { source, build: actual, archive };
 }
-
-test('更新黑盒：发行元数据校验、六小时合并与同版仅较大发行序号可升级', { skip: !isRust }, async (t) => {
+test('更新黑盒：发行元数据校验、六小时合并与同版仅较大发行序号可升级', {}, async (t) => {
   const f = await packageFixture(t);
   f.response.metadata = metadata(f);
   for (const sequence of [undefined, null, '101', 0, -1, 1.5]) {
@@ -190,7 +194,9 @@ test('更新黑盒：下载中断和SHA不符保留完整安装与私有数据',
   await failed(f, /校验和不匹配/);
   assert.deepEqual(snapshot(f.target), before);
   assert.deepEqual(
-    fs.existsSync(staging) ? fs.readdirSync(staging).filter((name) => name.startsWith('package-')) : [],
+    fs.existsSync(staging)
+      ? fs.readdirSync(staging).filter((name) => name.startsWith('package-'))
+      : [],
     beforeBadStaging,
   );
   assert.equal(fs.readFileSync(privateSentinel(f), 'utf8'), 'preserve private');
@@ -215,27 +221,7 @@ test('更新黑盒：真实下载校验换包换进程，健康检查和发现�
   const f = await packageFixture(t);
   const occupant = await occupyRuntime(f);
   const incoming = await packageArchive(f, async (source) => {
-    if (!occupant || isRust) return;
-    const native = path.join(source, 'codex-switcher.exe');
-    fs.copyFileSync(rustBinary(), native);
-    fs.copyFileSync(
-      path.join(path.dirname(rustBinary()), 'upgrade-bridge.exe'),
-      path.join(source, 'runtime/node.exe'),
-    );
-    const build = JSON.parse(
-      execFileSync(native, ['--build-info'], {
-        env: { ...process.env, SWITCHER_WEB_ROOT: path.join(source, 'web') },
-        encoding: 'utf8',
-        windowsHide: true,
-      }),
-    );
-    write(
-      path.join(source, 'src/platform/build-info.cjs'),
-      'exports.buildInfo=()=>(' + JSON.stringify(build) + ');\n',
-    );
-    const manifest = JSON.parse(fs.readFileSync(path.join(source, 'release-files.json')));
-    manifest.push('codex-switcher.exe');
-    write(path.join(source, 'release-files.json'), JSON.stringify(manifest));
+    return;
   });
   write(path.join(f.target, 'obsolete.txt'), 'old entry');
   const oldFiles = JSON.parse(fs.readFileSync(path.join(f.target, 'release-files.json')));
@@ -306,7 +292,7 @@ test('更新黑盒：真实下载校验换包换进程，健康检查和发现�
   console.log(
     JSON.stringify({
       event: 'update-replaced',
-      backend: isRust ? 'rust' : 'node',
+      backend: 'rust',
       oldPid: f.child.pid,
       newPid: record.pid,
       build: record.build,
@@ -314,7 +300,6 @@ test('更新黑盒：真实下载校验换包换进程，健康检查和发现�
     }),
   );
 });
-
 test('生命周期黑盒：活动任务拒绝退出，退出只清本进程运行与发现记录', async (t) => {
   const f = await startBackend(t, {
     setup({ root, environment }) {
@@ -336,10 +321,9 @@ test('生命周期黑盒：活动任务拒绝退出，退出只清本进程运�
   assert.equal(fs.existsSync(path.join(f.bridge, 'running.json')), false);
   assert.equal(fs.existsSync(path.join(f.root, 'discovery/connection.json')), false);
 });
-
 test(
   'Windows Rust后台：TEMP快捷方式启动无可见窗口或控制台宿主，PowerShell仍能捕获CLI输出',
-  { skip: process.platform !== 'win32' || !isRust },
+  { skip: process.platform !== 'win32' },
   async (t) => {
     const f = await packageFixture(t);
     await api(f, 'quit', {});
@@ -401,7 +385,9 @@ test(
       [
         '-NoProfile',
         '-Command',
-        '$value = & $env:SWITCHER_TEST_NATIVE --cli status 2>&1 | Out-String; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $value.Trim()',
+        '$value = & $env:SWITCHER_TEST_NATIVE --cli status 2>&1 | ' +
+          'Out-String; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; ' +
+          '$value.Trim()',
       ],
       {
         env: { ...f.environment, SWITCHER_TEST_NATIVE: executable },
@@ -420,7 +406,6 @@ test(
     );
   },
 );
-
 test('CLI黑盒：status、restore、cleanup全文和退出码，保留原配置与关闭TEMP自启', async (t) => {
   const f = await startBackend(t);
   await api(f, 'quit', {});
@@ -430,11 +415,12 @@ test('CLI黑盒：status、restore、cleanup全文和退出码，保留原配置
   write(file, original);
   write(path.join(f.bridge, 'original-config.toml'), original);
   const run = (action) => {
-    const child = require('node:child_process').spawnSync(
-      isRust ? rustBinary() : process.execPath,
-      isRust ? ['--cli', action] : [path.join(project, 'scripts/cli.cjs'), action],
-      { env: f.environment, windowsHide: true, encoding: 'utf8', timeout: 15000 },
-    );
+    const child = require('node:child_process').spawnSync(rustBinary(), ['--cli', action], {
+      env: f.environment,
+      windowsHide: true,
+      encoding: 'utf8',
+      timeout: 15000,
+    });
     return { stdout: child.stdout.trim(), stderr: child.stderr.trim(), code: child.status };
   };
   assert.equal(run('status').stdout, 'OFFICIAL');
@@ -442,13 +428,18 @@ test('CLI黑盒：status、restore、cleanup全文和退出码，保留原配置
   assert.equal(fs.readFileSync(file, 'utf8'), original);
   write(
     file,
-    'model = "custom"\nmodel_provider = "hermes_bridge"\n# user setting\n[mcp_servers.keep]\ncommand = "keep"\n[model_providers.hermes_bridge]\nname = "fixture"\nbase_url = "http://127.0.0.1:1/v1"\n',
+    'model = "custom"\nmodel_provider = "hermes_bridge"\n# user ' +
+      'setting\n[mcp_servers.keep]\ncommand = "keep"\n' +
+      '[model_providers.hermes_bridge]\nname = "fixture"\nbase_url ' +
+      '= "http://127.0.0.1:1/v1"\n',
   );
   assert.equal(run('status').stdout, 'BRIDGED');
   assert.equal(run('cleanup').code, 1);
   assert.equal(run('restore').stdout, 'Restored Codex official login (model official).');
   const kept =
-    'model = "official"\n# user setting\n[mcp_servers.keep]\ncommand = "keep"\n[model_providers.hermes_bridge]\nname = "fixture"\nbase_url = "http://127.0.0.1:1/v1"\n';
+    'model = "official"\n# user setting\n[mcp_servers.keep]\n' +
+    'command = "keep"\n[model_providers.hermes_bridge]\nname = ' +
+    '"fixture"\nbase_url = "http://127.0.0.1:1/v1"\n';
   assert.equal(fs.readFileSync(file, 'utf8'), kept);
   const link = path.join(
     f.environment.BRIDGE_STARTUP_DIR,
@@ -466,13 +457,13 @@ test('CLI黑盒：status、restore、cleanup全文和退出码，保留原配置
   assert.equal(run('cleanup').stdout, 'Codex config had nothing to clean.');
   assert.equal(run('bogus').code, 2);
 });
-
 function mcpClient(t, f) {
-  const child = spawn(
-    isRust ? rustBinary() : process.execPath,
-    isRust ? ['--mcp'] : [path.join(project, 'mcp-server.cjs')],
-    { cwd: f.root, env: f.environment, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
-  );
+  const child = spawn(rustBinary(), ['--mcp'], {
+    cwd: f.root,
+    env: f.environment,
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
   f.track(child);
   let buf = '',
     seq = 0,
@@ -507,7 +498,6 @@ function mcpClient(t, f) {
     });
   return { rpc, raw, child };
 }
-
 test(
   'MCP黑盒：原握手、工具清单和七种工具调用逐字节对照Node，磁盘全文与密钥隔离',
   { timeout: 90000 },
@@ -589,8 +579,6 @@ test(
       [],
     );
     const golden = path.join(__dirname, 'fixtures/mcp-wire.json');
-    if (process.env.SWITCHER_RECORD_MCP === '1' && !isRust)
-      write(golden, JSON.stringify(results, null, 2) + '\n');
     assert.deepEqual(
       results,
       JSON.parse(fs.readFileSync(golden, 'utf8')),
@@ -598,21 +586,20 @@ test(
     );
   },
 );
-
 test(
   '更新黑盒：新进程健康检查失败后恢复旧包、重启旧后台且私有权限不变',
   { timeout: 90000 },
   async (t) => {
     const f = await packageFixture(t);
     const incoming = await packageArchive(f, async (source) => {
-      if (!isRust) {
-        write(path.join(source, 'main.cjs'), 'throw Error("isolated new backend failure");\n');
-        return;
-      }
       const exe = path.join(source, path.basename(rustBinary()));
       if (process.platform === 'win32') {
         const code =
-          'using System; public static class FailedPackage {public static void Main(string[] args){if(Array.IndexOf(args,"--build-info")>=0){Console.WriteLine("{\\\"version\\\":\\\"0.1.5\\\",\\\"id\\\":\\\"bbbbbbbbbbbb\\\",\\\"sequence\\\":101}");return;}Environment.Exit(1);}}';
+          'using System; public static class FailedPackage {public static ' +
+          'void Main(string[] ' +
+          'args){if(Array.IndexOf(args,"--build-info")>=0){Console.Write' +
+          'Line("{\\"version\\":\\"0.1.5\\",\\"id\\":\\"bbbbbbbbbb' +
+          'bb\\",\\"sequence\\":101}");return;}Environment.Exit(1);}}';
         const cs = path.join(f.root, 'failed-package.cs');
         write(cs, code);
         execFileSync(
@@ -624,7 +611,11 @@ test(
         const c = path.join(f.root, 'failed-package.c');
         write(
           c,
-          '#include <stdio.h>\n#include <string.h>\nint main(int argc,char**argv){if(argc>1&&!strcmp(argv[1],"--build-info")){puts("{\\\"version\\\":\\\"0.1.5\\\",\\\"id\\\":\\\"bbbbbbbbbbbb\\\",\\\"sequence\\\":101}");return 0;}return 1;}',
+          '#include <stdio.h>\n#include <string.h>\nint main(int ' +
+            'argc,char**argv){if(argc>1&&!strcmp(argv[1],"--build-info")){' +
+            'puts("{\\"version\\":\\"0.1.5\\",\\"id\\":\\"bbbbbbbbbb' +
+            'bb\\",\\"sequence\\":101}");return ' +
+            '0;}return 1;}',
         );
         execFileSync('clang', [c, '-o', exe]);
       }
@@ -661,7 +652,7 @@ test(
     console.log(
       JSON.stringify({
         event: 'update-rolled-back',
-        backend: isRust ? 'rust' : 'node',
+        backend: 'rust',
         newBuild: incoming.build.id,
         restarted: record.build,
         result: JSON.parse(fs.readFileSync(resultFile)),
@@ -669,7 +660,6 @@ test(
     );
   },
 );
-
 for (const { keep, manual, stale } of [
   { keep: true },
   { keep: false },
@@ -681,7 +671,9 @@ for (const { keep, manual, stale } of [
     : []),
 ])
   test(
-    `卸载黑盒：KeepData保留私有文件，只有本机转换配置恢复官方，系统清理限TEMP（${manual ? '手动' : 'HTTP'}，KeepData=${keep}${stale ? '，旧PID指向无关进程' : ''}）`,
+    `卸载黑盒：KeepData保留私有文件，只有本机转换配置恢复官方，系统清理限TEMP（` +
+      `${manual ? '手动' : 'HTTP'}，KeepData=${keep}` +
+      `${stale ? '，旧PID指向无关进程' : ''}）`,
     { timeout: 45000 },
     async (t) => {
       let shellRoot, original, configBefore;
@@ -691,7 +683,9 @@ for (const { keep, manual, stale } of [
           write(path.join(bridge, 'original-config.toml'), original);
           const port = Number(environment.BRIDGE_PORT);
           configBefore =
-            'model = "custom"\nmodel_provider = "hermes_bridge"\n# preserve user\n[model_providers.hermes_bridge]\nname = "fixture"\nbase_url = "' +
+            'model = "custom"\nmodel_provider = "hermes_bridge"\n# ' +
+            'preserve user\n[model_providers.hermes_bridge]\nname = ' +
+            '"fixture"\nbase_url = "' +
             (keep ? 'http://127.0.0.1:' + port + '/v1' : 'http://127.0.0.1:2/v1') +
             '"\n';
           write(path.join(home, 'config.toml'), configBefore);
@@ -716,7 +710,9 @@ for (const { keep, manual, stale } of [
               );
             script = script.replace(
               "$ErrorActionPreference = 'Stop'",
-              "$ErrorActionPreference = 'Stop'\ntrap { $_ | Out-String | Set-Content -LiteralPath (Join-Path $env:BRIDGE_HOME 'uninstall-error.txt'); exit 1 }",
+              "$ErrorActionPreference = 'Stop'\ntrap { $_ | Out-String | " +
+                'Set-Content -LiteralPath (Join-Path $env:BRIDGE_HOME ' +
+                "'uninstall-error.txt'); exit 1 }",
             );
             write(file, script);
             // Keep the production RemoveRegistration code; only point the registry
@@ -727,7 +723,9 @@ for (const { keep, manual, stale } of [
               fs
                 .readFileSync(integration, 'utf8')
                 .replace(
-                  "$registry = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\CodexSwitcher'",
+                  '$registry = ' +
+                    "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\" +
+                    "Uninstall\\CodexSwitcher'",
                   "$registry = Join-Path $env:SWITCHER_TEST_SHELL_ROOT 'registration.json'",
                 ),
             );
@@ -795,7 +793,10 @@ for (const { keep, manual, stale } of [
       await f.closed;
       if (keep)
         try {
-          await until(() => !fs.existsSync(path.join(f.target, 'main.cjs')), 15000);
+          await until(
+            () => !fs.existsSync(path.join(f.target, path.basename(rustBinary()))),
+            15000,
+          );
         } catch (e) {
           throw Error(
             e.message +
@@ -837,7 +838,7 @@ for (const { keep, manual, stale } of [
           'Programs/Codex API Switcher.lnk',
           'registration.json',
         ])
-          assert.equal(fs.existsSync(path.join(shellRoot, item)), false);
+          assert.equal(fs.existsSync(path.join(shellRoot, item)), false, item);
       if (stale) {
         assert.equal(unrelated.exitCode, null);
         assert.equal(unrelated.signalCode, null);
@@ -846,7 +847,7 @@ for (const { keep, manual, stale } of [
       console.log(
         JSON.stringify({
           event: 'uninstalled',
-          backend: isRust ? 'rust' : 'node',
+          backend: 'rust',
           keepData: keep,
           restoredOfficial: keep,
           manual: !!manual,
@@ -856,14 +857,16 @@ for (const { keep, manual, stale } of [
       );
     },
   );
-
 test('MCP登记黑盒：仅迁移旧node登记，集成开关保留其他配置并使用隔离官方CLI', async (t) => {
   assert.ok(
     process.env.CODEX_EXE && fs.existsSync(process.env.CODEX_EXE),
     'An isolated official native CODEX_EXE is required',
   );
   const before =
-    '# user settings\nmodel = "official"\n\n[mcp_servers.keep]\ncommand = "keep-original"\n\n[mcp_servers.api_switcher]\ncommand = "C:/old/node.exe"\nargs = ["C:/old/mcp-server.cjs"]\nstartup_timeout_sec = 45\n';
+    '# user settings\nmodel = "official"\n\n[mcp_servers.keep]\n' +
+    'command = "keep-original"\n\n[mcp_servers.api_switcher]\n' +
+    'command = "C:/old/node.exe"\nargs = ' +
+    '["C:/old/mcp-server.cjs"]\nstartup_timeout_sec = 45\n';
   const f = await startBackend(t, {
     setup({ root, home, environment }) {
       const userRoot = path.join(root, 'user');
@@ -884,18 +887,15 @@ test('MCP登记黑盒：仅迁移旧node登记，集成开关保留其他配置�
   });
   const parse = () =>
     require('smol-toml').parse(fs.readFileSync(path.join(f.home, 'config.toml'), 'utf8'));
-  if (isRust) {
+  {
     assert.equal(parse().mcp_servers.api_switcher.command, path.resolve(rustBinary()));
     assert.deepEqual(parse().mcp_servers.api_switcher.args, ['--mcp']);
     assert.equal(parse().mcp_servers.api_switcher.startup_timeout_sec, 45);
-  } else assert.equal(fs.readFileSync(path.join(f.home, 'config.toml'), 'utf8'), before);
+  }
   assert.match((await api(f, 'integrate', { enabled: true })).message, /已集成/);
   assert.equal(parse().model, 'official');
   assert.equal(parse().mcp_servers.keep.command, 'keep-original');
-  assert.deepEqual(
-    parse().mcp_servers.api_switcher.args,
-    isRust ? ['--mcp'] : [path.join(project, 'mcp-server.cjs')],
-  );
+  assert.deepEqual(parse().mcp_servers.api_switcher.args, ['--mcp']);
   assert.equal(parse().mcp_servers.api_switcher.startup_timeout_sec, undefined);
   assert.equal((await api(f, 'state')).mcp.installed, true);
   assert.match((await api(f, 'integrate', { enabled: false })).message, /移除集成/);
@@ -906,7 +906,6 @@ test('MCP登记黑盒：仅迁移旧node登记，集成开关保留其他配置�
     fs.readFileSync(path.join(f.home, 'config.toml'), 'utf8').startsWith('# user settings\n'),
   );
 });
-
 test('更新传输样例对：平台curl参数、中文错误与原始英文诊断不泄露命令', (t) => {
   const { algorithm } = require('./config-blackbox-helpers.cjs');
   const vectors = [
@@ -940,8 +939,6 @@ test('更新传输样例对：平台curl参数、中文错误与原始英文诊�
     ),
   );
   const golden = path.join(__dirname, 'fixtures/update-transport.json');
-  if (process.env.SWITCHER_RECORD_TRANSPORT === '1' && !isRust)
-    write(golden, JSON.stringify(actual, null, 2) + '\n');
   assert.deepEqual(actual, JSON.parse(fs.readFileSync(golden, 'utf8')));
   for (const r of actual) {
     assert.equal(JSON.stringify(r).includes('PRIVATE-PATH'), false);
@@ -949,7 +946,6 @@ test('更新传输样例对：平台curl参数、中文错误与原始英文诊�
     assert.equal(r.args.includes('-k'), false);
   }
 });
-
 test('更新黑盒：无效包清单拒绝且安装目录和外层文件全文不变', { timeout: 90000 }, async (t) => {
   const f = await packageFixture(t);
   const outer = path.join(f.root, 'outside.txt');
@@ -967,7 +963,6 @@ test('更新黑盒：无效包清单拒绝且安装目录和外层文件全文�
   assert.deepEqual(snapshot(f.target), before);
   assert.equal(fs.readFileSync(outer, 'utf8'), 'outside stays');
 });
-
 test('更新黑盒：代理不可达时页面明确给地址，日志和页面无代理密码', async (t) => {
   const f = await packageFixture(t, {
     setup({ environment }) {
@@ -997,11 +992,17 @@ test('更新黑盒：代理不可达时页面明确给地址，日志和页面�
   assert.equal(f.requests.length, 1);
   assert.match(log, /"status":"fallback"/);
 });
-
 test('更新黑盒：手动代理连接失败时直连回退并记录公开URL', async (t) => {
   const f = await packageFixture(t, {
     setup({ environment }) {
-      for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'])
+      for (const key of [
+        'HTTP_PROXY',
+        'HTTPS_PROXY',
+        'ALL_PROXY',
+        'http_proxy',
+        'https_proxy',
+        'all_proxy',
+      ])
         environment[key] = 'http://127.0.0.1:9';
       environment.NO_PROXY = '';
       environment.no_proxy = '';
@@ -1017,17 +1018,33 @@ test('更新黑盒：手动代理连接失败时直连回退并记录公开URL',
     .filter(Boolean)
     .map((line) => JSON.parse(line))
     .filter((row) => row.event === 'update.check');
-  assert.ok(rows.some((row) => row.status === 'fallback' && row.fallback.direct.status === 'success'));
+  assert.ok(
+    rows.some((row) => row.status === 'fallback' && row.fallback.direct.status === 'success'),
+  );
   assert.ok(rows.every((row) => /^http:\/\/127\.0\.0\.1:\d+\/release\.json$/.test(row.url)));
 });
-
 test('更新黑盒：格式错误的代理地址含凭据时日志和返回值不泄露凭据', async (t) => {
-  const username = 'fixture-proxy-user', password = 'fixture-proxy-secret';
+  const username = 'fixture-proxy-user',
+    password = 'fixture-proxy-secret';
   const f = await packageFixture(t, {
     setup({ root, environment }) {
-      for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'])
+      for (const key of [
+        'HTTP_PROXY',
+        'HTTPS_PROXY',
+        'ALL_PROXY',
+        'http_proxy',
+        'https_proxy',
+        'all_proxy',
+      ])
         environment[key] = `http://${username}:${password}@[invalid`;
-      Object.assign(environment, { HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root, NO_PROXY: '', no_proxy: '' });
+      Object.assign(environment, {
+        HOME: root,
+        USERPROFILE: root,
+        APPDATA: root,
+        LOCALAPPDATA: root,
+        NO_PROXY: '',
+        no_proxy: '',
+      });
     },
   });
   f.response.metadata = metadata(f);

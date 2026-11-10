@@ -6,7 +6,6 @@ const assert = require('node:assert/strict'),
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { DatabaseSync } = require('node:sqlite');
-const { isRust } = require('./backend.cjs');
 const { startBackend } = require('./backend-process.cjs');
 const { api, isolatedEditor, serve, responseTool } = require('./config-blackbox-helpers.cjs');
 const { auth, accountId, until } = require('./official-blackbox-helpers.cjs');
@@ -71,7 +70,7 @@ test(
         .execFileSync(process.env.CODEX_EXE, ['--version'], { encoding: 'utf8' })
         .trim(),
       version = versionOutput.match(/\b(\d+)\.(\d+)/),
-      providerBoundSemantics = isRust || version && Number(version[1]) * 1000 + Number(version[2]) >= 166,
+      providerBoundSemantics = true,
       expected = {
         first: providerBoundSemantics ? { updated: 0, kept: 1 } : { updated: 1, kept: 0 },
         custom: providerBoundSemantics ? { updated: 0, kept: 7 } : { updated: 7, kept: 0 },
@@ -98,7 +97,10 @@ test(
         fs.writeFileSync(path.join(bridge, 'accounts', id, 'auth.json'), JSON.stringify(target));
         fs.writeFileSync(
           path.join(home, 'config.toml'),
-          'model="gpt-6.1-sol"\nmodel_provider="openai"\n[model_providers.other]\nname="Other fixture"\nbase_url="http://127.0.0.1:9/v1"\nwire_api="responses"\n[features]\nplugins=false\n',
+          'model="gpt-6.1-sol"\nmodel_provider="openai"\n' +
+            '[model_providers.other]\nname="Other fixture"\n' +
+            'base_url="http://127.0.0.1:9/v1"\nwire_api="responses"\n' +
+            '[features]\nplugins=false\n',
         );
       },
     });
@@ -159,7 +161,9 @@ test(
     const seedConfig = path.join(f.home, 'config.toml');
     fs.writeFileSync(
       seedConfig,
-      fs.readFileSync(seedConfig, 'utf8').replace('model_provider="openai"', 'model_provider="other"'),
+      fs
+        .readFileSync(seedConfig, 'utf8')
+        .replace('model_provider="openai"', 'model_provider="other"'),
     );
     client = await session(f);
     try {
@@ -238,7 +242,13 @@ test(
         ).thread;
         assert.equal(
           cold.modelProvider,
-          providerBoundSemantics ? (i === 7 ? 'other' : 'openai') : i === 6 ? 'openai' : 'hermes_bridge',
+          providerBoundSemantics
+            ? i === 7
+              ? 'other'
+              : 'openai'
+            : i === 6
+              ? 'openai'
+              : 'hermes_bridge',
         );
         assert.deepEqual(history(thread), before[i]);
         if (i < 6) {
@@ -267,7 +277,7 @@ test(
         assert.equal(
           (await client.call('thread/read', { threadId: thread.id, includeTurns: false })).thread
             .modelProvider,
-            providerBoundSemantics ? (i === 7 ? 'other' : 'openai') : 'openai',
+          providerBoundSemantics ? (i === 7 ? 'other' : 'openai') : 'openai',
         );
         assert.deepEqual(history(thread), before[i]);
       }

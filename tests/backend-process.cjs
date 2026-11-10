@@ -1,6 +1,5 @@
 'use strict';
-
-// Black-box transport: both backends receive only env/files/HTTP, no JS callbacks.
+// Native black boxes receive only environment, files and HTTP.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -8,24 +7,15 @@ const net = require('node:net');
 const { spawn, execFileSync } = require('node:child_process');
 const { once } = require('node:events');
 const project = path.resolve(__dirname, '..');
-const { isRust, rustBinary } = require('./backend.cjs');
+const { rustBinary } = require('./backend.cjs');
 function launchBackend(environment) {
-  return spawn(
-    isRust
-      ? environment.SWITCHER_BLACKBOX_EXE || rustBinary()
-      : environment.SWITCHER_BLACKBOX_NODE || process.execPath,
-    isRust
-      ? ['--no-open']
-      : [path.join(environment.SWITCHER_BLACKBOX_PROJECT || project, 'main.cjs'), '--no-open'],
-    {
-      cwd: project,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: environment,
-    },
-  );
+  return spawn(environment.SWITCHER_BLACKBOX_EXE || rustBinary(), ['--no-open'], {
+    cwd: project,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: environment,
+  });
 }
-
 async function startBackend(t, options = {}) {
   const temporaryBase = fs.realpathSync.native(
     options.shortRoot && process.platform === 'darwin' ? '/tmp' : os.tmpdir(),
@@ -69,19 +59,6 @@ async function startBackend(t, options = {}) {
       '-o',
       fake,
     ]);
-    const helper = path.join(project, 'bin', 'mac-process-context');
-    if (!isRust && !fs.existsSync(helper)) {
-      fs.mkdirSync(path.dirname(helper), { recursive: true });
-      const temporary = helper + '.' + process.pid;
-      execFileSync('clang', [
-        '-O2',
-        '-mmacosx-version-min=12.0',
-        path.join(project, 'platform/macos/mac-process-context.c'),
-        '-o',
-        temporary,
-      ]);
-      fs.renameSync(temporary, helper);
-    }
   }
   const rpcFixture = path.join(root, 'rpc-responses.json');
   fs.writeFileSync(
@@ -171,7 +148,7 @@ async function startBackend(t, options = {}) {
           ),
         );
       }
-      if (isRust) {
+      {
         const line = output
           .split(/\r?\n/)
           .find((line) => line.startsWith('{') && line.includes('"event":"ready"'));
@@ -179,9 +156,6 @@ async function startBackend(t, options = {}) {
           clearTimeout(timeout);
           resolve(JSON.parse(line));
         }
-      } else if (output.includes('BRIDGE_READY')) {
-        clearTimeout(timeout);
-        resolve(JSON.parse(fs.readFileSync(path.join(activeBridge, 'running.json'), 'utf8')));
       }
     });
   });
@@ -199,5 +173,4 @@ async function startBackend(t, options = {}) {
     });
   return { root, home, bridge, child, closed, url, token, request, api, environment, track };
 }
-
 module.exports = { startBackend, launchBackend };

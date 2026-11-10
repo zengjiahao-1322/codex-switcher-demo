@@ -4,8 +4,7 @@ const assert = require('node:assert/strict'),
   fs = require('node:fs'),
   path = require('node:path');
 const toml = require('smol-toml');
-const { api, isolatedEditor, read } = require('./config-blackbox-helpers.cjs');
-const { isRust } = require('./backend.cjs');
+const { api, isolatedEditor, read, serve, responseTool } = require('./config-blackbox-helpers.cjs');
 const {
   auth,
   accountId,
@@ -219,22 +218,18 @@ test('本机切换黑盒：API准备失败保留全文与模型目录，后台�
       methods: { initialize: { error: { code: -32000, message: 'fixture validation rejected' } } },
     },
   });
+  const upstream = await serve(t, (_request, response) =>
+    response.end(JSON.stringify(responseTool)),
+  );
   const { id } = await api(f, 'providerAdd', {
     name: 'API fixture',
-    baseUrl: 'https://example.test/v1',
+    baseUrl: upstream.url + '/v1',
     apiMode: 'responses',
     model: 'm',
     models: ['m'],
     apiKey: 'fixture',
   });
-  const store = require('../src/config/providers.cjs');
-  store.recordProbe(
-    f.bridge,
-    store.list(f.bridge).find((p) => p.id === id),
-    'm',
-    'direct',
-    'fixture-direct',
-  );
+  await api(f, 'probe', { id, model: 'm' });
   const config = read(f),
     live = read(f, 'auth.json');
   const catalog = path.join(f.bridge, 'model-catalog.json');
@@ -300,7 +295,8 @@ test('旧对话同步黑盒：切换后通过同一官方RPC冷启动核对来�
   );
   const db = new DatabaseSync(path.join(f.home, 'state_5.sqlite'));
   db.exec(
-    'CREATE TABLE threads (id TEXT, model_provider TEXT, model TEXT, rollout_path TEXT, archived INTEGER, source TEXT)',
+    'CREATE TABLE threads (id TEXT, model_provider TEXT, model ' +
+      'TEXT, rollout_path TEXT, archived INTEGER, source TEXT)',
   );
   db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?)').run(
     'thread-1',
@@ -328,7 +324,6 @@ test('旧对话同步黑盒：切换后通过同一官方RPC冷启动核对来�
   assert.equal(read(f), 'model = "new-model"\ncli_auth_credentials_store = "file"\n');
   assert.equal(f.rpc().filter((r) => r.method === 'thread/resume').length >= 1, true);
 });
-
 test('旧对话失败黑盒：失败保持未完成并恢复编辑器，继续同步不重复应用账号', async (t) => {
   const f = await fixture(t, {
     scenario: {
@@ -348,11 +343,12 @@ test('旧对话失败黑盒：失败保持未完成并恢复编辑器，继续�
   fs.writeFileSync(rollout, '{}\n');
   const db = new DatabaseSync(path.join(f.home, 'state_5.sqlite'));
   db.exec(
-    'CREATE TABLE threads (id TEXT, model_provider TEXT, model TEXT, rollout_path TEXT, archived INTEGER, source TEXT)',
+    'CREATE TABLE threads (id TEXT, model_provider TEXT, model ' +
+      'TEXT, rollout_path TEXT, archived INTEGER, source TEXT)',
   );
   db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?)').run(
     'thread-1',
-    isRust ? 'openai' : 'other',
+    'openai',
     'old-model',
     rollout,
     0,
@@ -385,7 +381,7 @@ test('旧对话失败黑盒：失败保持未完成并恢复编辑器，继续�
   assert.equal(read(f), config);
   assert.equal(read(f, 'auth.json'), applied);
 });
-test('旧对话供应商绑定拒绝时保留原来源并完成切换', { skip: !isRust }, async (t) => {
+test('旧对话供应商绑定拒绝时保留原来源并完成切换', {}, async (t) => {
   const f = await fixture(t, {
     scenario: {
       methods: {
@@ -394,7 +390,9 @@ test('旧对话供应商绑定拒绝时保留原来源并完成切换', { skip: 
         'thread/resume': {
           error: {
             code: -32600,
-            message: 'This chat uses other, but your current provider is openai. Switch to other to continue.',
+            message:
+              'This chat uses other, but your current provider is openai. ' +
+              'Switch to other to continue.',
           },
         },
       },
@@ -405,7 +403,8 @@ test('旧对话供应商绑定拒绝时保留原来源并完成切换', { skip: 
   fs.writeFileSync(rollout, '{}\n');
   const db = new DatabaseSync(path.join(f.home, 'state_5.sqlite'));
   db.exec(
-    'CREATE TABLE threads (id TEXT, model_provider TEXT, model TEXT, rollout_path TEXT, archived INTEGER, source TEXT)',
+    'CREATE TABLE threads (id TEXT, model_provider TEXT, model ' +
+      'TEXT, rollout_path TEXT, archived INTEGER, source TEXT)',
   );
   db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?)').run(
     'thread-bound',
@@ -421,11 +420,17 @@ test('旧对话供应商绑定拒绝时保留原来源并完成切换', { skip: 
   assert.equal(result.status, 'done', JSON.stringify(result));
   assert.equal(result.threads.kept, 1);
   assert.equal(f.rpc().filter((r) => r.method === 'thread/resume').length, 0);
-  assert.equal(f.rpc().filter((r) => r.method === 'initialize' && r.params?.clientInfo?.name === 'codex-switcher-routing').length, 0);
+  assert.equal(
+    f
+      .rpc()
+      .filter(
+        (r) => r.method === 'initialize' && r.params?.clientInfo?.name === 'codex-switcher-routing',
+      ).length,
+    0,
+  );
   assert.equal(result.threads.failed, 0);
   assert.equal(result.threads.updated, 0);
 });
-
 test('并行准备失败黑盒：缺重载通道时等另一校验收尾，保留锁和客户端且有进程链日志', async (t) => {
   const f = await fixture(t, {
     target: { exp: 1 },

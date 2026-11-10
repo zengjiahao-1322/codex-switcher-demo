@@ -6,7 +6,7 @@ const assert = require('node:assert/strict'),
   os = require('node:os');
 const { execFile } = require('node:child_process');
 const { auth } = require('./official-blackbox-helpers.cjs');
-const { isRust, rustBinary } = require('./backend.cjs');
+const { rustBinary } = require('./backend.cjs');
 test('会员HTTPS对照：本地TLS真请求校验证书、账号请求头及日期，错误响应不泄露凭证', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-subscription-tls-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -66,10 +66,8 @@ test('会员HTTPS对照：本地TLS真请求校验证书、账号请求头及日
     );
     await new Promise((resolve, reject) =>
       execFile(
-        isRust ? rustBinary() : process.execPath,
-        isRust
-          ? ['--algorithm-fixture', input, output]
-          : [path.join(__dirname, 'fixtures/diagnostics-algorithm.cjs'), input, output],
+        rustBinary(),
+        ['--algorithm-fixture', input, output],
         {
           windowsHide: true,
           env: {
@@ -145,7 +143,10 @@ test('会员HTTPS对照：本地TLS真请求校验证书、账号请求头及日
       { kind: 'renewal', date: entitlement.renews_at, discountAfter: 2 },
     ],
     [
-      { discount, scheduled_plan_change: { plan_type: 'plus', changes_at: '2031-01-01T00:00:00Z' } },
+      {
+        discount,
+        scheduled_plan_change: { plan_type: 'plus', changes_at: '2031-01-01T00:00:00Z' },
+      },
       true,
       { kind: 'planChange', plan: 'plus', date: '2031-01-01T00:00:00Z' },
     ],

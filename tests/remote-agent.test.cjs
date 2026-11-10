@@ -6,7 +6,6 @@ const test = require('node:test'),
   path = require('node:path'),
   crypto = require('node:crypto');
 const { createAgent, summarize } = require('../vscode-remote-agent/extension.cjs');
-const { identity } = require('../src/accounts/accounts.cjs');
 
 const SECRET = 'sk-remote-secret-123';
 const original = [
@@ -238,7 +237,7 @@ test('状态带登录账号摘要，编号与切换器保存账号一致，不�
   const text = login('team@example.com');
   fs.writeFileSync(path.join(home, 'auth.json'), text);
   const status = agent.status();
-  const saved = identity(JSON.parse(text));
+  const saved = { id: '040605546d8b2754f0b1', plan: 'team' };
   assert.deepEqual(status.account, {
     id: saved.id,
     email: 'team@example.com',

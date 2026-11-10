@@ -357,36 +357,6 @@ mod windows {
             &bytes[..length as usize],
         )))
     }
-    pub fn command(pid: u32) -> io::Result<String> {
-        #[repr(C)]
-        struct Unicode {
-            length: u16,
-            maximum: u16,
-            pointer: *const u16,
-        }
-        let handle = unsafe { OpenProcess(0x1000, 0, pid) };
-        if handle.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-        let mut length = 0;
-        unsafe { NtQueryInformationProcess(handle, 60, std::ptr::null_mut(), 0, &mut length) };
-        let mut bytes = vec![0u64; (length as usize).div_ceil(8)];
-        let status = unsafe {
-            NtQueryInformationProcess(handle, 60, bytes.as_mut_ptr().cast(), length, &mut length)
-        };
-        unsafe {
-            CloseHandle(handle);
-        }
-        if status < 0 {
-            return Err(io::Error::other(format!(
-                "Process command query failed {status}"
-            )));
-        }
-        let value = unsafe { &*bytes.as_ptr().cast::<Unicode>() };
-        Ok(String::from_utf16_lossy(unsafe {
-            std::slice::from_raw_parts(value.pointer, value.length as usize / 2)
-        }))
-    }
     pub fn alive(pid: u32) -> bool {
         let handle = unsafe { OpenProcess(0x1000, 0, pid) };
         if handle.is_null() {
@@ -611,7 +581,7 @@ pub use windows::attach_parent_console;
 #[cfg(windows)]
 pub use windows::scan;
 #[cfg(windows)]
-pub use windows::{alive, command, image, parent_process, terminate};
+pub use windows::{alive, image, parent_process, terminate};
 #[cfg(windows)]
 pub use windows::{port_pid, processes, random_bytes};
 #[cfg(not(windows))]
@@ -758,19 +728,6 @@ pub fn image(pid: u32) -> std::io::Result<std::path::PathBuf> {
     Ok(std::path::PathBuf::from(
         String::from_utf8_lossy(&output.stdout).trim(),
     ))
-}
-#[cfg(unix)]
-pub fn command(pid: u32) -> std::io::Result<String> {
-    let output = std::process::Command::new("/bin/ps")
-        .args(["-ww", "-p", &pid.to_string(), "-o", "command="])
-        .output()?;
-    if !output.status.success() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Process exited",
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 #[cfg(unix)]
 pub fn alive(pid: u32) -> bool {

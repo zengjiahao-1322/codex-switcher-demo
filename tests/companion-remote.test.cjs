@@ -9,6 +9,11 @@ const test = require('node:test'),
   crypto = require('node:crypto'),
   Module = require('node:module');
 const { createAgent } = require('../vscode-remote-agent/extension.cjs');
+const temporaryRoots = new Set();
+test.afterEach(() => {
+  for (const root of temporaryRoots) fs.rmSync(root, { recursive: true, force: true });
+  temporaryRoots.clear();
+});
 
 const SECRET = 'sk-remote-secret-123';
 const original =
@@ -43,6 +48,7 @@ async function runCompanion({
     shown = [],
     registered = new Map();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-companion-remote-'));
+  temporaryRoots.add(root);
   const home = path.join(root, 'server-codex');
   fs.mkdirSync(home);
   fs.writeFileSync(path.join(home, 'config.toml'), original);
@@ -594,8 +600,7 @@ const labels = (shown) =>
     .map((i) => i.label);
 
 test('SSH 窗口快捷切换：只列服务器能用的来源，额度充足排前，确认后切这台服务器', async () => {
-  const { identity } = require('../src/accounts/accounts.cjs');
-  const team = identity(JSON.parse(login('2026-10-24T10:00:00Z'))).id;
+  const team = 'ad7953c7af3ef98fc9bf';
   const accounts = [
     { id: 'low', label: 'low@example.com', plan: 'plus', current: true, quota: quota(10) },
     { id: 'none', label: 'none@example.com', plan: 'free', current: false, quota: null },

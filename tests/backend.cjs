@@ -6,7 +6,6 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const root = path.resolve(__dirname, '..');
-const isRust = process.env.SWITCHER_BACKEND === 'rust';
 const rustBinary = () =>
   process.env.SWITCHER_RUST_EXE ||
   path.join(
@@ -17,10 +16,8 @@ const rustBinary = () =>
     'codex-switcher' + (process.platform === 'win32' ? '.exe' : ''),
   );
 
-// Only the transport/lifetime changes. JS callbacks, mocks and actions are never
-// forwarded to Node when Rust is selected; unsupported Rust behavior must fail.
+// Tests start the native backend; callbacks are not injected into the product.
 function createServer(options, fixture = {}) {
-  if (!isRust) return require('../src/server/server.cjs').createServer(options);
   const server = new EventEmitter();
   let child, address, startupError;
   let temporaryRoot;
@@ -114,4 +111,4 @@ function createServer(options, fixture = {}) {
   return server;
 }
 
-module.exports = { createServer, isRust, rustBinary };
+module.exports = { createServer, rustBinary };

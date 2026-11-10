@@ -5,9 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
-const { isRust, rustBinary } = require('./backend.cjs');
+const { rustBinary } = require('./backend.cjs');
 const { startBackend } = require('./backend-process.cjs');
-
 test('双后台样例对：日志脱敏及2MiB轮换保持Node格式', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-log-vector-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -15,13 +14,10 @@ test('双后台样例对：日志脱敏及2MiB轮换保持Node格式', (t) => {
     output = path.join(root, 'output.json');
   const run = (value) => {
     fs.writeFileSync(input, JSON.stringify(value));
-    execFileSync(
-      isRust ? rustBinary() : process.execPath,
-      isRust
-        ? ['--algorithm-fixture', input, output]
-        : [path.join(__dirname, 'fixtures', 'diagnostics-algorithm.cjs'), input, output],
-      { windowsHide: true, stdio: 'pipe' },
-    );
+    execFileSync(rustBinary(), ['--algorithm-fixture', input, output], {
+      windowsHide: true,
+      stdio: 'pipe',
+    });
     return JSON.parse(fs.readFileSync(output, 'utf8'));
   };
   const value = {
@@ -94,7 +90,6 @@ test('双后台样例对：日志脱敏及2MiB轮换保持Node格式', (t) => {
   assert.equal(bounded[0].event, 'old-6');
   assert.equal(bounded.at(-1).event, 'last');
 });
-
 test('双后台黑盒：startup/firstRequest日志与诊断导出', async (t) => {
   const f = await startBackend(t);
   const runtime = await (await f.api('runtime')).json();
@@ -152,7 +147,6 @@ test('双后台黑盒：startup/firstRequest日志与诊断导出', async (t) =>
   assert.equal(result.text.includes(f.token), false);
   assert.ok(body.includes('startup'));
 });
-
 test('双后台黑盒：只读会话索引、错误证据诊断及可见上下文导出', async (t) => {
   const f = await startBackend(t);
   const { DatabaseSync } = require('node:sqlite');
@@ -201,7 +195,10 @@ test('双后台黑盒：只读会话索引、错误证据诊断及可见上下�
   );
   const db = new DatabaseSync(databaseFile);
   db.exec(
-    'CREATE TABLE threads(id TEXT,title TEXT,updated_at INTEGER,model TEXT,model_provider TEXT,archived INTEGER,source TEXT,rollout_path TEXT,cwd TEXT,creator_account_id TEXT,creator_user_id TEXT)',
+    'CREATE TABLE threads(id TEXT,title TEXT,updated_at ' +
+      'INTEGER,model TEXT,model_provider TEXT,archived INTEGER,source ' +
+      'TEXT,rollout_path TEXT,cwd TEXT,creator_account_id ' +
+      'TEXT,creator_user_id TEXT)',
   );
   db.prepare('INSERT INTO threads VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(
     'fixture-thread',

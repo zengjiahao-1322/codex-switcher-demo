@@ -15,10 +15,17 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::net::{TcpListener, TcpStream};
+fn bind(port: u16) -> io::Result<TcpListener> {
+    // std creates sockets with WSA_FLAG_NO_HANDLE_INHERIT and accepted sockets keep it;
+    // mio 1.0.3 does not, so the update worker and new instance would keep our port and connections.
+    let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
+    listener.set_nonblocking(true)?;
+    TcpListener::from_std(listener)
+}
 pub fn runtime() -> Value {
     use sha2::{Digest, Sha256};
     let root = project_root();
-    let metadata: Value = fs::read(root.join("src/platform/release-info.json"))
+    let metadata: Value = fs::read(root.join("release-info.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or(Value::Null);
@@ -78,16 +85,6 @@ pub fn other_action(old: u64, current: u64) -> &'static str {
         "stopped"
     }
 }
-fn legacy_bridge_handover(raw_bridge: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
-    if env::var("BRIDGE_LEGACY_HANDOVER").as_deref() != Ok("1") {
-        return None;
-    }
-    let bridge = PathBuf::from(raw_bridge?);
-    let looks_like_install_private = bridge
-        .file_name()
-        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("private"));
-    looks_like_install_private.then(|| bridge.join("running.json"))
-}
 fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
     match (fs::canonicalize(a), fs::canonicalize(b)) {
         (Ok(a), Ok(b)) => {
@@ -103,15 +100,7 @@ fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
 fn owner_install(pid: u32) -> Option<PathBuf> {
     let image = platform::image(pid).ok()?;
     let name = image.file_name()?.to_string_lossy();
-    if name.eq_ignore_ascii_case(if cfg!(windows) { "node.exe" } else { "node" }) {
-        let command = platform::command(pid).ok()?;
-        let expression = regex::Regex::new(
-            r#"(?i)(?:^|[\\/])node(?:\.exe)?"?\s+"?(.+?[\\/]main\.cjs)"?(?:\s|$)"#,
-        )
-        .unwrap();
-        let entry = expression.captures(&command)?.get(1)?.as_str();
-        PathBuf::from(entry).parent().map(PathBuf::from)
-    } else if [
+    if [
         "codex-switcher",
         "codex-switcher.exe",
         "switcher",
@@ -131,7 +120,7 @@ fn install_sequence(root: &Path) -> Option<Option<u64>> {
     if package["name"] != "codex-api-switcher" {
         return None;
     }
-    let sequence = fs::read(root.join("src/platform/release-info.json"))
+    let sequence = fs::read(root.join("release-info.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
         .and_then(|release| release["sequence"].as_u64());
@@ -143,10 +132,7 @@ pub async fn stop_installed(record: &std::path::Path, target: &std::path::Path) 
     if let Some(pid) = value["pid"].as_u64()
         && platform::image(pid as u32).ok().is_some_and(|image| {
             image.file_name().is_some_and(|name| {
-                matches!(
-                    name.to_str(),
-                    Some("node" | "node.exe" | "codex-switcher" | "codex-switcher.exe")
-                )
+                matches!(name.to_str(), Some("codex-switcher" | "codex-switcher.exe"))
             })
         })
         && let Some(root) = owner_install(pid as u32)
@@ -166,18 +152,7 @@ fn verified(pid: u32, old: &Value) -> bool {
     let Ok(image) = platform::image(pid) else {
         return false;
     };
-    let node_process = image.file_name().is_some_and(|name| {
-        name.to_string_lossy()
-            .eq_ignore_ascii_case(if cfg!(windows) { "node.exe" } else { "node" })
-    });
     same_path(&image, &PathBuf::from(entry))
-        || (entry.ends_with("main.cjs")
-            && node_process
-            && owner_install(pid).is_some_and(|root| {
-                PathBuf::from(entry)
-                    .parent()
-                    .is_some_and(|parent| same_path(&root, parent))
-            }))
 }
 fn open_url(url: &str) -> io::Result<()> {
     if !env::args().any(|s| s == "--no-open")
@@ -190,7 +165,7 @@ fn open_url(url: &str) -> io::Result<()> {
 async fn reclaimed_listener(port: u16) -> io::Result<TcpListener> {
     let deadline = Instant::now() + Duration::from_secs(1);
     loop {
-        match TcpListener::bind(("127.0.0.1", port)).await {
+        match bind(port) {
             Ok(listener) => return Ok(listener),
             Err(error) if error.kind() == io::ErrorKind::AddrInUse && Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(25)).await
@@ -310,7 +285,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     crate::update::cleanup_old(&project_root())?;
     let started = Instant::now();
-    let raw_bridge = env::var_os("BRIDGE_HOME").filter(|value| !value.is_empty());
     let explicit_bridge = crate::migration::configured_home();
     let bridge = crate::migration::data_home();
     let copied_local = crate::migration::prepare(&project_root(), &bridge)?;
@@ -443,7 +417,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let service_ms = service_started.elapsed().as_millis();
     let mut handover = json!({});
     let listen_started = Instant::now();
-    let listener = match TcpListener::bind(("127.0.0.1", desired_port)).await {
+    let listener = match bind(desired_port) {
         Ok(listener) => listener,
         Err(error)
             if [io::ErrorKind::AddrInUse, io::ErrorKind::PermissionDenied]
@@ -484,7 +458,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "port_in_use"
                     }
                 });
-                TcpListener::bind(("127.0.0.1", 0)).await?
+                bind(0)?
             }
         }
         Err(error) => return Err(error.into()),
@@ -493,9 +467,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     platform::clean_client_records(&app.bridge)?;
     let connection = json!({"pid":std::process::id(),"url":format!("http://127.0.0.1:{}/#{}",app.port,app.token),"build":runtime()});
     write_json(&running_path, &connection)?;
-    if let Some(path) = legacy_bridge_handover(raw_bridge.as_deref()) {
-        write_json(&path, &connection)?;
-    }
     if let Some(directory) = &discovery {
         write_json(&directory.join("connection.json"), &connection)?;
     }

@@ -2,9 +2,9 @@
 
 本文按当前源码整理。重点说明“切换配置”和“官方账号/额度”两条路径怎样汇合到本地 Codex，以及 Claude Code 切换和用量统计各自的边界。
 
-后端是 `rust/` 下的单个原生程序，按职责分为账号、配置、编辑器、远程、切换、Claude Code（`claude/`）、用量（`usage/`）、诊断、更新和平台模块。页面在 `web/`，价格快照和修正表在 `data/`。两个 VS Code 扩展在 `vscode-companion/` 和 `vscode-remote-agent/`，仍是 JavaScript。发布包不含 Node 后台；包里的 `main.cjs`、`scripts/update-worker.cjs`、`src/platform/build-info.cjs` 是打包时生成的占位文件，`runtime/node.exe` 实际是 Rust 升级桥，都只为旧版一键升级保留。
+后端是 `rust/` 下的单个原生程序，按职责分为账号、配置、编辑器、远程、切换、Claude Code（`claude/`）、用量（`usage/`）、诊断、更新和平台模块。页面在 `web/`，价格快照和修正表在 `data/`。两个 VS Code 扩展在 `vscode-companion/` 和 `vscode-remote-agent/`，仍是 JavaScript。发布包不含 Node。包里的 `runtime/`、`bin/`、`node_modules/` 三个目录各只有一个 `.keep`：已发布的 7 个 Rust 版本（0.1.6-rc.1 到 0.1.7-rc.3）的更新程序会检查新包里有这三个目录，见 `scripts/rust-release.cjs` 的注释。
 
-仓库里的 `src/`、根目录 `main.cjs`、`cli.cjs` 和 `mcp-server.cjs` 是已冻结的 Node 后台，只作行为对照和测试支撑，不再修改。
+Node.js 只用于测试和打包脚本（`scripts/`、`tests/`）。
 
 ## Windows 与 Mac 共用的功能边界
 
@@ -198,7 +198,7 @@ Mac 的心跳与客户端列表通过异步 `ps` 枚举进程，再并行调用�
 
 `rust/src/update.rs` 只处理固定仓库的发布查询、下载、SHA-256 校验与安装调度；下载使用官方会话相同的环境或系统代理。发布清单定义实际运行文件，构建号按文件名与统一换行后的内容计算，使 Windows、两种 Mac 包和 `release.json` 使用同一标识。
 
-打包时把本次工作流的 `GITHUB_RUN_NUMBER` 写入包内 `src/platform/release-info.json`，该序号参与构建号计算。发布元数据使用同一序号；开发目录不会提示安装，正式包仅在远端序号更大时允许升级，启动独立升级进程前还需确认包内序号和构建号与发布信息一致。工作流重跑保持原序号，旧标签回退不触发降级安装。
+打包时把本次工作流的 `GITHUB_RUN_NUMBER` 写入包根目录的 `release-info.json`，该序号参与构建号计算。发布元数据使用同一序号；开发目录不会提示安装，正式包仅在远端序号更大时允许升级，启动独立升级进程前还需确认包内序号和构建号与发布信息一致。工作流重跑保持原序号，旧标签回退不触发降级安装。
 
 校验完成后，把当前程序复制到暂存目录，以 `--update-worker` 启动独立更新进程。独立进程就绪后旧后台退出，升级进程等待它结束，再备份并替换：Windows 按发行清单及运行时目录处理；Mac 通过应用包改名替换，账号数据仍留在 Application Support。健康检查在 30 秒内验证新后台的 `/api/runtime` 构建号，失败恢复旧版并重新启动。新后台收到的 `BRIDGE_HOME` 若就是默认数据目录，仍按默认安装处理，继续刷新发现文件和桌面快捷方式。数据目录的 `updates/previous/` 只保留一份备份，诊断日志记录检查、下载、安装和回滚。
 
@@ -235,7 +235,7 @@ Mac 的心跳与客户端列表通过异步 `ps` 枚举进程，再并行调用�
 | Claude Code | `rust/src/claude/`                                                    | Claude Code 设置接管与恢复、接入判断、检测连接、Anthropic 转换（含流式） |
 | 用量     | `rust/src/usage.rs`、`rust/src/usage/`、`data/`                          | 来源记录、记录扫描与索引、价格簿和计费   |
 | 诊断     | `rust/src/diagnostics.rs`                                                | 日志脱敏、轮换和诊断导出                 |
-| 更新     | `rust/src/update.rs`、`rust/src/bin/upgrade-bridge.rs`                   | 发布查询、校验替换、回滚和旧版升级桥     |
+| 更新     | `rust/src/update.rs`                                                     | 发布查询、校验替换和回滚                 |
 | 迁移     | `rust/src/migration.rs`                                                  | 旧安装数据导入和默认数据目录             |
 | 平台     | `rust/src/platform.rs`、`rust/src/integration.rs`、`rust/src/lifecycle.rs` | 进程、权限、代理、快捷方式、自启和卸载   |
 | 接口     | `rust/src/mcp.rs`、`rust/src/adapter*.rs`                                | MCP 服务和 API 转换                      |

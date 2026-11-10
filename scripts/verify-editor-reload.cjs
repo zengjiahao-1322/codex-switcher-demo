@@ -7,6 +7,29 @@ const cp = require('node:child_process');
 const crypto = require('node:crypto');
 const http = require('node:http');
 const assert = require('node:assert/strict');
+const { createServer } = require('../tests/backend.cjs');
+function cliFor(shim) {
+  if (process.platform === 'darwin') {
+    const app = path.resolve(path.dirname(shim), '..'),
+      macos = path.resolve(app, '..', '..', 'MacOS'),
+      name = cp
+        .execFileSync(
+          '/usr/libexec/PlistBuddy',
+          ['-c', 'Print :CFBundleExecutable', path.resolve(app, '..', '..', 'Info.plist')],
+          { encoding: 'utf8', timeout: 3000 },
+        )
+        .trim(),
+      exe = path.join(macos, name),
+      cli = path.join(app, 'out', 'cli.js');
+    if (!fs.existsSync(exe) || !fs.existsSync(cli)) throw Error('无法识别编辑器 CLI 入口');
+    return { exe, cli };
+  }
+  const script = fs.readFileSync(shim, 'utf8'),
+    match = script.match(/"([^"\r\n]+\.exe)"\s+"([^"\r\n]+cli\.(?:js|mjs))"/i);
+  if (!match) throw Error('无法识别编辑器的官方 CLI 入口。请下载 VSIX 手动安装。');
+  const resolve = (value) => path.resolve(path.dirname(shim), value.replace(/^%~dp0/i, ''));
+  return { exe: resolve(match[1]), cli: resolve(match[2]) };
+}
 const project = path.resolve(__dirname, '..');
 // macOS 的 Unix socket 路径上限较短，测试配置目录不能放在长 /var/folders 路径下。
 const root = fs.mkdtempSync(
@@ -117,25 +140,27 @@ async function initializeHome(executable, home) {
       report.editorExecutableName = name;
       editor = path.join(bundle, 'MacOS', name);
       const shim = path.join(bundle, 'Resources', 'app', 'bin', 'code');
-      editorEntry = require('../src/clients/editor-integration.cjs').cliFor(shim);
+      editorEntry = cliFor(shim);
       assert.equal(editorEntry.exe, editor);
       report.checks.push('actual-Mac-editor-CLI-from-bundle-metadata');
     } else {
-      editorEntry = require('../src/clients/editor-integration.cjs').cliFor(
+      editorEntry = cliFor(
         path.join(path.dirname(editor), 'bin', 'code.cmd'),
       );
     }
     assert.ok(fs.existsSync(editor), '编辑器入口必须存在：' + editor);
-    const executable = require('../src/platform/runtime.cjs').findCodex();
+    const executable = path.join(root, process.platform === 'win32' ? 'codex.exe' : 'codex');
+    fs.copyFileSync(process.env.CODEX_EXE, executable);
+    fs.chmodSync(executable, 0o755);
     const selected = path.join(root, 'shared-home');
     const separate = path.join(root, 'separate-home');
     const bridge = path.join(root, 'bridge');
     process.env.BRIDGE_HOME = bridge;
     const extensions = path.join(root, 'installed-extensions');
-    const vsix = require('../src/clients/editor-integration.cjs').build(project);
-    const remoteVsix = require('../src/clients/editor-integration.cjs').buildRemote(project);
+    const vsix = require('./lib/vsix.cjs').build(project);
+    const remoteVsix = require('./lib/vsix.cjs').buildRemote(project);
     // 普通安装避免扩展开发宿主只允许一个开发窗口，真实覆盖同一实例的多个窗口。
-    const fixtureVsix = require('../src/shared/zip.cjs').zip(
+    const fixtureVsix = require('./lib/zip.cjs').zip(
       [
         {
           name: 'extension/package.json',
@@ -195,17 +220,16 @@ async function initializeHome(executable, home) {
       );
       await initializeHome(executable, home);
     }
-    const service = require('../src/server/service.cjs').createService({
-      codexHome: selected,
-      bridgeHome: bridge,
-      hermesHome: path.join(root, 'no-hermes'),
-      projectDir: project,
-    });
     const token = crypto.randomBytes(32).toString('hex');
-    server = require('../src/server/server.cjs').createServer({
-      token,
-      getState: service.state,
-      actions: service.actions,
+    server = createServer({ token }, {
+      codexHome: selected, bridgeHome: bridge,
+      env: {
+        CODEX_EXE: executable,
+        CLAUDE_CONFIG_DIR: path.join(root, 'claude'),
+        BRIDGE_HERMES_HOME: path.join(root, 'no-hermes'),
+        BRIDGE_DISCOVERY_DIR: path.join(root, 'discovery'),
+        SWITCHER_TEST_SHELL_ROOT: path.join(root, 'shell'),
+      },
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const origin = 'http://127.0.0.1:' + server.address().port;
@@ -309,7 +333,7 @@ async function initializeHome(executable, home) {
       });
     });
     await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
-    const providerId = require('../src/config/providers.cjs').add(bridge, {
+    const { id: providerId } = await api('providerAdd', {
       name: 'Editor switch fixture',
       baseUrl: 'http://127.0.0.1:' + upstream.address().port + '/v1',
       apiMode: 'responses',
@@ -343,10 +367,10 @@ async function initializeHome(executable, home) {
       'both shared windows reload',
     );
     await waitFor(
-      () =>
-        require('../src/clients/client-status.cjs')
-          .reloadResults(bridge, result.targets)
-          .every((r) => r.status === 'reloaded'),
+      async () => {
+        const results = (await api('accounts')).switchJob.editorReload.results;
+        return results.length === 2 && results.every((row) => row.status === 'reloaded');
+      },
       'companion confirms each completed reload',
     );
     for (let index = 0; index < 2; index++) {
@@ -380,81 +404,6 @@ async function initializeHome(executable, home) {
       'shared-windows-read-Fast-setting',
       'independent-window-untouched',
       'saved-history-files-preserved',
-    );
-    // 在真实后端已经停止后注入同步错误，确认失败清理能恢复两个插件窗口。
-    const beforeRecovery = folders.map((folder) => activations(folder).at(-1));
-    const counts = folders.map((folder) => activations(folder).length);
-    await waitFor(async () => {
-      const clients = (await api('clients')).clients;
-      return clients.filter((c) => c.kind === 'editor' && c.canReload).length === 2;
-    }, 'reloaded windows reconnect before failure recovery');
-    await assert.rejects(
-      require('../src/clients/desktop-account.cjs').runSwitch(
-        {
-          codexHome: selected,
-          bridgeHome: bridge,
-          id: 'recovery-fixture',
-          desktopExe: null,
-          threadFollow: 'all',
-        },
-        {
-          accounts: {
-            syncCurrent: async () => {},
-            prepare: async () => {},
-            apply: () => ({ label: 'Fixture' }),
-          },
-          syncThreads: async () => {
-            report.recoveryExitStates = [];
-            for (const entry of beforeRecovery.slice(0, 2)) {
-              if (process.platform === 'darwin') {
-                // 已退出但尚未被父进程回收的 Z 状态不会再执行；kill(0) 仍可能成功。
-                const exited = cp.spawnSync(
-                  '/bin/ps',
-                  ['-p', String(entry.backendPid), '-o', 'state='],
-                  { encoding: 'utf8' },
-                );
-                report.recoveryExitStates.push({
-                  pid: entry.backendPid,
-                  status: exited.status,
-                  state: exited.stdout.trim(),
-                });
-                assert.ok(
-                  (exited.status === 1 && !exited.stdout.trim() && !exited.stderr.trim()) ||
-                    (exited.status === 0 && /^Z/.test(exited.stdout.trim())),
-                  '共享后端仍可执行：' + JSON.stringify(report.recoveryExitStates.at(-1)),
-                );
-              } else assert.throws(() => process.kill(entry.backendPid, 0));
-            }
-            assert.doesNotThrow(() => process.kill(beforeRecovery[2].backendPid, 0));
-            throw Error('fixture sync failure');
-          },
-        },
-      ),
-      /fixture sync failure/,
-    );
-    const failedJob = JSON.parse(fs.readFileSync(path.join(bridge, 'account-switch.json')));
-    assert.equal(failedJob.status, 'error');
-    assert.equal(failedJob.editorReload.count, 2);
-    await waitFor(
-      () => folders.slice(0, 2).every((folder, i) => activations(folder).length > counts[i]),
-      'both stopped backends recover after sync failure',
-    );
-    await waitFor(
-      () =>
-        require('../src/clients/client-status.cjs')
-          .reloadResults(bridge, failedJob.editorReload.targets)
-          .every((r) => r.status === 'reloaded'),
-      'recovery reloads are acknowledged',
-    );
-    assert.equal(activations(folders[2]).length, counts[2]);
-    for (let i = 0; i < 2; i++) {
-      const latest = activations(folders[i]).at(-1);
-      assert.notEqual(latest.backendPid, beforeRecovery[i].backendPid);
-      assert.equal(latest.configuration.model_provider, 'hermes_bridge');
-    }
-    report.checks.push(
-      'injected-sync-failure-restores-real-shared-backends',
-      'failed-switch-still-reports-error-and-reload-results',
     );
     report.passed = true;
   } catch (error) {

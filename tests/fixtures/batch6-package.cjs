@@ -3,9 +3,8 @@ const fs = require('node:fs'),
   path = require('node:path'),
   http = require('node:http');
 const { execFileSync } = require('node:child_process');
-const { isRust, rustBinary } = require('../backend.cjs');
+const { rustBinary } = require('../backend.cjs');
 const { startBackend } = require('../backend-process.cjs');
-const rootProject = path.resolve(__dirname, '../..');
 const asset =
   process.platform === 'win32'
     ? 'codex-switcher-windows-x64.zip'
@@ -18,80 +17,31 @@ function write(file, value, mode) {
   if (mode) fs.chmodSync(file, mode);
 }
 function makePackage(destination, sequence) {
-  const files = [...require('../../release-files.json')];
-  for (const name of files)
-    write(path.join(destination, name), fs.readFileSync(path.join(rootProject, name)));
-  // Only the copied fixture changes the fixed release origin and browser opener.
-  const updateFile = path.join(destination, 'src/server/update.cjs');
-  fs.writeFileSync(
-    updateFile,
-    fs
-      .readFileSync(updateFile, 'utf8')
-      .replace(
-        'const releaseUrl = `https://github.com/${REPOSITORY}/releases/latest/download/`;',
-        "const releaseUrl = process.env.SWITCHER_TEST_UPDATE_ORIGIN + '/';",
-      ),
+  const entries = require('../../scripts/rust-release.cjs').entries(
+    '',
+    sequence,
+    process.platform,
+    process.arch,
+    path.dirname(rustBinary()),
   );
-  const platformFile = path.join(destination, 'src/platform/platform.cjs');
-  fs.writeFileSync(
-    platformFile,
-    fs
-      .readFileSync(platformFile, 'utf8')
-      .replace(
-        /const openUrl = \(url\) =>[\s\S]*?\.unref\(\);/,
-        "const openUrl = (url) => fs.appendFileSync(path.join(process.env.BRIDGE_HOME, 'opened-pages.txt'), url + '\\n');",
-      ),
-  );
-  write(
-    path.join(destination, 'src/platform/release-info.json'),
-    JSON.stringify({ sequence }) + '\n',
-  );
-  fs.cpSync(path.join(rootProject, 'node_modules'), path.join(destination, 'node_modules'), {
-    recursive: true,
-  });
-  for (const dir of ['runtime', 'bin'])
-    fs.mkdirSync(path.join(destination, dir), { recursive: true });
-  const helper = path.join(
-    rootProject,
-    'bin',
-    process.platform === 'win32' ? 'process-context.exe' : 'mac-process-context',
-  );
-  if (fs.existsSync(helper))
-    fs.copyFileSync(helper, path.join(destination, 'bin', path.basename(helper)));
-  if (isRust) {
-    const exe = path.basename(rustBinary());
-    fs.copyFileSync(rustBinary(), path.join(destination, exe));
-    fs.chmodSync(path.join(destination, exe), 0o755);
-    files.push(exe);
-  } else {
-    const node = path.join(
-      destination,
-      'runtime',
-      ...(process.platform === 'win32' ? ['node.exe'] : [process.arch, 'node']),
+  for (const entry of entries) {
+    write(
+      path.join(destination, entry.name),
+      entry.data === undefined ? fs.readFileSync(entry.file) : entry.data,
+      entry.mode && entry.mode & 0o777,
     );
-    write(node, fs.readFileSync(process.execPath), 0o755);
   }
-  write(path.join(destination, 'release-files.json'), JSON.stringify(files));
   return build(destination);
 }
 function build(destination) {
   return JSON.parse(
-    execFileSync(
-      isRust ? path.join(destination, path.basename(rustBinary())) : process.execPath,
-      isRust
-        ? ['--build-info']
-        : [
-            '-e',
-            "console.log(JSON.stringify(require('./src/platform/build-info.cjs').buildInfo()))",
-          ],
-      {
-        cwd: destination,
-        env: { ...process.env, SWITCHER_WEB_ROOT: path.join(destination, 'web') },
-        windowsHide: true,
-        encoding: 'utf8',
-        timeout: 10000,
-      },
-    ),
+    execFileSync(path.join(destination, path.basename(rustBinary())), ['--build-info'], {
+      cwd: destination,
+      env: { ...process.env, SWITCHER_WEB_ROOT: path.join(destination, 'web') },
+      windowsHide: true,
+      encoding: 'utf8',
+      timeout: 10000,
+    }),
   );
 }
 function archive(source, out) {
@@ -114,7 +64,7 @@ function archive(source, out) {
   for (const folder of ['runtime', 'bin', 'node_modules'])
     write(path.join(source, folder, '.keep'), '');
   walk(source, 'Codex Switcher/');
-  require('../../src/shared/zip.cjs').zip(entries, out);
+  require('../../scripts/lib/zip.cjs').zip(entries, out);
 }
 function snapshot(directory) {
   const result = {};
@@ -210,11 +160,6 @@ async function packageFixture(t, options = {}) {
       );
       write(path.join(context.bridge, 'accounts', 'keep.txt'), 'preserve credentials', 0o600);
       context.environment.SWITCHER_BLACKBOX_PROJECT = target;
-      context.environment.SWITCHER_BLACKBOX_NODE = path.join(
-        target,
-        'runtime',
-        ...(process.platform === 'win32' ? ['node.exe'] : [process.arch, 'node']),
-      );
       context.environment.SWITCHER_BLACKBOX_EXE = path.join(target, path.basename(rustBinary()));
       context.environment.SWITCHER_WEB_ROOT = path.join(target, 'web');
       context.environment.BRIDGE_DISCOVERY_DIR = discovery;

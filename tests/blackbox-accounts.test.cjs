@@ -4,7 +4,6 @@ const assert = require('node:assert/strict'),
   fs = require('node:fs'),
   path = require('node:path');
 const { api, algorithm } = require('./config-blackbox-helpers.cjs');
-const rustBackend = process.env.SWITCHER_BACKEND === 'rust';
 const {
   auth,
   accountId,
@@ -436,7 +435,7 @@ test('官方额度HTTP：当前过期及无exp旧登录暂缓、非当前过期�
   });
 });
 
-test('官方账号后台续期：到期前两天刷新凭证并记录成功', { skip: !rustBackend }, async (t) => {
+test('官方账号后台续期：到期前两天刷新凭证并记录成功', async (t) => {
   const f = await officialFixture(t, { live: auth('alice') });
   await accounts(f);
   const id = accountId('bob'),
@@ -466,7 +465,7 @@ test('官方账号后台续期：到期前两天刷新凭证并记录成功', { 
   assert.match(log, /"status":"ok"/);
 });
 
-test('官方账号后台续期：API 模式账号可续期并同步本机 auth.json', { skip: !rustBackend }, async (t) => {
+test('官方账号后台续期：API 模式账号可续期并同步本机 auth.json', async (t) => {
   const old = auth('alice', { exp: Math.floor(Date.now() / 1000) + 86400 });
   const f = await officialFixture(t, { live: old });
   await accounts(f);
@@ -491,7 +490,7 @@ test('官方账号后台续期：API 模式账号可续期并同步本机 auth.j
   assert.equal(f.rpc().filter((call) => call.method === 'account/read').length, 1);
 });
 
-test('官方账号后台续期：六种不续期情况均不启动假 Codex', { skip: !rustBackend }, async (t) => {
+test('官方账号后台续期：六种不续期情况均不启动假 Codex', async (t) => {
   const cases = [
     ['正在使用', (f, id) => id],
     ['等待登录', (f, id) => ({ pendingLogin: true })],
@@ -545,7 +544,7 @@ test('官方账号后台续期：六种不续期情况均不启动假 Codex', { 
   }
 });
 
-test('官方额度HTTP：刷新错误写入脱敏原因并将续期标为失败', { skip: !rustBackend }, async (t) => {
+test('官方额度HTTP：刷新错误写入脱敏原因并将续期标为失败', async (t) => {
   const f = await officialFixture(t, { live: auth('alice') });
   await accounts(f);
   const id = accountId('bob'),
@@ -572,7 +571,7 @@ test('官方额度HTTP：刷新错误写入脱敏原因并将续期标为失败'
   assert.match(log, /"status":"failed"/);
 });
 
-test('官方账号立即续期：成功续期，拒绝 Codex、SSH、失效和待应用账号', { skip: !rustBackend }, async (t) => {
+test('官方账号立即续期：成功续期，拒绝 Codex、SSH、失效和待应用账号', async (t) => {
   const f = await officialFixture(t, { live: auth('owner') });
   await accounts(f);
   const add = (user, extra = {}) => {
@@ -620,7 +619,7 @@ test('官方账号立即续期：成功续期，拒绝 Codex、SSH、失效和�
   );
 });
 
-test('官方刷新stderr在关闭后分类额度和prepare错误', { skip: !rustBackend }, async (t) => {
+test('官方刷新stderr在关闭后分类额度和prepare错误', async (t) => {
   for (const [stderr, expected] of [
     ['Failed to refresh token status=503 Service Unavailable', 'network_error'],
     ['Failed to refresh token status=401 Unauthorized', 'auth_invalid'],
@@ -657,7 +656,7 @@ test('官方刷新stderr在关闭后分类额度和prepare错误', { skip: !rust
   }
 });
 
-test('官方账号状态返回续期状态并清理残留账号目录', { skip: !rustBackend }, async (t) => {
+test('官方账号状态返回续期状态并清理残留账号目录', async (t) => {
   const f = await officialFixture(t, { live: auth('owner') });
   await accounts(f);
   const add = (user, options = {}) => {
@@ -695,7 +694,7 @@ test('官方账号状态返回续期状态并清理残留账号目录', { skip: 
   assert.equal(fs.existsSync(path.join(f.bridge, 'accounts', 'known')), true);
 });
 
-test('断开的SSH服务器仍阻止续期并在账号状态标记 remote', { skip: !rustBackend }, async (t) => {
+test('断开的SSH服务器仍阻止续期并在账号状态标记 remote', async (t) => {
   const f = await officialFixture(t, { live: auth('owner') });
   await accounts(f);
   const id = accountId('stale-remote'),
@@ -721,7 +720,7 @@ test('断开的SSH服务器仍阻止续期并在账号状态标记 remote', { sk
   assert.equal(status.items.find((row) => row.id === id).renewal.state, 'remote');
 });
 
-test('同一SSH服务器按最新记录排除B并允许续期旧记录A', { skip: !rustBackend }, async (t) => {
+test('同一SSH服务器按最新记录排除B并允许续期旧记录A', async (t) => {
   const f = await officialFixture(t, { live: auth('owner') });
   await accounts(f);
   const add = (user, refreshed) => {

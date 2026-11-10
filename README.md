@@ -80,7 +80,7 @@ Mac 使用 ad-hoc 签名，首次打开可能需要在“系统设置 → 隐私
 
 可以在页面上点“检查更新”升级：只接受更大的发行序号，同时校验 SHA-256、包内构建号与序号；保留旧版备份，启动检查失败时自动恢复。如果检查更新因为网络或证书错误失败，可以手动下载安装。升级后在“编辑器与诊断”点“一键更新扩展”，再到“远程服务器”页更新远端代理。
 
-**0.1.3、0.1.4、0.1.5 是早期的 Node 版，已从发布页下架。** 0.1.3 的更新地址固定在旧版本，只能手动安装新版；0.1.4、0.1.5 目前还能一键升级，后续版本不再保证，请直接下载最新版安装。
+**0.1.3、0.1.4、0.1.5 是早期的 Node 版，已从发布页下架，不能一键升级。** 请下载最新版，用 `install.cmd` 安装，或在 Mac 上运行 `Install.command`。安装时会停掉旧版后台，账号和 API 配置会自动导入。
 
 | 内容             | 默认位置                                          |
 | ---------------- | ------------------------------------------------- |
@@ -99,6 +99,6 @@ Mac 使用 ad-hoc 签名，首次打开可能需要在“系统设置 → 隐私
 - **局限**：自动化使用隔离配置，不能替代具体设备上的登录、额度和 Remote-SSH 实测；Cursor、Windsurf、Insiders 仍需人工验证。
 - **重载风险**：重载可能中断任务，请先保存工作。已保存的聊天文件会保留，但运行中的任务和未保存的状态不能保证恢复。“进程已启动”“已请求重载”都不代表实际模型请求已验证。
 
-产品代码在 `rust/`、`web/`、`data/`、`platform/` 和两个 VS Code 扩展目录，见[架构说明](docs/ARCHITECTURE.md)。`src/` 是已冻结的 Node 后台，只作对照和测试支撑，计划移除。
+产品代码在 `rust/`、`web/`、`data/`、`platform/` 和两个 VS Code 扩展目录，见[架构说明](docs/ARCHITECTURE.md)。
 
-开发需要 Rust stable 和 Node.js 22+：先运行 `cargo build --locked --release --manifest-path rust/Cargo.toml`，再设置 `SWITCHER_BACKEND=rust` 运行 `npm test`。
+开发需要 Rust stable 和 Node.js 22+：先运行 `cargo build --locked --release --manifest-path rust/Cargo.toml`，再运行 `npm test`。Node.js 只用于测试和打包脚本，发布包不包含它。

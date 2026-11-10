@@ -5,13 +5,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
-const { isRust } = require('./backend.cjs');
 const { startBackend } = require('./backend-process.cjs');
 
 test(
   'Rust伴随诊断：未安装、禁用、错误发现文件及一次60秒无心跳摘要',
   {
-    skip: !isRust || process.platform !== 'win32',
+    skip: process.platform !== 'win32',
     timeout: 85000,
   },
   async (t) => {

@@ -12,8 +12,8 @@ if ($env:SWITCHER_TEST_SHELL_ROOT) { $registry = Join-Path $env:SWITCHER_TEST_SH
 if ($RemoveRegistration) { Remove-Item -LiteralPath $registry -Recurse -Force -ErrorAction SilentlyContinue; return }
 $package = Get-Content -LiteralPath (Join-Path $InstallDir 'package.json') -Raw | ConvertFrom-Json
 $native = Join-Path $InstallDir 'codex-switcher.exe'
-$icon = if (Test-Path -LiteralPath $native) { $native } else { Join-Path $InstallDir 'runtime\node.exe' }
-$sequence = (Get-Content -LiteralPath (Join-Path $InstallDir 'src\platform\release-info.json') -Raw | ConvertFrom-Json).sequence
+$icon = $native
+$sequence = (Get-Content -LiteralPath (Join-Path $InstallDir 'release-info.json') -Raw | ConvertFrom-Json).sequence
 $markerFile = Join-Path $DiscoveryDir 'shortcut.json'
 $marker = if (Test-Path -LiteralPath $markerFile) { Get-Content -LiteralPath $markerFile -Raw | ConvertFrom-Json } else { $null }
 if ($marker -and [long]$marker.sequence -gt [long]$sequence) { Write-Output '{"shortcutChanged":false}'; return }
@@ -27,7 +27,7 @@ if (-not $RegisterOnly -and ($exists -or -not $marker.created)) {
   $link = $shell.CreateShortcut($linkFile)
   $oldSequence = 0
   if ($exists -and $link.WorkingDirectory) {
-    $oldInfo = Join-Path $link.WorkingDirectory 'src\platform\release-info.json'
+    $oldInfo = Join-Path $link.WorkingDirectory 'release-info.json'
     if (Test-Path -LiteralPath $oldInfo) { $oldSequence = [long](Get-Content -LiteralPath $oldInfo -Raw | ConvertFrom-Json).sequence }
   }
   if (-not $exists -or [long]$sequence -gt $oldSequence -or $link.WorkingDirectory -eq $InstallDir) {

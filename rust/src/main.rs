@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let app = instance::fixture_app()?;
         let action = std::env::args().nth(2).unwrap_or_default();
         if !["status", "restore", "cleanup"].contains(&action.as_str()) {
-            println!("usage: node cli.cjs status|restore|cleanup");
+            println!("usage: codex-switcher --cli status|restore|cleanup");
             std::process::exit(2);
         }
         match lifecycle::cli(&app, &action).await {

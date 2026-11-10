@@ -25,10 +25,7 @@ function stamped(binaryDir, native) {
   );
   return file;
 }
-// The two small legacy markers/directories are required by the published seq136
-// updater. Its own Node VM reads build-info.cjs, then launches our native bridge.
 function entries(prefix, sequence, target, arch, binaryDir) {
-  const build = require('./rust-build-info.cjs').buildInfo(sequence);
   const names = require('../release-files.json').filter(
     (name) =>
       /^(web|vscode-companion|vscode-remote-agent|data)\//.test(name) ||
@@ -39,7 +36,6 @@ function entries(prefix, sequence, target, arch, binaryDir) {
         'docs/ARCHITECTURE.md',
         'package.json',
         'install.cmd',
-        'install.ps1',
         'Start.cmd',
         'launch-hidden.vbs',
         'uninstall.ps1',
@@ -52,14 +48,10 @@ function entries(prefix, sequence, target, arch, binaryDir) {
       ].includes(name),
   );
   const native = target === 'win32' ? 'codex-switcher.exe' : 'codex-switcher';
-  const bridge = target === 'win32' ? 'upgrade-bridge.exe' : 'upgrade-bridge';
   const files = [
     ...names,
     native,
-    'main.cjs',
-    'scripts/update-worker.cjs',
-    'src/platform/build-info.cjs',
-    'src/platform/release-info.json',
+    'release-info.json',
     'release-files.json',
   ];
   return names
@@ -71,27 +63,14 @@ function entries(prefix, sequence, target, arch, binaryDir) {
         mode: 0o100755,
       },
       {
-        name: prefix + 'main.cjs',
-        data: '// Native release. The seq136 updater uses runtime/node to launch codex-switcher.\n',
-      },
-      {
-        name: prefix + 'scripts/update-worker.cjs',
-        data: '// Native upgrade bridge dispatches this legacy entry to --update-worker.\n',
-      },
-      {
-        name: prefix + 'src/platform/build-info.cjs',
-        data: `'use strict'; module.exports={buildInfo:()=>(${JSON.stringify(build)})};\n`,
-      },
-      {
-        name: prefix + 'src/platform/release-info.json',
+        name: prefix + 'release-info.json',
         data: JSON.stringify({ sequence }) + '\n',
       },
       { name: prefix + 'release-files.json', data: JSON.stringify(files, null, 2) + '\n' },
-      {
-        name: prefix + (target === 'win32' ? 'runtime/node.exe' : `runtime/${arch}/node`),
-        file: path.join(binaryDir, bridge),
-        mode: 0o100755,
-      },
+      // All seven published Rust updaters require these directories, without a Node runtime.
+      // update.rs: v0.1.6-rc.1/2:408; rc.3:434; rc.4:435;
+      // v0.1.7-rc.1/2:652; rc.3:657. See collab/cleanup-r1-report.md section 1.
+      { name: prefix + 'runtime/.keep', data: '' },
       { name: prefix + 'bin/.keep', data: '' },
       { name: prefix + 'node_modules/.keep', data: '' },
     ]);

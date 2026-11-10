@@ -19,10 +19,7 @@ for (const name of fs.readdirSync(artifactDir).sort()) {
 }
 const release = {
   version: require('../package.json').version,
-  build: (process.env.SWITCHER_RELEASE_BACKEND === 'rust'
-    ? require('./rust-build-info.cjs')
-    : require('../src/platform/build-info.cjs')
-  ).buildInfo(sequence).id,
+  build: require('./rust-build-info.cjs').buildInfo(sequence).id,
   sequence,
   commit:
     process.env.GITHUB_SHA ||

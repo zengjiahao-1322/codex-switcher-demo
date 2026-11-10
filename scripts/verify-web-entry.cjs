@@ -9,8 +9,7 @@ try {
 } catch {
   ({ chromium } = require('../.build-cache/browser-check/node_modules/playwright'));
 }
-const { createServer, isRust } = require('../tests/backend.cjs');
-const { createService } = require('../src/server/service.cjs');
+const { createServer } = require('../tests/backend.cjs');
 
 // 验证真实页面；仅使用独立本机配置，不触碰用户账号和正在执行的任务。
 const root = fs.mkdtempSync(
@@ -30,24 +29,10 @@ fs.writeFileSync(
   path.join(home, 'config.toml'),
   'model="fixture-api"\nmodel_provider="hermes_bridge"\n',
 );
-const service = createService({ codexHome: home, bridgeHome: bridge });
-const providerId = require('../src/config/providers.cjs').add(bridge, {
-  name: 'Web entry fixture',
-  baseUrl: 'http://127.0.0.1:1/v1',
-  apiMode: 'responses',
-  model: 'fixture-api',
-  apiKey: 'fixture-key',
-});
-fs.writeFileSync(path.join(bridge, 'current.json'), JSON.stringify({ providerId }));
+let providerId;
 const claudeConfig = path.join(root, 'claude');
 fs.mkdirSync(claudeConfig, { recursive: true });
 fs.writeFileSync(path.join(claudeConfig, 'settings.json'), JSON.stringify({ env: { KEEP: 'fixture' } }));
-if (isRust) {
-  const providersFile = path.join(bridge, 'providers.json');
-  const providers = JSON.parse(fs.readFileSync(providersFile));
-  providers.providers.push({ id: 'claude-fixture', name: 'Claude fixture', baseUrl: 'https://anthropic.fixture/v1', apiMode: 'anthropic_messages', apiKey: 'fixture-claude-key', model: 'claude-fixture', models: ['claude-fixture'] });
-  fs.writeFileSync(providersFile, JSON.stringify(providers));
-}
 let browser, server, port;
 let native;
 let fixtureJob = null;
@@ -59,55 +44,23 @@ function checked(...checks) {
   console.log('PASS ' + checks.join(', '));
 }
 async function start(token) {
-  server = createServer(
-    {
-      token,
-      getState: service.state,
-      actions: {
-        ...service.actions,
-        accounts: async () => ({ items: [], switchJob: fixtureJob }),
-        // 不访问 GitHub：固定返回有新构建，验证顶部更新提示。
-        checkUpdate: async () => ({
-          current: { version: '0.1.3', build: 'fixture-old', sequence: 7 },
-          latest: { version: '0.1.3', build: 'fixture-new', sequence: 9, notes: 'fixture notes' },
-          checkedAt: new Date().toISOString(),
-          status: 'available',
-        }),
-        // 这里只替代重启客户端这一步，页面传参和配置读写仍使用实际代码。
-        desktopSwitch: async (input) => {
-          switchRequests.push(input);
-          fixtureJob = {
-            status: 'done',
-            startedAt: new Date().toISOString(),
-            elapsedMs: 1250,
-            configurationApplied: true,
-            threadFollow: 'all',
-            threads: { updated: 3, skipped: 0, failed: 0 },
-            steps: [{ id: 'apply', label: '保存并应用目标配置', status: 'done', durationMs: 250 }],
-            editorReload: {
-              results: [
-                { name: 'VS Code A', status: 'reloaded' },
-                { name: 'VS Code B', status: 'received' },
-              ],
-            },
-            message: 'fixture switch applied',
-          };
-          return { message: 'fixture switch applied' };
-        },
-        probe: async (input) => {
-          probeRequests.push(input);
-          return {
-            ok: true,
-            mode: 'direct',
-            message: 'API 连接检测通过。',
-          };
-        },
-      },
-    },
-    { codexHome: home, bridgeHome: bridge, env: { ...native?.env, CLAUDE_CONFIG_DIR: claudeConfig } },
-  );
+  server = createServer({ token }, {
+    codexHome: home, bridgeHome: bridge,
+    env: { ...native?.env, CLAUDE_CONFIG_DIR: claudeConfig },
+  });
   await new Promise((resolve) => server.listen(port || 0, '127.0.0.1', resolve));
   port = server.address().port;
+}
+async function api(name, input) {
+  const url = new URL(server.url);
+  const response = await fetch(url.origin + '/api/' + name, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + url.hash.slice(1), 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const value = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(value));
+  return value;
 }
 async function loaded(page, url) {
   // 启动器会打开页面；先离开旧文档，避免仅更换 hash 被浏览器当成页内跳转。
@@ -125,14 +78,18 @@ async function loaded(page, url) {
 }
 (async () => {
   try {
-    if (isRust) {
-      native = await require('../tests/browser-native-fixture.cjs').prepare(root, home, bridge);
-      const file = path.join(bridge, 'providers.json'),
-        data = JSON.parse(fs.readFileSync(file));
-      data.providers.find((p) => p.id === providerId).baseUrl = native.baseUrl;
-      fs.writeFileSync(file, JSON.stringify(data));
-    }
+    native = await require('../tests/browser-native-fixture.cjs').prepare(root, home, bridge);
     await start('fixture-session-one');
+    providerId = (await api('providerAdd', {
+      name: 'Web entry fixture', baseUrl: native.baseUrl,
+      apiMode: 'responses', model: 'fixture-api', apiKey: 'fixture-key',
+    })).id;
+    await api('providerAdd', {
+      name: 'Claude fixture', baseUrl: 'https://anthropic.fixture/v1',
+      apiMode: 'anthropic_messages', apiKey: 'fixture-claude-key',
+      model: 'claude-fixture', models: ['claude-fixture'],
+    });
+    fs.writeFileSync(path.join(bridge, 'current.json'), JSON.stringify({ providerId }));
     browser = await chromium.launch({
       headless: true,
       ...(process.env.SWITCHER_BROWSER_CHANNEL
@@ -142,12 +99,11 @@ async function loaded(page, url) {
     const context = await browser.newContext();
     const page = await context.newPage();
     const errors = [];
-    if (isRust)
-      page.on('request', (request) => {
-        if (request.url().endsWith('/api/probe')) probeRequests.push(request.postDataJSON());
-        if (request.url().endsWith('/api/desktopSwitch'))
-          switchRequests.push(request.postDataJSON());
-      });
+    page.on('request', (request) => {
+      if (request.url().endsWith('/api/probe')) probeRequests.push(request.postDataJSON());
+      if (request.url().endsWith('/api/desktopSwitch'))
+        switchRequests.push(request.postDataJSON());
+    });
     page.on('pageerror', (error) => errors.push(error.message));
     const base = 'http://127.0.0.1:' + port;
     await page.goto(base + '/');
@@ -157,21 +113,19 @@ async function loaded(page, url) {
     await loaded(page, base + '/#fixture-session-one');
     assert.equal(new URL(page.url()).hash, '');
     checked('current-launch-token-establishes-session');
-    if (isRust) {
-      await page.locator('#client-switcher button').nth(1).click();
-      await page.locator('#claude-list .source-card').nth(1).waitFor();
-      assert.equal(await page.locator('#claude-list .group-label').count(), 3);
-      await page.locator('#claude-list .source-card').nth(1).click();
-      await Promise.all([
-        page.waitForResponse((r) => r.url().endsWith('/api/claudeApply') && r.status() === 200),
-        page.getByRole('button', { name: '用于 Claude Code' }).click(),
-      ]);
-      const settings = JSON.parse(fs.readFileSync(path.join(claudeConfig, 'settings.json'), 'utf8'));
-      assert.equal(settings.env.ANTHROPIC_BASE_URL, 'https://anthropic.fixture');
-      assert.equal(settings.env.ANTHROPIC_MODEL, 'claude-fixture');
-      checked('claude-view-apply-writes-settings');
-      await page.locator('#client-switcher button').first().click();
-    }
+    await page.locator('#client-switcher button').nth(1).click();
+    await page.locator('#claude-list .source-card').nth(1).waitFor();
+    assert.equal(await page.locator('#claude-list .group-label').count(), 3);
+    await page.locator('#claude-list .source-card').nth(1).click();
+    await Promise.all([
+      page.waitForResponse((r) => r.url().endsWith('/api/claudeApply') && r.status() === 200),
+      page.getByRole('button', { name: '用于 Claude Code' }).click(),
+    ]);
+    const settings = JSON.parse(fs.readFileSync(path.join(claudeConfig, 'settings.json'), 'utf8'));
+    assert.equal(settings.env.ANTHROPIC_BASE_URL, 'https://anthropic.fixture');
+    assert.equal(settings.env.ANTHROPIC_MODEL, 'claude-fixture');
+    checked('claude-view-apply-writes-settings');
+    await page.locator('#client-switcher button').first().click();
     assert.equal(await page.locator('#migration-notice').isVisible(), true);
     assert.equal(
       await page.locator('#migration-text').innerText(),
@@ -235,7 +189,7 @@ async function loaded(page, url) {
     await response;
     await page.waitForFunction(
       (text) => document.getElementById('status').textContent.includes(text),
-      isRust ? '可直连：Responses 和函数调用通过' : 'API 连接检测通过',
+      '可直连：Responses 和函数调用通过',
     );
     assert.equal(Object.hasOwn(probeRequests.at(-1), 'fast'), false);
     assert.equal(switchRequests.length, 0);
@@ -246,34 +200,31 @@ async function loaded(page, url) {
     );
     await page.locator('#switch').click();
     await applied;
-    if (isRust) {
-      const deadline = Date.now() + 15000;
-      while (Date.now() < deadline) {
-        const job = JSON.parse(fs.readFileSync(path.join(bridge, 'account-switch.json')));
-        if (['done', 'error'].includes(job.status)) break;
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      // Fixed persisted stage rows exercise rendering; actual worker behavior is
-      // covered by the same HTTP black boxes on both backends.
-      fixtureJob = {
-        status: 'done',
-        startedAt: new Date().toISOString(),
-        elapsedMs: 1250,
-        configurationApplied: true,
-        threadFollow: 'all',
-        threads: { updated: 3, skipped: 0, failed: 0 },
-        steps: [{ id: 'apply', label: '保存并应用目标配置', status: 'done', durationMs: 250 }],
-        editorReload: {
-          results: [
-            { name: 'VS Code A', status: 'reloaded' },
-            { name: 'VS Code B', status: 'received' },
-          ],
-        },
-        message: 'fixture switch applied',
-      };
-      fs.writeFileSync(path.join(bridge, 'account-switch.json'), JSON.stringify(fixtureJob));
-      await loaded(page, base + '/');
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      const job = JSON.parse(fs.readFileSync(path.join(bridge, 'account-switch.json')));
+      if (['done', 'error'].includes(job.status)) break;
+      await new Promise((r) => setTimeout(r, 50));
     }
+    // Fixed persisted stage rows exercise rendering.
+    fixtureJob = {
+      status: 'done',
+      startedAt: new Date().toISOString(),
+      elapsedMs: 1250,
+      configurationApplied: true,
+      threadFollow: 'all',
+      threads: { updated: 3, skipped: 0, failed: 0 },
+      steps: [{ id: 'apply', label: '保存并应用目标配置', status: 'done', durationMs: 250 }],
+      editorReload: {
+        results: [
+          { name: 'VS Code A', status: 'reloaded' },
+          { name: 'VS Code B', status: 'received' },
+        ],
+      },
+      message: 'fixture switch applied',
+    };
+    fs.writeFileSync(path.join(bridge, 'account-switch.json'), JSON.stringify(fixtureJob));
+    await loaded(page, base + '/');
     assert.equal(Object.hasOwn(switchRequests.at(-1), 'fast'), false);
     await page.locator('#switch-progress').waitFor({ state: 'visible' });
     await page.locator('#switch-progress-title').click();
@@ -288,8 +239,7 @@ async function loaded(page, url) {
       editorReload: undefined,
       steps: [{ id: 'threads', label: '同步并核对旧对话', status: 'error', durationMs: 500 }],
     };
-    if (isRust)
-      fs.writeFileSync(path.join(bridge, 'account-switch.json'), JSON.stringify(fixtureJob));
+    fs.writeFileSync(path.join(bridge, 'account-switch.json'), JSON.stringify(fixtureJob));
     await loaded(page, base + '/');
     assert.ok((await page.locator('#switch-progress-title').innerText()).includes('切换未完成'));
     assert.ok((await page.locator('#switch-steps').innerText()).includes('失败'));

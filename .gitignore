@@ -11,16 +11,10 @@
 !/README.md
 !/CHANGELOG.md
 !/release-files.json
-!/main.cjs
-!/mcp-server.cjs
-!/cli.cjs
-!/install.ps1
 !/uninstall.ps1
 !/Start.cmd
 !/install.cmd
 !/launch-hidden.vbs
-!/src/
-!/src/**
 !/web/
 !/web/**
 !/data/

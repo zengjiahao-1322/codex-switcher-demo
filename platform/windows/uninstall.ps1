@@ -7,14 +7,12 @@ param([switch]$KeepData, [switch]$KeepCodexConfig)
 $ErrorActionPreference = 'Stop'
 [Environment]::CurrentDirectory = [IO.Path]::GetTempPath()
 $InstallDir = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'main.cjs')) -or -not (Test-Path -LiteralPath (Join-Path $InstallDir 'package.json'))) { throw 'Run uninstall.ps1 from the complete installed app folder.' }
+if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'codex-switcher.exe')) -or -not (Test-Path -LiteralPath (Join-Path $InstallDir 'package.json'))) { throw 'Run uninstall.ps1 from the complete installed app folder.' }
 $packageInfo = Get-Content -LiteralPath (Join-Path $InstallDir 'package.json') -Raw | ConvertFrom-Json
 if ($packageInfo.name -ne 'codex-api-switcher') { throw 'Unexpected uninstall folder.' }
-$node = Join-Path $InstallDir 'runtime\node.exe'
-$cli = Join-Path $InstallDir 'scripts/cli.cjs'
 $native = Join-Path $InstallDir 'codex-switcher.exe'
-$cliExe = if (Test-Path -LiteralPath $native) { $native } else { $node }
-[string[]]$cliPrefix = if (Test-Path -LiteralPath $native) { @('--cli') } else { @($cli) }
+$cliExe = $native
+[string[]]$cliPrefix = @('--cli')
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 if ($env:BRIDGE_UNINSTALL_READY) { [IO.File]::WriteAllText($env:BRIDGE_UNINSTALL_READY, 'ready') }
 if ($env:BRIDGE_UNINSTALL_PID) {
@@ -29,16 +27,15 @@ if (Test-Path -LiteralPath $running) {
   $servicePid = [int]$record.pid
   $serviceProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $servicePid"
   if ($serviceProcess) {
-    $ownsNode = $serviceProcess.ExecutablePath -eq $node -and $serviceProcess.CommandLine.Contains((Join-Path $InstallDir 'main.cjs'))
     $ownsNative = $serviceProcess.ExecutablePath -eq $native
-    if ($ownsNode -or $ownsNative) {
+    if ($ownsNative) {
       Stop-Process -Id $servicePid -Force -ErrorAction Stop
       Step 'Stopped the running service'
     }
   }
 }
 
-if ((Test-Path $cliExe) -and ((Test-Path $native) -or (Test-Path $cli))) {
+if (Test-Path $native) {
   if (-not $KeepCodexConfig -and (& $cliExe @cliPrefix status --no-open | Out-String).Trim() -eq 'BRIDGED') {
     Step 'Switching Codex back to its official login'
     & $cliExe @cliPrefix restore --no-open | Out-Host; if ($LASTEXITCODE -ne 0) { throw 'Could not restore the official Codex config; nothing was removed.' }

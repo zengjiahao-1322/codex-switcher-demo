@@ -1,13 +1,9 @@
 // 前端验收：切换直接发出（旧对话默认跟随，不再询问）、部分失败后继续同步、首屏与多窗口提示。
 const test = require('node:test'),
-  assert = require('node:assert/strict'),
-  fs = require('node:fs'),
-  os = require('node:os'),
-  path = require('node:path');
+  assert = require('node:assert/strict');
 const { runPage } = require('./fake-page.cjs');
-const { createService } = require('../src/server/service.cjs');
 
-// 页面读取的状态来自真实 service，只替换会启动或重启客户端的接口。
+// 页面测试的数据在本文件内构造。
 function backend({
   switchJob = null,
   desktopSwitch,
@@ -17,31 +13,18 @@ function backend({
   editors = [],
   editorRunning = false,
 } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-switch-ui-'));
-  fs.mkdirSync(path.join(root, 'codex'));
-  fs.mkdirSync(path.join(root, 'bridge'));
-  fs.writeFileSync(path.join(root, 'codex', 'config.toml'), 'model="gpt-5"\n');
-  fs.writeFileSync(
-    path.join(root, 'bridge', 'providers.json'),
-    JSON.stringify({
-      providers: [
-        {
-          id: 'api-1',
-          name: '测试 API',
-          baseUrl: 'https://api.example.com/v1',
-          apiMode: 'chat_completions',
-          model: 'model-a',
-          models: ['model-a'],
-        },
-      ],
-    }),
-  );
-  const service = createService({
-    codexHome: path.join(root, 'codex'),
-    bridgeHome: path.join(root, 'bridge'),
-  });
+  const state = {
+    current: { official: true, model: 'gpt-5' },
+    providers: [ { id: 'official', name: '官方', baseUrl: '' }, {
+      id: 'api-1', name: '测试 API', baseUrl: 'https://api.example.com/v1',
+      apiMode: 'chat_completions', model: 'model-a', models: ['model-a'], hasKey: false,
+    } ],
+    adapter: { autostart: false, ready: true, port: 1 }, dataDirProtection: { ok: true },
+    build: { version: '0.1.7-rc.3', id: 'fixture' },
+    update: { current: { version: '0.1.7-rc.3', build: 'fixture' }, latest: null, status: 'idle' },
+  };
   return async (route, body) => {
-    if (route === 'state') return { body: await service.state() };
+    if (route === 'state') return { body: state };
     if (route === 'accounts') return { body: { items: accounts, switchJob } };
     if (route === 'clients')
       return {

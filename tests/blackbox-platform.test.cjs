@@ -6,9 +6,8 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { startBackend } = require('./backend-process.cjs');
-const { isRust, rustBinary } = require('./backend.cjs');
+const { rustBinary } = require('./backend.cjs');
 const project = path.resolve(__dirname, '..');
-
 test('双后台样例对：系统代理转换与多安装序号决策', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-platform-vector-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -16,13 +15,7 @@ test('双后台样例对：系统代理转换与多安装序号决策', (t) => {
     const source = path.join(root, 'input.json'),
       target = path.join(root, 'output.json');
     fs.writeFileSync(source, JSON.stringify(input));
-    execFileSync(
-      isRust ? rustBinary() : process.execPath,
-      isRust
-        ? ['--algorithm-fixture', source, target]
-        : [path.join(__dirname, 'fixtures/diagnostics-algorithm.cjs'), source, target],
-      { windowsHide: true },
-    );
+    execFileSync(rustBinary(), ['--algorithm-fixture', source, target], { windowsHide: true });
     return JSON.parse(fs.readFileSync(target));
   }
   assert.deepEqual(
@@ -42,12 +35,11 @@ test('双后台样例对：系统代理转换与多安装序号决策', (t) => {
   assert.deepEqual(run({ op: 'windowsProxyEnv', value: { enabled: 0, server: 'fixture:8' } }), {});
   for (const [old, current, expected] of [
     [9, 10, 'stopped'],
-    [10, 10, isRust ? 'stopped' : 'deferred'],
+    [10, 10, 'stopped'],
     [11, 10, 'deferred'],
   ])
     assert.equal(run({ op: 'otherInstallAction', old, current }), expected);
 });
-
 function installation(sequence, discovery) {
   return ({ root, environment }) => {
     const install = path.join(root, 'install');
@@ -62,11 +54,8 @@ function installation(sequence, discovery) {
       process.platform === 'win32' ? 'junction' : 'dir',
     );
     const exe = path.join(install, process.platform === 'win32' ? 'switcher.exe' : 'switcher');
-    if (isRust) fs.copyFileSync(rustBinary(), exe);
-    fs.writeFileSync(
-      path.join(install, 'src/platform/release-info.json'),
-      JSON.stringify({ sequence }),
-    );
+    fs.copyFileSync(rustBinary(), exe);
+    fs.writeFileSync(path.join(install, 'release-info.json'), JSON.stringify({ sequence }));
     environment.SWITCHER_BLACKBOX_PROJECT = install;
     environment.SWITCHER_BLACKBOX_EXE = exe;
     environment.SWITCHER_WEB_ROOT = path.join(install, 'web');
@@ -79,7 +68,6 @@ function installation(sequence, discovery) {
     );
   };
 }
-
 test('双后台黑盒：BRIDGE_HOME等于默认数据目录时仍写默认发现文件', async (t) => {
   const f = await startBackend(t, {
     setup(input) {
@@ -112,7 +100,6 @@ test('双后台黑盒：BRIDGE_HOME等于默认数据目录时仍写默认发现
   const connection = path.join(f.environment.USERPROFILE, '.codex-api-switcher', 'connection.json');
   assert.equal(JSON.parse(fs.readFileSync(connection, 'utf8')).pid, f.child.pid);
 });
-
 test(
   '双后台黑盒：新序号且缺快捷方式时创建隔离桌面快捷方式',
   { skip: process.platform !== 'win32' },
@@ -145,7 +132,6 @@ test(
     assert.equal(fs.existsSync(link), true);
   },
 );
-
 test('双后台黑盒：仅从临时可信安装查找Codex，扩展版本按数字排序', async (t) => {
   let expected;
   const f = await startBackend(t, {
@@ -182,7 +168,6 @@ test('双后台黑盒：仅从临时可信安装查找Codex，扩展版本按数
   assert.equal(header.runtime.trusted, true);
   assert.equal(header.codexVersion, 'codex-fixture 0.1.0');
 });
-
 test('双后台黑盒：不同安装序号让位与升级交接，真实隔离PID停止', async (t) => {
   const old = await startBackend(t, { setup: installation(10) });
   const discovery = old.environment.BRIDGE_DISCOVERY_DIR;
@@ -214,7 +199,6 @@ test('双后台黑盒：不同安装序号让位与升级交接，真实隔离PI
     newer.child.pid,
   );
 });
-
 test('双后台黑盒：Insiders/Cursor及openai.codex扩展从真实临时安装路径发现', async (t) => {
   for (const [editor, id] of [
     ['.vscode-insiders', 'openai.chatgpt-1.10'],
@@ -252,7 +236,6 @@ test('双后台黑盒：Insiders/Cursor及openai.codex扩展从真实临时安�
     assert.equal(state.environment.codexTrusted, true);
   }
 });
-
 test('双后台样例对：显式代理优先且source为env', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-explicit-proxy-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -270,19 +253,12 @@ test('双后台样例对：显式代理优先且source为env', (t) => {
   ])
     delete env[key];
   env.HTTPS_PROXY = 'http://127.0.0.1:19090';
-  execFileSync(
-    isRust ? rustBinary() : process.execPath,
-    isRust
-      ? ['--algorithm-fixture', source, output]
-      : [path.join(__dirname, 'fixtures/diagnostics-algorithm.cjs'), source, output],
-    { env, windowsHide: true },
-  );
+  execFileSync(rustBinary(), ['--algorithm-fixture', source, output], { env, windowsHide: true });
   assert.deepEqual(JSON.parse(fs.readFileSync(output, 'utf8')), {
     source: 'env',
     env: { HTTPS_PROXY: 'http://127.0.0.1:19090', CODEX_HOME: root },
   });
 });
-
 test('双后台黑盒：启动收紧已有文件额外授权', async (t) => {
   let file;
   const f = await startBackend(t, {
@@ -307,7 +283,8 @@ test('双后台黑盒：启动收紧已有文件额外授权', async (t) => {
       [
         '-NoProfile',
         '-Command',
-        '(Get-Acl -LiteralPath $env:T).Access | ForEach-Object {$_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value}',
+        '(Get-Acl -LiteralPath $env:T).Access | ForEach-Object ' +
+          '{$_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value}',
       ],
       { env, encoding: 'utf8', windowsHide: true },
     )
@@ -321,7 +298,6 @@ test('双后台黑盒：启动收紧已有文件额外授权', async (t) => {
     assert.equal(fs.statSync(f.bridge).mode & 0o777, 0o700);
   }
 });
-
 test(
   '双后台黑盒：Codex.exe渲染子进程不计为另一个客户端',
   { skip: process.platform !== 'win32' },
@@ -336,7 +312,10 @@ test(
       exe,
       [
         '-e',
-        "const p=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{stdio:'ignore',windowsHide:true});console.log(p.pid);setTimeout(()=>{},30000)",
+        'const ' +
+          "p=require('child_process').spawn(process.execPath,['-e','setTim" +
+          "eout(()=>{},30000)'],{stdio:'ignore',windowsHide:true});console" +
+          '.log(p.pid);setTimeout(()=>{},30000)',
       ],
       {
         cwd: f.root,

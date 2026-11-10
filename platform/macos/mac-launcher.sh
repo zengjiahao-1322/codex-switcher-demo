@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 RESOURCES="$(cd "$(dirname "$0")/../.." && pwd)"
-# Finder 不继承终端环境，根据当前架构选用随包运行时。
+# 只运行当前支持的 macOS 架构。
 case "$(uname -m)" in
   arm64) ARCH=arm64 ;;
   x86_64) ARCH=x64 ;;
@@ -15,9 +15,5 @@ if [ -f "$DATA/runtime.env" ]; then
   source "$DATA/runtime.env"
 fi
 # 保留命令行参数，便于在精简环境中验证同一个应用入口。
-if [ -x "$RESOURCES/codex-switcher" ]; then
-  nohup "$RESOURCES/codex-switcher" "$@" >>"$DATA/service.log" 2>>"$DATA/service-error.log" </dev/null &
-else
-  nohup "$RESOURCES/runtime/$ARCH/node" "$RESOURCES/main.cjs" "$@" >>"$DATA/service.log" 2>>"$DATA/service-error.log" </dev/null &
-fi
+nohup "$RESOURCES/codex-switcher" "$@" >>"$DATA/service.log" 2>>"$DATA/service-error.log" </dev/null &
 exit 0

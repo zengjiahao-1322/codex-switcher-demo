@@ -58,7 +58,7 @@ async function prepare(root, home, bridge) {
   };
   write(scenario, data);
   fs.cpSync(path.join(project, 'web'), path.join(root, 'web'), { recursive: true });
-  write(path.join(root, 'src/platform/release-info.json'), { sequence: 7 });
+  write(path.join(root, 'release-info.json'), { sequence: 7 });
   const upstream = http.createServer(async (q, s) => {
     for await (const c of q) {
     }

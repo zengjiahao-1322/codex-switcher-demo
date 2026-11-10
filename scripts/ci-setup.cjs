@@ -1,7 +1,6 @@
 'use strict';
 const fs = require('node:fs'),
-  path = require('node:path'),
-  cp = require('node:child_process');
+  path = require('node:path');
 const pkg = process.env.CODEX_NPM_ROOT;
 if (!pkg) throw Error('CODEX_NPM_ROOT required');
 const platform = process.platform === 'darwin' ? 'apple-darwin' : 'pc-windows-msvc',
@@ -21,18 +20,4 @@ function find(dir) {
 const exe = find(path.join(pkg, '@openai'));
 if (!exe) throw Error('Native Codex executable missing under ' + pkg);
 fs.appendFileSync(process.env.GITHUB_ENV, 'CODEX_EXE=' + exe + '\n');
-if (process.platform === 'darwin') {
-  fs.mkdirSync('bin', { recursive: true });
-  cp.execFileSync('clang', [
-    '-O2',
-    '-Wall',
-    '-Wextra',
-    '-mmacosx-version-min=12.0',
-    'platform/macos/mac-process-context.c',
-    '-o',
-    'bin/mac-process-context',
-  ]);
-} else if (process.platform === 'win32') {
-  cp.execFileSync(process.execPath, ['scripts/build-windows-helper.cjs'], { stdio: 'inherit' });
-}
-console.log('Native Codex located; platform helper ready.');
+console.log('Native Codex located.');

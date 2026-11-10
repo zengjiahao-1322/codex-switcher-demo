@@ -5,10 +5,6 @@ edition = "2024"
 publish = false
 default-run = "codex-switcher"
 
-[[bin]]
-name = "upgrade-bridge"
-path = "src/bin/upgrade-bridge.rs"
-
 [dependencies]
 tokio = { version = "=1.43.0", features = ["net", "rt", "macros", "time", "process", "io-util", "sync", "signal"] }
 hyper = { version = "=1.6.0", features = ["server", "client", "http1"] }

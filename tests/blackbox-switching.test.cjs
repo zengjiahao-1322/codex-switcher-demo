@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'),
   path = require('node:path');
 const { startBackend } = require('./backend-process.cjs');
-const { api } = require('./config-blackbox-helpers.cjs');
+const { api, serve, responseTool } = require('./config-blackbox-helpers.cjs');
 const { auth, accountId, until } = require('./official-blackbox-helpers.cjs');
 const provider = {
   id: 'fixture-provider',
@@ -40,15 +40,15 @@ function registration() {
   };
 }
 test('双后台切换黑盒：远端独立remoteSwitch通过真实HTTP心跳读写并保留本机文件', async (t) => {
-  let providerId;
-  const f = await startBackend(t, {
-    setup({ bridge }) {
-      const store = require('../src/config/providers.cjs');
-      providerId = store.add(bridge, provider);
-      const saved = store.list(bridge).find((item) => item.id === providerId);
-      store.recordProbe(bridge, saved, 'remote-model', 'direct', 'fixture-direct');
-    },
+  const f = await startBackend(t);
+  const upstream = await serve(t, (_request, response) =>
+    response.end(JSON.stringify(responseTool)),
+  );
+  const { id: providerId } = await api(f, 'providerAdd', {
+    ...provider,
+    baseUrl: upstream.url + '/v1',
   });
+  await api(f, 'probe', { id: providerId, model: 'remote-model' });
   fs.writeFileSync(path.join(f.home, 'config.toml'), 'model="local"\nmodel_provider="openai"\n');
   const localConfig = fs.readFileSync(path.join(f.home, 'config.toml'), 'utf8');
   const input = registration();

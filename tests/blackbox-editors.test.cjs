@@ -6,7 +6,6 @@ const { test } = require('node:test'),
 const { startBackend } = require('./backend-process.cjs');
 const { api, isolatedEditor } = require('./config-blackbox-helpers.cjs');
 const { until } = require('./official-blackbox-helpers.cjs');
-const { isRust } = require('./backend.cjs');
 test('窗口黑盒：真实父子PID关联、独立目录隔离、对应重载编号和失败回报', async (t) => {
   const f = await startBackend(t);
   await isolatedEditor(t, f);
@@ -119,7 +118,8 @@ test('长轮询黑盒：超过15秒租期有效、外部写命令唤醒、断开
   await one;
   const started = performance.now();
   row.command = { id: 'surviving-command', type: 'reload' };
-  require('../src/accounts/accounts.cjs').writeJson(file('waiting-window-two'), row);
+  fs.writeFileSync(file('waiting-window-two') + '.tmp', JSON.stringify(row), { mode: 0o600 });
+  fs.renameSync(file('waiting-window-two') + '.tmp', file('waiting-window-two'));
   const returned = await (await two).json();
   assert.equal(returned.command.id, 'surviving-command');
   const wakeElapsed = performance.now() - started;
@@ -184,7 +184,7 @@ test('心跳黑盒：非可信程序路径不入库，SSH公开字段去除正�
     .map(JSON.parse);
   assert.equal(logs.filter((e) => e.event === 'remote.agent').length, 1);
   await api(f, 'clientHeartbeat', { ...input, id: '../../escape' }, 400);
-  if (isRust) {
+  {
     const denied = await f.request('/api/clientHeartbeat', {
       method: 'POST',
       headers: {

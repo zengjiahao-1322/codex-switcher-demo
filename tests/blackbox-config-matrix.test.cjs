@@ -4,7 +4,6 @@ const assert = require('node:assert/strict'),
   fs = require('node:fs'),
   path = require('node:path');
 const { startBackend } = require('./backend-process.cjs');
-const { isRust } = require('./backend.cjs');
 const provider = {
   name: 'Mine',
   baseUrl: 'https://api.example.com/v1/',
@@ -26,7 +25,12 @@ function hermes(f) {
   fs.writeFileSync(path.join(home, '.env'), 'export API_SECRET="hk"\n');
   fs.writeFileSync(
     path.join(home, 'config.yaml'),
-    'providers:\n  "custom:h1":\n    name: H1\n    base_url: https://h/v1\n    api_key: ${API_SECRET}\n    api_mode: chat_completions\n    model: m\n    models: [m]\n  "custom:local":\n    name: Local\n    base_url: http://127.0.0.1:8317/v1\n    api_mode: chat_completions\n    model: x\n',
+    'providers:\n  "custom:h1":\n    name: H1\n    base_url: ' +
+      'https://h/v1\n    api_key: ${API_SECRET}\n    api_mode: ' +
+      'chat_completions\n    model: m\n    models: [m]\n  ' +
+      '"custom:local":\n    name: Local\n    base_url: ' +
+      'http://127.0.0.1:8317/v1\n    api_mode: chat_completions\n    ' +
+      'model: x\n',
   );
   return home;
 }
@@ -43,7 +47,7 @@ test('配置对照/providers：add, edit (blank key keeps old), delete custom pr
         id,
         origin: 'custom',
         createdAt: p.createdAt,
-        ...(isRust ? { pricing: { mode: 'official' }, usageUrl: null } : {}),
+        ...{ pricing: { mode: 'official' }, usageUrl: null },
       },
     ],
     hermesImported: false,
@@ -65,7 +69,7 @@ test('配置对照/providers：add, edit (blank key keeps old), delete custom pr
       origin: 'custom',
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
-      ...(isRust ? { pricing: { mode: 'official' }, usageUrl: null } : {}),
+      ...{ pricing: { mode: 'official' }, usageUrl: null },
     },
   ]);
   assert.deepEqual([p.apiKey, p.name], ['sk-1', 'Mine2']);
@@ -94,35 +98,44 @@ test('配置对照/providers：validation rejects bad input and duplicate names'
   await api(f, 'providerUpdate', { id, apiKey: 'a b' }, 400);
   assert.deepEqual(fs.readFileSync(path.join(f.bridge, 'providers.json')), before);
 });
-test('配置对照/providers：Hermes import copies providers (same ids, keyless allowed); imported ones are fully editable and deletable', async (t) => {
-  const f = await startBackend(t);
-  hermes(f);
-  await api(f, 'importHermes', {});
-  assert.deepEqual(
-    disk(f).providers.map((p) => [p.id, p.origin, p.apiKey]),
-    [
-      ['custom:h1', 'hermes', 'hk'],
-      ['custom:local', 'hermes', ''],
-    ],
-  );
-  await api(f, 'providerUpdate', { id: 'custom:h1', name: 'H1 改名', model: 'm2' });
-  assert.deepEqual([disk(f).providers[0].name, disk(f).providers[0].apiKey], ['H1 改名', 'hk']);
-  await api(f, 'providerUpdate', { id: 'custom:local', name: 'Local2' });
-  await api(f, 'providerRemove', { id: 'custom:h1' });
-  assert.equal(disk(f).providers.length, 1);
-});
-test('配置对照/providers：auto import runs once and never resurrects deleted entries; manual import brings them back', async (t) => {
-  const f = await startBackend(t);
-  hermes(f);
-  await api(f, 'state');
-  await api(f, 'providerRemove', { id: 'custom:h1' });
-  await api(f, 'state');
-  assert.equal(disk(f).providers.length, 1);
-  assert.deepEqual(disk(f).skippedHermes, ['custom:h1']);
-  await api(f, 'importHermes', {});
-  assert.equal(disk(f).providers.length, 2);
-  assert.deepEqual(disk(f).skippedHermes, []);
-});
+test(
+  '配置对照/providers：Hermes import copies providers (same ids, ' +
+    'keyless allowed); imported ones are fully editable and ' +
+    'deletable',
+  async (t) => {
+    const f = await startBackend(t);
+    hermes(f);
+    await api(f, 'importHermes', {});
+    assert.deepEqual(
+      disk(f).providers.map((p) => [p.id, p.origin, p.apiKey]),
+      [
+        ['custom:h1', 'hermes', 'hk'],
+        ['custom:local', 'hermes', ''],
+      ],
+    );
+    await api(f, 'providerUpdate', { id: 'custom:h1', name: 'H1 改名', model: 'm2' });
+    assert.deepEqual([disk(f).providers[0].name, disk(f).providers[0].apiKey], ['H1 改名', 'hk']);
+    await api(f, 'providerUpdate', { id: 'custom:local', name: 'Local2' });
+    await api(f, 'providerRemove', { id: 'custom:h1' });
+    assert.equal(disk(f).providers.length, 1);
+  },
+);
+test(
+  '配置对照/providers：auto import runs once and never resurrects ' +
+    'deleted entries; manual import brings them back',
+  async (t) => {
+    const f = await startBackend(t);
+    hermes(f);
+    await api(f, 'state');
+    await api(f, 'providerRemove', { id: 'custom:h1' });
+    await api(f, 'state');
+    assert.equal(disk(f).providers.length, 1);
+    assert.deepEqual(disk(f).skippedHermes, ['custom:h1']);
+    await api(f, 'importHermes', {});
+    assert.equal(disk(f).providers.length, 2);
+    assert.deepEqual(disk(f).skippedHermes, []);
+  },
+);
 test('配置对照/providers：import renames on name clash with existing custom entry', async (t) => {
   const f = await startBackend(t);
   await api(f, 'providerAdd', { ...provider, name: 'H1' });
@@ -160,30 +173,36 @@ test('配置对照/core：discover redacts malformed YAML parser diagnostics', a
   assert.equal(result.error.includes('fixture-secret'), false);
   assert.equal(fs.existsSync(path.join(f.bridge, 'providers.json')), false);
 });
-test('配置样例/core：discover resolves dotenv and current provider and removes keys publicly', async (t) => {
-  const f = await startBackend(t),
-    home = f.environment.BRIDGE_HERMES_HOME;
-  fs.mkdirSync(home);
-  fs.writeFileSync(path.join(home, '.env'), 'API_SECRET="fixture-secret"\n');
-  fs.writeFileSync(
-    path.join(home, 'config.yaml'),
-    'providers:\n  p:\n    name: Local\n    base_url: http://localhost:9000/v1\n    api_key: ${API_SECRET}\n    api_mode: responses\n    model: old\n    models:\n      old: {}\n      new: {}\nmodel:\n  provider: p\n  default: new\n',
-  );
-  const actual = require('./config-blackbox-helpers.cjs').algorithm(t, {
-    op: 'discoverProviders',
-    home,
-  });
-  const p = {
-    id: 'p',
-    name: 'Local',
-    active: true,
-    baseUrl: 'http://localhost:9000/v1',
-    model: 'new',
-    models: ['old', 'new'],
-    apiMode: 'responses',
-    apiKey: 'fixture-secret',
-  };
-  const { apiKey, ...publicProvider } = p;
-  assert.deepEqual(actual, { providers: [p], public: [publicProvider] });
-  assert.equal(JSON.stringify(actual.public).includes(apiKey), false);
-});
+test(
+  '配置样例/core：discover resolves dotenv and current provider and ' + 'removes keys publicly',
+  async (t) => {
+    const f = await startBackend(t),
+      home = f.environment.BRIDGE_HERMES_HOME;
+    fs.mkdirSync(home);
+    fs.writeFileSync(path.join(home, '.env'), 'API_SECRET="fixture-secret"\n');
+    fs.writeFileSync(
+      path.join(home, 'config.yaml'),
+      'providers:\n  p:\n    name: Local\n    base_url: ' +
+        'http://localhost:9000/v1\n    api_key: ${API_SECRET}\n    ' +
+        'api_mode: responses\n    model: old\n    models:\n      old: ' +
+        '{}\n      new: {}\nmodel:\n  provider: p\n  default: new\n',
+    );
+    const actual = require('./config-blackbox-helpers.cjs').algorithm(t, {
+      op: 'discoverProviders',
+      home,
+    });
+    const p = {
+      id: 'p',
+      name: 'Local',
+      active: true,
+      baseUrl: 'http://localhost:9000/v1',
+      model: 'new',
+      models: ['old', 'new'],
+      apiMode: 'responses',
+      apiKey: 'fixture-secret',
+    };
+    const { apiKey, ...publicProvider } = p;
+    assert.deepEqual(actual, { providers: [p], public: [publicProvider] });
+    assert.equal(JSON.stringify(actual.public).includes(apiKey), false);
+  },
+);

@@ -421,7 +421,7 @@ pub fn desktop(discovery: &Path, sequence: u64) -> io::Result<()> {
         let link = directory_path.join("Codex API Switcher.lnk");
         if link.exists() {
             let old = windows::shortcut_directory(&link)?;
-            let release: serde_json::Value = fs::read(old.join("src/platform/release-info.json"))
+            let release: serde_json::Value = fs::read(old.join("release-info.json"))
                 .ok()
                 .and_then(|bytes| serde_json::from_slice(&bytes).ok())
                 .unwrap_or(serde_json::Value::Null);

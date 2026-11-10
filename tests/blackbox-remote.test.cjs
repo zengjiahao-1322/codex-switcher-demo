@@ -6,7 +6,7 @@ const assert = require('node:assert/strict'),
   crypto = require('node:crypto');
 const toml = require('smol-toml');
 const { startBackend } = require('./backend-process.cjs');
-const { api } = require('./config-blackbox-helpers.cjs');
+const { api, serve, responseTool } = require('./config-blackbox-helpers.cjs');
 const { auth, accountId, until } = require('./official-blackbox-helpers.cjs');
 const version = require('../package.json').version;
 const sha = (text) => crypto.createHash('sha256').update(text).digest('hex');
@@ -32,28 +32,20 @@ const registration = (id = 'remote-matrix-window') => ({
   },
 });
 async function fixture(t, setup) {
-  let providerId;
-  const f = await startBackend(t, {
-    setup(context) {
-      const store = require('../src/config/providers.cjs');
-      providerId = store.add(context.bridge, {
-        name: 'Remote fixture',
-        apiMode: 'responses',
-        baseUrl: 'https://example.test/v1',
-        apiKey: 'arbitrary-remote-key-PRIVATE',
-        model: 'm',
-        models: ['m'],
-      });
-      store.recordProbe(
-        context.bridge,
-        store.list(context.bridge).find((p) => p.id === providerId),
-        'm',
-        'direct',
-        'fixture',
-      );
-      if (setup) setup(context);
-    },
+  const f = await startBackend(t, { setup });
+  const upstream = await serve(t, (_request, response) =>
+    response.end(JSON.stringify(responseTool)),
+  );
+  f.providerBaseUrl = upstream.url + '/v1';
+  const { id: providerId } = await api(f, 'providerAdd', {
+    name: 'Remote fixture',
+    apiMode: 'responses',
+    baseUrl: f.providerBaseUrl,
+    apiKey: 'arbitrary-remote-key-PRIVATE',
+    model: 'm',
+    models: ['m'],
   });
+  await api(f, 'probe', { id: providerId, model: 'm' });
   f.providerId = providerId;
   f.switch = (input, extra = {}) =>
     api(f, 'remoteSwitch', { authority: input.authority, providerId, model: 'm', ...extra });
@@ -92,7 +84,14 @@ test('远端黑盒：同组只写一次、保留全文设置、另一窗口重�
   assert.equal(write.expectedSha256, sha(original));
   assert.equal(
     write.text,
-    'model = "m"\nmodel_provider = "hermes_bridge"\n[projects."/srv/keep"]\ntrust_level="trusted"\n[model_providers.hermes_bridge]\nname = "Remote fixture"\nbase_url = "https://example.test/v1"\nwire_api = "responses"\nexperimental_bearer_token = "arbitrary-remote-key-PRIVATE"\nrequires_openai_auth = false\n',
+    'model = "m"\nmodel_provider = "hermes_bridge"\n' +
+      '[projects."/srv/keep"]\ntrust_level="trusted"\n' +
+      '[model_providers.hermes_bridge]\nname = "Remote fixture"\n' +
+      'base_url = "' +
+      f.providerBaseUrl +
+      ('"\nwire_api = "responses"\nexperimental_bearer_token = ' +
+        '"arbitrary-remote-key-PRIVATE"\nrequires_openai_auth = ' +
+        'false\n'),
   );
   await ack(f, first, write, {
     ok: true,
@@ -192,7 +191,8 @@ test('远端黑盒：官方账号读写auth并拒绝keyring，保持本机配置
   let pending = api(f, 'remoteSwitch', options);
   let cmd = await command(f, input);
   const original =
-    'model="old-api"\nmodel_provider="hermes_bridge"\n[model_providers.hermes_bridge]\nname="keep-table"\n';
+    'model="old-api"\nmodel_provider="hermes_bridge"\n' +
+    '[model_providers.hermes_bridge]\nname="keep-table"\n';
   await ack(f, input, cmd, { text: original, sha256: sha(original) });
   cmd = await command(f, input);
   assert.equal(cmd.step, 'readAuth');

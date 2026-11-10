@@ -111,19 +111,16 @@ async function finishJob(f) {
 function algorithm(t, input, environment = {}) {
   const os = require('node:os'),
     { execFileSync } = require('node:child_process');
-  const { isRust, rustBinary } = require('./backend.cjs');
+  const { rustBinary } = require('./backend.cjs');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switcher-config-algorithm-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const source = path.join(root, 'input.json'),
     target = path.join(root, 'output.json');
   fs.writeFileSync(source, JSON.stringify(input));
-  execFileSync(
-    isRust ? rustBinary() : process.execPath,
-    isRust
-      ? ['--algorithm-fixture', source, target]
-      : [path.join(__dirname, 'fixtures/diagnostics-algorithm.cjs'), source, target],
-    { windowsHide: true, env: { ...process.env, ...environment } },
-  );
+  execFileSync(rustBinary(), ['--algorithm-fixture', source, target], {
+    windowsHide: true,
+    env: { ...process.env, ...environment },
+  });
   return JSON.parse(fs.readFileSync(target, 'utf8'));
 }
 async function interfere(t, f, directory, prefix) {

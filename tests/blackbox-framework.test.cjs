@@ -1,12 +1,10 @@
 'use strict';
-
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { startBackend } = require('./backend-process.cjs');
-
-test('双后台黑盒：没有runtime接口的旧后台通过accounts鉴权与PID归属核实后交接', async (t) => {
+test('双后台黑盒：Rust不再接管旧Node后台，Node保持原交接', async (t) => {
   let legacy, closed;
   const f = await startBackend(t, {
     async setup({ root, bridge, environment }) {
@@ -18,12 +16,17 @@ test('双后台黑盒：没有runtime接口的旧后台通过accounts鉴权与PI
       );
       fs.writeFileSync(
         entry,
-        `const http=require('node:http');http.createServer((req,res)=>{
-      if(req.url==='/'){res.end('legacy fixture');return;}
-      if(req.headers.authorization!=='Bearer legacy-fixture-token'){res.writeHead(401);res.end('{}');return;}
-      if(req.url==='/api/accounts'&&req.method==='POST'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({items:[],switchJob:null}));return;}
-      res.writeHead(404);res.end('{}');
-    }).listen(Number(process.env.BRIDGE_PORT),'127.0.0.1',()=>console.log('legacy-ready'));`,
+        "const http=require('node:http');http.createServer((req,res)=>{" +
+          '\n' +
+          "      if(req.url==='/'){res.end('legacy fixture');return;}\n" +
+          "      if(req.headers.authorization!=='Bearer legacy-fixture-tok" +
+          "en'){res.writeHead(401);res.end('{}');return;}\n" +
+          "      if(req.url==='/api/accounts'&&req.method==='POST'){res.se" +
+          "tHeader('Content-Type','application/json');res.end(JSON.stringi" +
+          'fy({items:[],switchJob:null}));return;}\n' +
+          "      res.writeHead(404);res.end('{}');\n" +
+          "    }).listen(Number(process.env.BRIDGE_PORT),'127.0.0.1',()=>c" +
+          "onsole.log('legacy-ready'));",
       );
       legacy = require('node:child_process').spawn(process.execPath, [entry], {
         env: environment,
@@ -46,12 +49,13 @@ test('双后台黑盒：没有runtime接口的旧后台通过accounts鉴权与PI
       );
     },
   });
-  await closed;
-  assert.ok(legacy.exitCode !== null || legacy.signalCode !== null);
+  {
+    assert.equal(legacy.exitCode, null);
+    assert.equal(legacy.signalCode, null);
+  }
   assert.equal((await (await f.api('runtime')).json()).pid, f.child.pid);
   assert.equal(JSON.parse(fs.readFileSync(path.join(f.bridge, 'running.json'))).pid, f.child.pid);
 });
-
 test('双后台黑盒：临时开机自启文件启用禁用和首次空配置启动', async (t) => {
   const f = await startBackend(t, { missingConfig: true });
   assert.equal((await f.api('state')).status, 200);
@@ -68,7 +72,6 @@ test('双后台黑盒：临时开机自启文件启用禁用和首次空配置�
   assert.equal((await f.api('autostart', { enabled: false })).status, 200);
   assert.equal(fs.existsSync(file), false);
 });
-
 test('双后台黑盒：选择配置目录与非可信Codex路径需要明确确认', async (t) => {
   const f = await startBackend(t);
   const home = path.join(f.root, '中文 配置');
@@ -82,7 +85,6 @@ test('双后台黑盒：选择配置目录与非可信Codex路径需要明确确
   assert.equal(settings.codexHome, home);
   assert.equal(settings.approvedCodexPath, fs.realpathSync(input.codexExe));
 });
-
 test('双后台黑盒：页面公开、Bearer换会话、Cookie和Origin/Host隔离', async (t) => {
   const f = await startBackend(t);
   const page = await f.request('/');
@@ -119,7 +121,6 @@ test('双后台黑盒：页面公开、Bearer换会话、Cookie和Origin/Host隔
   });
   assert.equal(hostStatus, 403);
 });
-
 test('双后台黑盒：静态模块与CSP、缓存及路径边界', async (t) => {
   const f = await startBackend(t);
   const page = await f.request('/');
@@ -134,7 +135,6 @@ test('双后台黑盒：静态模块与CSP、缓存及路径边界', async (t) =
   assert.equal((await f.request('/package.json')).status, 404);
   assert.equal((await f.request('/%2e%2e%5cpackage.json')).status, 404);
 });
-
 test('双后台黑盒：GET state读取隔离配置且返回可用运行摘要', async (t) => {
   const f = await startBackend(t);
   fs.writeFileSync(
@@ -166,7 +166,6 @@ test('双后台黑盒：GET state读取隔离配置且返回可用运行摘要',
   assert.equal(state.codexVersion, 'codex-fixture 0.1.0');
   assert.equal(state.mcp.installed, false);
 });
-
 test('双后台黑盒：反复刷新state复用同一程序的版本查询', async (t) => {
   const f = await startBackend(t, {
     setup({ root, environment }) {
@@ -183,7 +182,6 @@ test('双后台黑盒：反复刷新state复用同一程序的版本查询', asy
     1,
   );
 });
-
 test('双后台黑盒：API方法、JSON类型、正文大小和解析错误保持Node协议', async (t) => {
   const f = await startBackend(t);
   const headers = { Authorization: 'Bearer ' + f.token };
@@ -202,7 +200,6 @@ test('双后台黑盒：API方法、JSON类型、正文大小和解析错误保�
   assert.equal((await post(JSON.stringify({ text: '中'.repeat(6000) }))).status, 413);
   assert.equal((await f.api('runtime')).status, 200, '拒绝请求后服务仍可用');
 });
-
 test('双后台黑盒：启动运行记录与HTTP runtime一致且重复启动复用原实例', async (t) => {
   const f = await startBackend(t);
   const runningFile = path.join(f.bridge, 'running.json');
@@ -228,7 +225,6 @@ test('双后台黑盒：启动运行记录与HTTP runtime一致且重复启动�
   assert.deepEqual(JSON.parse(fs.readFileSync(runningFile, 'utf8')), running);
   assert.equal((await f.api('runtime')).status, 200);
 });
-
 test('双后台黑盒：VSIX下载凭一次性URL且取回后失效', async (t) => {
   const f = await startBackend(t);
   const result = await (await f.api('companionPackage', {})).json();
@@ -243,7 +239,6 @@ test('双后台黑盒：VSIX下载凭一次性URL且取回后失效', async (t) 
   assert.ok(archive.includes(Buffer.from('extension/extension.cjs')));
   assert.equal((await f.request(result.url)).status, 404);
 });
-
 test('双后台黑盒：clients动作通过HTTP返回隔离进程清单和运行程序摘要', async (t) => {
   const f = await startBackend(t);
   const child = require('node:child_process').spawn(f.environment.CODEX_EXE, ['app-server'], {
@@ -281,7 +276,6 @@ test('双后台黑盒：clients动作通过HTTP返回隔离进程清单和运行
   assert.ok(row.chain.some((value) => value.startsWith(child.pid + ':')));
   assert.ok(row.chain.some((value) => value.startsWith(process.pid + ':')));
 });
-
 test('双后台黑盒：固定端口交接只停止同安装隔离后台，外部占用回退随机端口', async (t) => {
   const prior = await startBackend(t);
   const closed = require('node:events').once(prior.child, 'close');

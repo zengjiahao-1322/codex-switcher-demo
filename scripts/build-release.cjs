@@ -11,127 +11,27 @@ const project = path.resolve(__dirname, '..'),
   ),
   macArch =
     options.find((value) => value.startsWith('--arch='))?.slice(7) ||
-    (options.includes('--backend=rust') ? process.arch : 'universal');
-const nativeRelease = options.includes('--backend=rust');
+    process.arch;
 const binaryDir = process.env.SWITCHER_RUST_BIN_DIR || path.join(project, 'rust/target/release');
-const files = require('../release-files.json'),
-  version = require('../package.json').version,
-  nodeVersion = 'v22.22.0';
+const version = require('../package.json').version;
 const sequence = Number(process.env.GITHUB_RUN_NUMBER);
 if (!Number.isSafeInteger(sequence) || sequence <= 0)
   throw Error('GITHUB_RUN_NUMBER 必须为正整数，用作发行序号。');
 const cache = path.join(project, '.build-cache');
 fs.mkdirSync(cache, { recursive: true });
 fs.mkdirSync(out, { recursive: true });
-async function download(url, file) {
-  if (fs.existsSync(file)) return;
-  const response = await fetch(url, { signal: AbortSignal.timeout(240000) });
-  if (!response.ok) throw Error('Download failed: ' + url + ' HTTP ' + response.status);
-  fs.writeFileSync(file, Buffer.from(await response.arrayBuffer()));
-}
-function walk(dir, prefix = '') {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
-    const name = prefix + e.name,
-      file = path.join(dir, e.name);
-    if (e.isSymbolicLink()) throw Error('Unexpected symlink ' + name);
-    return e.isDirectory() ? walk(file, name + '/') : [{ name, file }];
-  });
-}
-function sourceEntries(prefix = '') {
-  return files
-    .map((name) =>
-      name === 'src/platform/release-info.json'
-        ? {
-            name: prefix + name,
-            data: require('../src/platform/build-info.cjs').releaseInfo(sequence),
-          }
-        : { name: prefix + name, file: path.join(project, name) },
-    )
-    .concat(
-      ['smol-toml', 'yaml'].flatMap((dep) =>
-        walk(path.join(project, 'node_modules', dep), 'node_modules/' + dep + '/').map((e) => ({
-          ...e,
-          name: prefix + e.name,
-        })),
-      ),
-    );
-}
-async function runtime(platform, arch) {
-  const name = `node-${nodeVersion}-${platform}-${arch}`,
-    ext = platform === 'win' ? 'zip' : 'tar.gz',
-    archive = name + '.' + ext,
-    file = path.join(cache, archive),
-    dir = path.join(cache, name);
-  await download(`https://nodejs.org/dist/${nodeVersion}/${archive}`, file);
-  const sums = await fetch(`https://nodejs.org/dist/${nodeVersion}/SHASUMS256.txt`).then((r) => {
-    if (!r.ok) throw Error('Checksums unavailable');
-    return r.text();
-  });
-  const expected = sums
-    .split('\n')
-    .find((l) => l.trim().endsWith('  ' + archive))
-    ?.split(/\s+/)[0];
-  if (
-    !expected ||
-    crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== expected
-  )
-    throw Error('Runtime checksum mismatch: ' + archive);
-  const exe = path.join(dir, platform === 'win' ? 'node.exe' : 'bin/node');
-  if (!fs.existsSync(exe))
-    cp.execFileSync(process.platform === 'win32' ? 'tar.exe' : 'tar', ['-xf', file, '-C', cache]);
-  return { exe, license: path.join(dir, 'LICENSE') };
-}
 (async () => {
   let entries, filename;
   if (target === 'win32') {
-    if (nativeRelease) {
-      entries = require('./rust-release.cjs').entries(
-        'Codex Switcher/',
-        sequence,
-        target,
-        'x64',
-        binaryDir,
-      );
-    } else {
-      const r = await runtime('win', 'x64');
-      cp.execFileSync(
-        process.execPath,
-        [path.join(project, 'scripts', 'build-windows-helper.cjs')],
-        {
-          stdio: 'inherit',
-        },
-      );
-      entries = sourceEntries('Codex Switcher/');
-      entries.push(
-        { name: 'Codex Switcher/runtime/node.exe', file: r.exe },
-        { name: 'Codex Switcher/runtime/NODE-LICENSE', file: r.license },
-        {
-          name: 'Codex Switcher/bin/process-context.exe',
-          file: path.join(project, 'bin', 'process-context.exe'),
-        },
-      );
-    }
+    entries = require('./rust-release.cjs').entries(
+      'Codex Switcher/', sequence, target, 'x64', binaryDir,
+    );
     filename = 'codex-switcher-windows-x64.zip';
   } else if (target === 'darwin') {
     if (process.platform !== 'darwin')
       throw Error('Build the macOS native helper on a macOS host.');
     if (!['arm64', 'x64', 'universal'].includes(macArch))
       throw Error('Unsupported Mac architecture');
-    const native = path.join(cache, 'mac-process-context');
-    // 固定最低系统版本，避免助手继承构建机的 macOS 26 要求，导致旧系统无法启动。
-    cp.execFileSync('clang', [
-      '-O2',
-      '-Wall',
-      '-Wextra',
-      '-mmacosx-version-min=12.0',
-      '-arch',
-      'arm64',
-      '-arch',
-      'x86_64',
-      path.join(project, 'platform/macos/mac-process-context.c'),
-      '-o',
-      native,
-    ]);
     const launcher = path.join(cache, 'mac-launcher');
     cp.execFileSync('clang', [
       '-O2',
@@ -148,11 +48,8 @@ async function runtime(platform, arch) {
     ]);
     const bundle = 'Codex Switcher.app/Contents/',
       resources = bundle + 'Resources/';
-    entries = nativeRelease
-      ? require('./rust-release.cjs').entries(resources, sequence, target, macArch, binaryDir)
-      : sourceEntries(resources);
+    entries = require('./rust-release.cjs').entries(resources, sequence, target, macArch, binaryDir);
     entries.push(
-      { name: resources + 'bin/mac-process-context', file: native, mode: 0o100755 },
       { name: resources + 'AppIcon.icns', file: path.join(project, 'platform/macos/AppIcon.icns') },
       {
         name: bundle + 'MacOS/CodexSwitcher',
@@ -165,18 +62,6 @@ async function runtime(platform, arch) {
         mode: 0o100755,
       },
     );
-    // 按芯片发行时只带一套 Node，避免每个用户下载另一种芯片的运行时。
-    for (const arch of nativeRelease
-      ? []
-      : macArch === 'universal'
-        ? ['arm64', 'x64']
-        : [macArch]) {
-      const r = await runtime('darwin', arch);
-      entries.push(
-        { name: resources + `runtime/${arch}/node`, file: r.exe, mode: 0o100755 },
-        { name: resources + `runtime/${arch}/NODE-LICENSE`, file: r.license },
-      );
-    }
     entries.push({
       name: bundle + 'Info.plist',
       data: `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleName</key><string>Codex Switcher</string><key>CFBundleIdentifier</key><string>com.codex-switcher.demo</string><key>CFBundleExecutable</key><string>CodexSwitcher</string><key>CFBundleIconFile</key><string>AppIcon</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${version}</string><key>LSMinimumSystemVersion</key><string>12.0</string><key>LSUIElement</key><true/></dict></plist>`,
@@ -197,18 +82,8 @@ async function runtime(platform, arch) {
         fs.chmodSync(file, (entry.mode || 0o100644) & 0o777);
       }
       const app = path.join(stage, 'Codex Switcher.app');
-      if (nativeRelease) {
-        for (const file of [
-          path.join(app, 'Contents/Resources/codex-switcher'),
-          path.join(app, `Contents/Resources/runtime/${macArch}/node`),
-        ])
-          cp.execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', file]);
-      }
       cp.execFileSync('/usr/bin/codesign', [
-        '--force',
-        '--sign',
-        '-',
-        path.join(app, 'Contents', 'Resources', 'bin', 'mac-process-context'),
+        '--force', '--sign', '-', path.join(app, 'Contents/Resources/codex-switcher'),
       ]);
       cp.execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', app]);
       cp.execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
@@ -217,13 +92,13 @@ async function runtime(platform, arch) {
       fs.rmSync(stage, { recursive: true, force: true });
     }
   } else {
-    require('../src/shared/zip.cjs').zip(entries, artifact);
+    require('./lib/zip.cjs').zip(entries, artifact);
   }
   const digest = crypto.createHash('sha256').update(fs.readFileSync(artifact)).digest('hex');
   fs.writeFileSync(artifact + '.sha256', digest + '  ' + filename + '\n');
   if (target === 'win32') {
     // 两份扩展均为跨平台小包；由Windows任务提供独立下载，所有平台包都带可离线构建的源码。
-    const integration = require('../src/clients/editor-integration.cjs');
+    const integration = require('./lib/vsix.cjs');
     for (const [name, build] of [
       ['codex-switcher-companion.vsix', integration.build],
       ['codex-switcher-remote.vsix', integration.buildRemote],
