@@ -316,8 +316,33 @@ async function validate() {
     security('list-keychains', '-d', 'user', '-s', temporaryKeychain, ...originalSearch);
     await start(ctx);
     const accounts = await api(ctx, 'accounts', {});
-    assert.ok(accounts.items.some((item) => item.current && item.email === 'keychain@example.test'),
-      'Synthetic keychain account missing from Rust account summaries');
+    const found = accounts.items.some(
+      (item) => item.current && item.email === 'keychain@example.test',
+    );
+    if (!found) {
+      // Match the backend's command, store key and environment. stdout contains
+      // the synthetic credential, so retain only its exit status and presence.
+      const probe = (env) => {
+        const result = cp.spawnSync('/usr/bin/security', [
+          'find-generic-password', '-s', 'Codex Auth', '-a', storeKey, '-w',
+        ], { env, encoding: 'utf8', timeout: 10000 });
+        return {
+          exitCode: result.status,
+          read: result.status === 0 && Boolean(result.stdout?.trim()),
+          signal: result.signal,
+          errorCode: result.error?.code ?? null,
+        };
+      };
+      const diagnostics = {
+        accounts: accounts.items.map(({ email, current }) => ({ email, current })),
+        notice: accounts.credentialsNotice ?? null,
+        securityBackendEnv: probe(ctx.env),
+        securityScriptEnv: probe(process.env),
+      };
+      report.checks.find((row) => row.name === activeCheck).diagnostics = diagnostics;
+      assert.fail('Synthetic keychain account missing from Rust account summaries: '
+        + JSON.stringify(diagnostics));
+    }
     assert.equal(exists(path.join(ctx.codexHome, 'auth.json')), false);
     await stop(ctx);
     return { email: 'keychain@example.test', currentAccountRead: true, authFileCreated: false };
