@@ -1,0 +1,60 @@
+name: Mac real package validation
+on:
+  push:
+    branches: ['verify/macos-*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+            arch: arm64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x64
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+      SWITCHER_RUST_BIN_DIR: rust/target/${{ matrix.target }}/release
+      MAC_PACKAGE_RUN_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+      - run: npm install --ignore-scripts
+      - run: npm install --global @openai/codex@0.163.0
+      - name: Locate the official runtime
+        shell: bash
+        run: CODEX_NPM_ROOT="$(npm root -g)" node scripts/ci-setup.cjs
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+          rustup override set stable
+      - name: Compile native release
+        run: cargo build --locked --release --manifest-path rust/Cargo.toml --target ${{ matrix.target }}
+      - name: Package the architecture with a validation-only sequence
+        shell: bash
+        run: |
+          export GITHUB_RUN_NUMBER=$((100000 + MAC_PACKAGE_RUN_NUMBER))
+          node scripts/build-release.cjs darwin --arch=${{ matrix.arch }}
+      - name: Verify installed package and official rc.3 upgrade
+        if: always()
+        shell: bash
+        run: |
+          export GITHUB_RUN_NUMBER=$((100000 + MAC_PACKAGE_RUN_NUMBER))
+          node scripts/verify-mac-package.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-package-${{ matrix.arch }}
+          path: verification/macos-package.json
+          if-no-files-found: warn
+          retention-days: 7
