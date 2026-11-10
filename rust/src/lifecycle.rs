@@ -204,6 +204,11 @@ pub async fn uninstall(app: Arc<App>, input: &Value) -> io::Result<Value> {
     if root.join(".git").exists() {
         return Err(io::Error::other("开发目录请保留源码，不能从这里卸载。"));
     }
+    if crate::desktop_sidebar::restore(&app).await?["pending"] == true {
+        return Err(io::Error::other(
+            "卸载前要还原 Codex 桌面端原有的侧边栏规则，但桌面端还在运行（关窗口只会藏到托盘）。请从托盘菜单退出桌面端后再卸载。",
+        ));
+    }
     let text = config_ops::read(&app.codex_home().join("config.toml"))?.unwrap_or_default();
     let config: toml::Value = toml::from_str(&text).map_err(io::Error::other)?;
     let selected = config
@@ -313,6 +318,10 @@ pub async fn cli(app: &App, action: &str) -> io::Result<String> {
     }
     check(app).map_err(|_| io::Error::other("账号切换正在进行，请稍后"))?;
     let _operation = config_ops::operation(&app.bridge)?;
+    let sidebar = crate::desktop_sidebar::restore(app).await?;
+    let sidebar_notice = if sidebar["pending"] == true {
+        " Codex 桌面端还在运行，侧边栏规则下次切换来源时还原。"
+    } else { "" };
     match action {
         "restore" => {
             let c: toml::Value = toml::from_str(&text).map_err(io::Error::other)?;
@@ -321,7 +330,7 @@ pub async fn cli(app: &App, action: &str) -> io::Result<String> {
                 if app.bridge.join("current.json").exists() {
                     fs::remove_file(app.bridge.join("current.json"))?;
                 }
-                return Ok("Codex already uses its official login.".into());
+                return Ok(format!("Codex already uses its official login.{sidebar_notice}"));
             }
             config_ops::official(app, &json!({"threadFollow":"off"}), true).await?;
             let mut effect = config_store::read_json(&app.bridge.join("effect.json"))?;
@@ -334,7 +343,7 @@ pub async fn cli(app: &App, action: &str) -> io::Result<String> {
                 .get("model")
                 .and_then(|v| v.as_str())
                 .unwrap_or("undefined");
-            Ok(format!("Restored Codex official login (model {model})."))
+            Ok(format!("Restored Codex official login (model {model}).{sidebar_notice}"))
         }
         "cleanup" => {
             let result =
@@ -346,12 +355,12 @@ pub async fn cli(app: &App, action: &str) -> io::Result<String> {
             if startup.exists() {
                 fs::remove_file(startup)?;
             }
-            Ok(if result["changed"] == true {
+            let message = if result["changed"] == true {
                 "Removed the switcher provider definition from Codex config."
             } else {
                 "Codex config had nothing to clean."
-            }
-            .into())
+            };
+            Ok(format!("{message}{sidebar_notice}"))
         }
         _ => unreachable!(),
     }

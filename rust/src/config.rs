@@ -237,7 +237,10 @@ impl App {
             Value::Null
         };
         let build = crate::instance::runtime();
+        let settings = json_file(self.bridge.join("settings.json"))?;
         Ok(json!({
+            "desktopSharedSidebar":settings["desktopSharedSidebar"].as_bool().unwrap_or(true),
+            "desktopSidebarPending":settings["desktopSidebarPending"].as_bool().unwrap_or(false),
             "build":build,
             "update":crate::update::snapshot(self),
             "dataDirProtection":self.protection,

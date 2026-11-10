@@ -271,7 +271,7 @@ impl Run {
     fn report(&self, status: &str, message: &str) -> io::Result<()> {
         write_json(
             &self.app.bridge.join("account-switch.json"),
-            &json!({"id":self.job["id"],"pid":std::process::id(),"status":status,"message":message,"startedAt":self.started_at,"elapsedMs":self.started.elapsed().as_millis(),"steps":self.steps,"configurationApplied":self.applied,"threadFollow":self.job["threadFollow"],"previousProvider":self.job["previousProvider"],"threads":self.threads,"editorReload":self.reload,"desktopStarted":self.desktop_started,"desktopRequested":self.job["desktopExe"].is_string(),"finishedAt":if ["done","error"].contains(&status){json!(now())}else{Value::Null}}),
+            &json!({"id":self.job["id"],"pid":std::process::id(),"status":status,"message":message,"startedAt":self.started_at,"elapsedMs":self.started.elapsed().as_millis(),"steps":self.steps,"configurationApplied":self.applied,"threadFollow":self.job["threadFollow"],"previousProvider":self.job["previousProvider"],"threads":self.threads,"editorReload":self.reload,"desktopStarted":self.desktop_started,"desktopRequested":self.job["desktopExe"].is_string(),"desktopSidebar":self.job["desktopSidebar"],"finishedAt":if ["done","error"].contains(&status){json!(now())}else{Value::Null}}),
         )
     }
     fn begin(&mut self, id: &str, label: &str) -> io::Result<Instant> {
@@ -452,6 +452,13 @@ async fn run(app: Arc<App>, job: Value) -> io::Result<()> {
         state.end("apply", at, applied.as_ref().err().map(ToString::to_string).as_deref())?;
         let applied = applied?;
         state.applied = true;
+        state.job["desktopSidebar"] = match crate::desktop_sidebar::share(&app, &latest) {
+            Ok(result) => result,
+            Err(error) => {
+                let _ = log(&app.bridge, "desktop.sidebar", json!({"error":error.to_string()}));
+                json!({"error":error.to_string()})
+            }
+        };
         state.effect("thread_sync_pending", "配置已写入，正在同步旧对话，尚未完成切换。")?;
         let at = state.begin("threads", "同步并核对旧对话")?;
         match crate::thread_routing::synchronize(&app, text(&state.job["threadFollow"]), state.job["previousProvider"].as_str()).await {

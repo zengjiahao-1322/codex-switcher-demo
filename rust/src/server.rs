@@ -134,6 +134,7 @@ const ACTIONS: &[&str] = &[
     "resumeThreadSync",
     "clients",
     "setEnvironment",
+    "setDesktopSharedSidebar",
     "clientHeartbeat",
     "installRemoteAgent",
     "remoteSwitch",
@@ -577,6 +578,20 @@ pub(crate) async fn serve(
                     "setEnvironment" => {
                         Some(crate::platform::set_environment(&app, &input.unwrap()))
                     }
+                    "setDesktopSharedSidebar" => Some(async {
+                        let enabled = input.unwrap()["desktopSharedSidebar"].as_bool()
+                            .ok_or_else(|| io::Error::other("desktopSharedSidebar 必须为布尔值"))?;
+                        // A running switch holds this lock; do not interleave with its share().
+                        let _operation = crate::config_ops::operation(&app.bridge)?;
+                        let file = app.bridge.join("settings.json");
+                        let mut settings = crate::config_store::read_json(&file)?;
+                        if settings.is_null() { settings = json!({}); }
+                        settings["desktopSharedSidebar"] = json!(enabled);
+                        if enabled { settings["desktopSidebarPending"] = json!(false); }
+                        crate::instance::write_json(&file, &settings)?;
+                        if !enabled { crate::desktop_sidebar::restore(&app).await }
+                        else { Ok(json!({"message":"已启用桌面侧边栏共用，下次切换时生效"})) }
+                    }.await),
                     "autostart" => Some(crate::integration::autostart(
                         input.unwrap()["enabled"].as_bool().unwrap_or(false),
                         &app.bridge,

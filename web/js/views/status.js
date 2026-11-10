@@ -71,6 +71,14 @@ export function renderSwitchProgress() {
       : '桌面端：已请求重新打开，尚未确认实际请求来源。';
     $('switch-windows').append(line);
   }
+  const sidebar = job.desktopSidebar;
+  if (sidebar?.error || sidebar?.skipped === 'desktop_running') {
+    const line = document.createElement('p');
+    line.textContent = sidebar.error
+      ? '桌面端侧边栏：未能保留，' + sidebar.error
+      : '桌面端侧边栏：桌面端仍在运行，本次未处理。';
+    $('switch-windows').append(line);
+  }
   const labels = {
     pending: '等待接收',
     received: '已接收，等待扩展重新连接',

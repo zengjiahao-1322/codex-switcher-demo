@@ -11,6 +11,7 @@ mod config_ops;
 mod config_store;
 mod config_text;
 mod diagnostics;
+mod desktop_sidebar;
 mod editor_integration;
 mod editors;
 mod instance;

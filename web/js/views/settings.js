@@ -18,6 +18,8 @@ function finished(title, text) {
 export function renderService() {
   const a = state.adapter;
   $('autostart').checked = !!a.autostart;
+  $('desktop-shared-sidebar').checked = state.desktopSharedSidebar;
+  $('desktop-sidebar-pending').hidden = !state.desktopSidebarPending;
   $('service').textContent = a.ready
     ? '转换服务运行中 · 端口 ' + a.port
     : '转换服务未运行或端口 ' + a.port + ' 被占用。';
@@ -26,6 +28,14 @@ $('autostart').onchange = () =>
   busy($('autostart'), async () => {
     const r = await api('autostart', { enabled: $('autostart').checked });
     status(r.message);
+    await refresh();
+  });
+$('desktop-shared-sidebar').onchange = () =>
+  busy($('desktop-shared-sidebar'), async () => {
+    const r = await api('setDesktopSharedSidebar', {
+      desktopSharedSidebar: $('desktop-shared-sidebar').checked,
+    });
+    if (r.message) status(r.message);
     await refresh();
   });
 $('app-quit').onclick = () => {
