@@ -25,12 +25,11 @@ const report = {
 };
 const contexts = [];
 const children = new Set();
-let root, activeCheck, staticServer, temporaryKeychain, originalSearch;
+let root, activeCheck, staticServer, temporaryKeychain, keychainEnv;
 const pause = () => new Promise((resolve) => setTimeout(resolve, 100));
 const sha = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 const exists = fs.existsSync;
-const security = (...args) => exec('/usr/bin/security', args, process.env);
 
 function exec(executable, args, env, timeout = 30000) {
   const run = cp.spawnSync(executable, args, { env, encoding: 'utf8', timeout });
@@ -297,9 +296,10 @@ async function validate() {
   await check('mcp-initialize-and-tool-list', () => mcp(current));
   await check('synthetic-macos-keychain-login', async () => {
     const ctx = context('keychain-home'); install(source, ctx);
+    fs.mkdirSync(path.join(ctx.home, 'Library/Preferences'), { recursive: true });
+    keychainEnv = ctx.env;
+    const security = (...args) => exec('/usr/bin/security', args, ctx.env);
     fs.writeFileSync(path.join(ctx.codexHome, 'config.toml'), 'cli_auth_credentials_store="keyring"\n');
-    originalSearch = security('list-keychains', '-d', 'user').split('\n')
-      .map((line) => line.trim().replace(/^"|"$/g, '')).filter(Boolean);
     temporaryKeychain = path.join(root, 'fixture.keychain-db');
     security('create-keychain', '-p', 'fixture-only', temporaryKeychain);
     security('unlock-keychain', '-p', 'fixture-only', temporaryKeychain);
@@ -313,39 +313,42 @@ async function validate() {
       last_refresh: '2026-01-01T00:00:00Z' };
     security('add-generic-password', '-s', 'Codex Auth', '-a', storeKey,
       '-w', JSON.stringify(credentials), '-T', '/usr/bin/security', temporaryKeychain);
-    security('list-keychains', '-d', 'user', '-s', temporaryKeychain, ...originalSearch);
+    security('list-keychains', '-d', 'user', '-s', temporaryKeychain);
+    // Verify the same search environment used by Rust before starting it.
+    // stdout is a synthetic credential; retain only exit status and presence.
+    const probe = cp.spawnSync('/usr/bin/security', [
+      'find-generic-password', '-s', 'Codex Auth', '-a', storeKey, '-w',
+    ], { env: ctx.env, encoding: 'utf8', timeout: 10000 });
+    const diagnostics = {
+      securityBackendEnv: {
+        exitCode: probe.status,
+        read: probe.status === 0 && Boolean(probe.stdout?.trim()),
+        signal: probe.signal,
+        errorCode: probe.error?.code ?? null,
+      },
+    };
+    report.checks.find((row) => row.name === activeCheck).diagnostics = diagnostics;
+    assert.ok(diagnostics.securityBackendEnv.read,
+      'Synthetic keychain preflight failed: ' + JSON.stringify(diagnostics));
     await start(ctx);
     const accounts = await api(ctx, 'accounts', {});
+    diagnostics.accounts = accounts.items.map(({ email, current }) => ({ email, current }));
+    diagnostics.notice = accounts.credentialsNotice ?? null;
     const found = accounts.items.some(
       (item) => item.current && item.email === 'keychain@example.test',
     );
     if (!found) {
-      // Match the backend's command, store key and environment. stdout contains
-      // the synthetic credential, so retain only its exit status and presence.
-      const probe = (env) => {
-        const result = cp.spawnSync('/usr/bin/security', [
-          'find-generic-password', '-s', 'Codex Auth', '-a', storeKey, '-w',
-        ], { env, encoding: 'utf8', timeout: 10000 });
-        return {
-          exitCode: result.status,
-          read: result.status === 0 && Boolean(result.stdout?.trim()),
-          signal: result.signal,
-          errorCode: result.error?.code ?? null,
-        };
-      };
-      const diagnostics = {
-        accounts: accounts.items.map(({ email, current }) => ({ email, current })),
-        notice: accounts.credentialsNotice ?? null,
-        securityBackendEnv: probe(ctx.env),
-        securityScriptEnv: probe(process.env),
-      };
-      report.checks.find((row) => row.name === activeCheck).diagnostics = diagnostics;
       assert.fail('Synthetic keychain account missing from Rust account summaries: '
         + JSON.stringify(diagnostics));
     }
     assert.equal(exists(path.join(ctx.codexHome, 'auth.json')), false);
     await stop(ctx);
     return { email: 'keychain@example.test', currentAccountRead: true, authFileCreated: false };
+  }).catch((error) => {
+    // The independent upgrade scenario must still run after a keychain failure.
+    report.failedCheck = activeCheck;
+    report.error = error.message;
+    report.diagnostics = failureDiagnostics();
   });
   await check('official-rc3-one-click-upgrade', async () => {
     const asset = `codex-switcher-macos-${process.arch}.zip`;
@@ -453,16 +456,9 @@ async function cleanup() {
       }
     } catch (error) { report.cleanup.push({ item: 'temporary detached workers', error: error.message }); }
   }
-  if (originalSearch) {
-    try {
-      security('list-keychains', '-d', 'user', '-s', ...originalSearch);
-      report.keychainSearchRestored = true;
-    }
-    catch (error) { report.cleanup.push({ item: 'restore keychain search list', error: error.message }); }
-  }
   if (temporaryKeychain && exists(temporaryKeychain)) {
     try {
-      security('delete-keychain', temporaryKeychain);
+      exec('/usr/bin/security', ['delete-keychain', temporaryKeychain], keychainEnv);
       report.temporaryKeychainRemoved = !exists(temporaryKeychain);
     }
     catch (error) { report.cleanup.push({ item: 'delete temporary keychain', error: error.message }); }
@@ -480,7 +476,7 @@ async function cleanup() {
 }
 
 (async () => {
-  try { await validate(); report.passed = true; }
+  try { await validate(); report.passed = report.checks.every((row) => row.passed === true); }
   catch (error) {
     report.passed = false;
     report.failedCheck = activeCheck || 'preflight';

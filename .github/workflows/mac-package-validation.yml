@@ -38,6 +38,15 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
           rustup override set stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            rust/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: rust-${{ matrix.target }}-${{ hashFiles('rust/Cargo.lock') }}-${{ hashFiles('rust/src/**') }}
+          restore-keys: |
+            rust-${{ matrix.target }}-${{ hashFiles('rust/Cargo.lock') }}-
       - name: Compile native release
         run: cargo build --locked --release --manifest-path rust/Cargo.toml --target ${{ matrix.target }}
       - name: Package the architecture with a validation-only sequence
