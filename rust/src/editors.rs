@@ -98,14 +98,16 @@ impl Drop for Lease {
     }
 }
 pub fn all_records(bridge: &Path) -> io::Result<Vec<Value>> {
-    let entries = match fs::read_dir(bridge.join("clients")) {
+    let directory = bridge.join("clients");
+    let entries = match fs::read_dir(&directory) {
         Ok(v) => v,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
-        Err(e) => return Err(e),
+        Err(e) => return Err(crate::instance::file_error(e, "读取目录", &directory, None)),
     };
     let mut rows = Vec::new();
     for entry in entries {
-        let file = entry?.path();
+        let file = entry.map_err(|e| crate::instance::file_error(e, "读取目录项", &directory, None))?
+            .path();
         if file.extension().and_then(|s| s.to_str()) != Some("json") {
             continue;
         }

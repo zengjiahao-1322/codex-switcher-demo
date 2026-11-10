@@ -49,7 +49,7 @@ pub fn read(file: &Path, fallback: Value) -> io::Result<Value> {
     match fs::read(file) {
         Ok(bytes) => serde_json::from_slice(&bytes).map_err(io::Error::other),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(fallback),
-        Err(e) => Err(e),
+        Err(e) => Err(crate::instance::file_error(e, "读取", file, None)),
     }
 }
 fn now() -> String {

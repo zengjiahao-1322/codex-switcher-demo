@@ -323,8 +323,9 @@ pub fn redact(value: &Value) -> Value {
     }
 }
 pub fn log(bridge: &Path, event: &str, fields: Value) -> io::Result<()> {
+    use crate::instance::file_error;
     let dir = bridge.join("logs");
-    fs::create_dir_all(&dir)?;
+    fs::create_dir_all(&dir).map_err(|e| file_error(e, "创建目录", &dir, None))?;
     let file = dir.join("switcher.log");
     if fs::metadata(&file)
         .map(|m| m.len() > 2 * 1024 * 1024)
@@ -332,13 +333,14 @@ pub fn log(bridge: &Path, event: &str, fields: Value) -> io::Result<()> {
     {
         let second = dir.join("switcher.log.2");
         if second.exists() {
-            fs::remove_file(second)?;
+            fs::remove_file(&second).map_err(|e| file_error(e, "删除", &second, None))?;
         }
         let first = dir.join("switcher.log.1");
         if first.exists() {
-            fs::rename(&first, dir.join("switcher.log.2"))?;
+            fs::rename(&first, &second)
+                .map_err(|e| file_error(e, "改名", &first, Some(&second)))?;
         }
-        fs::rename(&file, first)?;
+        fs::rename(&file, &first).map_err(|e| file_error(e, "改名", &file, Some(&first)))?;
     }
     let mut row = json!({"t":now(),"pid":std::process::id(),"event":event});
     if let Value::Object(fields) = fields {
@@ -351,7 +353,8 @@ pub fn log(bridge: &Path, event: &str, fields: Value) -> io::Result<()> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    writeln!(options.open(file)?, "{}", redact(&row))
+    let mut output = options.open(&file).map_err(|e| file_error(e, "打开追加写入", &file, None))?;
+    writeln!(output, "{}", redact(&row)).map_err(|e| file_error(e, "追加写入", &file, None))
 }
 pub fn recent(bridge: &Path, limit: usize) -> io::Result<Vec<Value>> {
     let mut rows = Vec::new();

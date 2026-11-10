@@ -224,9 +224,43 @@ async fn local_response(url: &str, route: &str) -> io::Result<(hyper::StatusCode
         .await
         .map_err(io::Error::other)?
 }
+#[derive(Debug)]
+struct FileError {
+    operation: &'static str,
+    file: PathBuf,
+    target: Option<PathBuf>,
+    original: io::Error,
+}
+impl std::fmt::Display for FileError {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(output, "{} {}", self.operation, platform::display_path(&self.file))?;
+        if let Some(target) = &self.target {
+            write!(output, " -> {}", platform::display_path(target))?;
+        }
+        write!(output, "：{}", self.original)
+    }
+}
+impl std::error::Error for FileError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.original)
+    }
+}
+pub fn file_error(
+    error: io::Error,
+    operation: &'static str,
+    file: &Path,
+    target: Option<&Path>,
+) -> io::Error {
+    io::Error::new(error.kind(), FileError {
+        operation,
+        file: file.to_path_buf(),
+        target: target.map(Path::to_path_buf),
+        original: error,
+    })
+}
 pub fn write_json(file: &std::path::Path, value: &Value) -> io::Result<()> {
     if let Some(parent) = file.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent).map_err(|e| file_error(e, "创建目录", parent, None))?;
     }
     let temporary = file.with_extension(format!("{}.tmp", std::process::id()));
     use std::io::Write;
@@ -237,15 +271,18 @@ pub fn write_json(file: &std::path::Path, value: &Value) -> io::Result<()> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let mut output = options.open(&temporary)?;
+    let mut output = options.open(&temporary)
+        .map_err(|e| file_error(e, "打开写入", &temporary, None))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        output.set_permissions(fs::Permissions::from_mode(0o600))?;
+        output.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|e| file_error(e, "修改权限", &temporary, None))?;
     }
-    output.write_all(&serde_json::to_vec_pretty(value).map_err(io::Error::other)?)?;
+    output.write_all(&serde_json::to_vec_pretty(value).map_err(io::Error::other)?)
+        .map_err(|e| file_error(e, "写入", &temporary, None))?;
     drop(output);
-    fs::rename(&temporary, file)
+    fs::rename(&temporary, file).map_err(|e| file_error(e, "改名", &temporary, Some(file)))
 }
 fn launch() -> Value {
     let parent = match platform::parent_process() {

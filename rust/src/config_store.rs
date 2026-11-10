@@ -4,11 +4,12 @@ use serde_json::{Value, json};
 use std::{fs, io, path::Path};
 
 pub fn load(bridge: &Path) -> io::Result<Value> {
-    let mut value = match fs::read(bridge.join("providers.json")) {
+    let file = bridge.join("providers.json");
+    let mut value = match fs::read(&file) {
         Ok(bytes) => serde_json::from_slice::<Value>(&bytes)
             .map_err(|_| io::Error::other("providers.json 已损坏，请检查或删除后重试"))?,
         Err(e) if e.kind() == io::ErrorKind::NotFound => json!({}),
-        Err(e) => return Err(e),
+        Err(e) => return Err(crate::instance::file_error(e, "读取", &file, None)),
     };
     let mut providers = value["providers"]
         .as_array()
@@ -262,7 +263,7 @@ pub fn read_json(file: &Path) -> io::Result<Value> {
     match fs::read(file) {
         Ok(bytes) => serde_json::from_slice(&bytes).map_err(io::Error::other),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Value::Null),
-        Err(e) => Err(e),
+        Err(e) => Err(crate::instance::file_error(e, "读取", file, None)),
     }
 }
 pub fn discover(home: &Path) -> io::Result<Vec<Value>> {

@@ -1,5 +1,8 @@
 //! Configuration transactions, snapshots, operation locks and HTTP actions.
-use crate::{config_store as store, config_text as text, instance::write_json, server::App};
+use crate::{
+    config_store as store, config_text as text,
+    instance::{file_error, write_json}, server::App,
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -12,18 +15,20 @@ pub fn read(file: &Path) -> io::Result<Option<String>> {
     match fs::read_to_string(file) {
         Ok(s) => Ok(Some(s)),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e),
+        Err(e) => Err(file_error(e, "读取", file, None)),
     }
 }
 pub fn private_file(file: &Path) -> io::Result<()> {
     #[cfg(windows)]
     {
         crate::platform::protect_directory(file)
+            .map_err(|e| file_error(e, "修改权限", file, None))
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(file, fs::Permissions::from_mode(0o600))
+            .map_err(|e| file_error(e, "修改权限", file, None))
     }
 }
 pub fn atomic(file: &Path, value: &str, expected: Option<Option<&str>>) -> io::Result<()> {
@@ -44,10 +49,12 @@ pub fn atomic(file: &Path, value: &str, expected: Option<Option<&str>>) -> io::R
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        let mut output = options.open(&temporary)?;
+        let mut output = options.open(&temporary)
+            .map_err(|e| file_error(e, "打开写入", &temporary, None))?;
         private_file(&temporary)?;
-        output.write_all(value.as_bytes())?;
-        output.sync_all()?;
+        output.write_all(value.as_bytes())
+            .map_err(|e| file_error(e, "写入", &temporary, None))?;
+        output.sync_all().map_err(|e| file_error(e, "同步写入", &temporary, None))?;
         drop(output);
         if let Some(previous) = expected
             && read(file)?.as_deref() != previous
@@ -56,7 +63,8 @@ pub fn atomic(file: &Path, value: &str, expected: Option<Option<&str>>) -> io::R
                 "Concurrent config modification detected; retry after review",
             ));
         }
-        fs::rename(&temporary, file)?;
+        fs::rename(&temporary, file)
+            .map_err(|e| file_error(e, "改名", &temporary, Some(file)))?;
         if read(file)?.as_deref() != Some(value) {
             return Err(io::Error::other(
                 "Concurrent config modification after replacement",
@@ -65,7 +73,7 @@ pub fn atomic(file: &Path, value: &str, expected: Option<Option<&str>>) -> io::R
         Ok(())
     })();
     if temporary.exists() {
-        fs::remove_file(temporary)?;
+        fs::remove_file(&temporary).map_err(|e| file_error(e, "删除", &temporary, None))?;
     }
     operation
 }
@@ -241,7 +249,7 @@ fn effect(home: &Path, bridge: &Path) -> io::Result<()> {
 fn remove_optional(file: &Path) -> io::Result<()> {
     match fs::remove_file(file) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        other => other,
+        result => result.map_err(|e| file_error(e, "删除", file, None)),
     }
 }
 fn provider(bridge: &Path, id: &str) -> io::Result<Value> {
