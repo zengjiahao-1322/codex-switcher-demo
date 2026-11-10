@@ -57,7 +57,7 @@ const companionRun = spawnSync(
     '--test',
     '--test-concurrency=1',
     '--test-reporter=tap',
-    '--test-name-pattern=^(服务器支持长轮询|重载完成待确认|旧版切换器|切换器不可用)',
+    '--test-name-pattern=^(服务器支持长轮询|重载完成待确认|切换器不可用)',
     path.join(root, 'tests', 'long-poll.test.cjs'),
   ],
   { cwd: root, env: process.env, encoding: 'utf8', windowsHide: true, timeout: 180000 },

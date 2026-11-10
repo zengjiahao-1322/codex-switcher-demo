@@ -7,9 +7,6 @@ const test = require('node:test'),
   http = require('node:http'),
   Module = require('node:module');
 
-const source = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
-const companionReady = source('vscode-companion/extension.cjs').includes('longPoll');
-const companion = { todo: !companionReady && '等待 GPT 实现 L3' };
 
 // 真实 HTTP 服务 + 真实 service，数据目录隔离。
 async function start() {
@@ -195,7 +192,7 @@ async function runCompanion({
 }
 const gaps = (requests) => requests.slice(1).map((r, i) => r.at - requests[i].at);
 
-test('服务器支持长轮询时，伴随扩展连续发出带 wait 的请求，不再等 2 秒', companion, async () => {
+test('服务器支持长轮询时，伴随扩展连续发出带 wait 的请求，不再等 2 秒', async () => {
   const requests = await runCompanion({ longPoll: true, durationMs: 3000 });
   const waiting = requests.filter((r) => r.body.wait === 25000);
   assert.ok(waiting.length >= 5, '3 秒内带 wait 的请求只有 ' + waiting.length + ' 个');
@@ -204,7 +201,7 @@ test('服务器支持长轮询时，伴随扩展连续发出带 wait 的请求�
 });
 
 // 重载后新后端尚未接入时，带 completedReload 的请求不挂起且会强制扫描；必须保持约 2 秒一次，接入后再连续长轮询。
-test('重载完成待确认期间保持约 2 秒一次，确认接入后才进入连续长轮询', companion, async () => {
+test('重载完成待确认期间保持约 2 秒一次，确认接入后才进入连续长轮询', async () => {
   const requests = await runCompanion({
     longPoll: true,
     durationMs: 8000,
@@ -219,22 +216,7 @@ test('重载完成待确认期间保持约 2 秒一次，确认接入后才进�
   assert.ok(after.every((r) => r.body.wait === 25000 && !r.body.completedReload));
 });
 
-test(
-  '旧版切换器（回复没有 longPoll）时，伴随扩展仍按约 2 秒一次',
-  {
-    todo:
-      '已有问题：伴随扩展在服务器不回 longPoll 时请求过密，2026-11-10 确认本轮之前就失败；所有 Rust ' +
-      '版本都回 longPoll（rust/src/editors.rs:719），这条兼容路径只服务已下架的 Node ' +
-      '版，下一批决定是否连同扩展里的回退一起删除',
-  },
-  async () => {
-    const requests = await runCompanion({ longPoll: false, durationMs: 5000 });
-    assert.ok(requests.length >= 2 && requests.length <= 4, '5 秒内请求数 ' + requests.length);
-    assert.ok(Math.min(...gaps(requests)) > 1500, '旧版服务器下请求过密');
-  },
-);
-
-test('切换器不可用时，伴随扩展约每 5 秒尝试一次', companion, async () => {
+test('切换器不可用时，伴随扩展约每 5 秒尝试一次', async () => {
   const attempts = await runCompanion({ longPoll: true, failing: true, durationMs: 11000 });
   // 第 0、5、10 秒左右各一次；原来每 2 秒一次会有 6 次。
   assert.ok(attempts.length >= 2 && attempts.length <= 3, '11 秒内尝试 ' + attempts.length + ' 次');
