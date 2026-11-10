@@ -13,6 +13,7 @@ unsafe extern "C" {
     -> i32;
     fn sqlite3_close_v2(db: Handle) -> i32;
     fn sqlite3_errmsg(db: Handle) -> *const c_char;
+    fn sqlite3_extended_errcode(db: Handle) -> i32;
     fn sqlite3_prepare_v2(
         db: Handle,
         sql: *const c_char,
@@ -38,6 +39,35 @@ unsafe extern "C" {
     fn sqlite3_column_int64(stmt: Handle, column: i32) -> i64;
     fn sqlite3_column_double(stmt: Handle, column: i32) -> f64;
     fn sqlite3_busy_timeout(db: Handle, ms: i32) -> i32;
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn errors_include_phase_path_and_extended_code() {
+        let root = std::env::temp_dir().join(format!(
+            "switcher-sqlite-diagnostics-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let missing = root.join("missing.sqlite");
+        let error = match Database::open(&missing) {
+            Ok(_) => panic!("missing database unexpectedly opened"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("code 14/14，打开"), "{error}");
+        assert!(error.contains(&crate::platform::display_path(&missing)), "{error}");
+
+        let file = root.join("state_5.sqlite");
+        let db = Database::writable(&file).unwrap();
+        let error = db.query("SELECT * FROM missing_table", &[]).unwrap_err().to_string();
+        assert!(error.contains("code 1/1，查询"), "{error}");
+        assert!(error.contains(&crate::platform::display_path(&file)), "{error}");
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 #[cfg(windows)]
 mod native {
@@ -80,6 +110,7 @@ mod native {
     );
     api!(sqlite3_close_v2(db: Handle) -> i32);
     api!(sqlite3_errmsg(db: Handle) -> *const c_char);
+    api!(sqlite3_extended_errcode(db: Handle) -> i32);
     api!(
         sqlite3_prepare_v2(
             db: Handle,
@@ -112,7 +143,7 @@ mod native {
 }
 #[cfg(windows)]
 use native::*;
-pub struct Database(Handle);
+pub struct Database(Handle, String);
 impl Drop for Database {
     fn drop(&mut self) {
         unsafe {
@@ -136,10 +167,16 @@ impl Database {
         Self::open_flags(path, 2 | 4)
     }
     fn open_flags(path: &Path, flags: i32) -> io::Result<Self> {
-        let file = CString::new(crate::platform::display_path(path)).map_err(io::Error::other)?;
+        let path = crate::platform::display_path(path);
+        let file = CString::new(path.as_str()).map_err(io::Error::other)?;
         let mut db = std::ptr::null_mut();
         let status = unsafe { sqlite3_open_v2(file.as_ptr(), &mut db, flags, std::ptr::null()) };
         if status != 0 {
+            let extended = if db.is_null() {
+                status
+            } else {
+                unsafe { sqlite3_extended_errcode(db) }
+            };
             let error = if db.is_null() {
                 "SQLite open failed".into()
             } else {
@@ -152,19 +189,24 @@ impl Database {
                     sqlite3_close_v2(db);
                 }
             }
-            return Err(io::Error::other(error));
+            return Err(io::Error::other(format!(
+                "{error}（code {}/{extended}，打开，{path}）",
+                status & 0xff,
+            )));
         }
         unsafe {
             sqlite3_busy_timeout(db, 1000);
         }
-        Ok(Self(db))
+        Ok(Self(db, path))
     }
-    fn error(&self) -> io::Error {
-        io::Error::other(
-            unsafe { CStr::from_ptr(sqlite3_errmsg(self.0)) }
-                .to_string_lossy()
-                .to_string(),
-        )
+    fn error(&self, status: i32) -> io::Error {
+        let message = unsafe { CStr::from_ptr(sqlite3_errmsg(self.0)) }.to_string_lossy();
+        let extended = unsafe { sqlite3_extended_errcode(self.0) };
+        io::Error::other(format!(
+            "{message}（code {}/{extended}，查询，{}）",
+            status & 0xff,
+            self.1,
+        ))
     }
     pub fn query(&self, sql: &str, parameters: &[Value]) -> io::Result<Vec<Value>> {
         let mut rows = Vec::new();
@@ -182,7 +224,7 @@ impl Database {
     ) -> io::Result<()> {
         let text = CString::new(sql).map_err(io::Error::other)?;
         let mut statement = std::ptr::null_mut();
-        if unsafe {
+        let status = unsafe {
             sqlite3_prepare_v2(
                 self.0,
                 text.as_ptr(),
@@ -190,9 +232,9 @@ impl Database {
                 &mut statement,
                 std::ptr::null_mut(),
             )
-        } != 0
-        {
-            return Err(self.error());
+        };
+        if status != 0 {
+            return Err(self.error(status));
         }
         let statement = Statement(statement);
         let strings: Vec<_> = parameters
@@ -216,7 +258,7 @@ impl Database {
                 }
             };
             if status != 0 {
-                return Err(self.error());
+                return Err(self.error(status));
             }
         }
         loop {
@@ -244,7 +286,7 @@ impl Database {
                     visit(Value::Object(row))?;
                 }
                 101 => return Ok(()),
-                _ => return Err(self.error()),
+                status => return Err(self.error(status)),
             }
         }
     }

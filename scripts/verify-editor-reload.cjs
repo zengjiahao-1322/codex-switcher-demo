@@ -39,6 +39,8 @@ const root = fs.mkdtempSync(
   ),
 );
 const report = { platform: process.platform, arch: process.arch, checks: [] };
+const selected = path.join(root, 'shared-home');
+const bridge = path.join(root, 'bridge');
 const processes = [];
 let server, upstream;
 
@@ -152,9 +154,7 @@ async function initializeHome(executable, home) {
     const executable = path.join(root, process.platform === 'win32' ? 'codex.exe' : 'codex');
     fs.copyFileSync(process.env.CODEX_EXE, executable);
     fs.chmodSync(executable, 0o755);
-    const selected = path.join(root, 'shared-home');
     const separate = path.join(root, 'separate-home');
-    const bridge = path.join(root, 'bridge');
     process.env.BRIDGE_HOME = bridge;
     const extensions = path.join(root, 'installed-extensions');
     const vsix = require('./lib/vsix.cjs').build(project);
@@ -353,6 +353,7 @@ async function initializeHome(executable, home) {
     });
     const job = await waitFor(async () => {
       const state = await api('accounts');
+      report.switchJob = state.switchJob;
       if (state.switchJob?.status === 'error') throw Error(state.switchJob.message);
       return state.switchJob?.status === 'done' && state.switchJob;
     }, 'complete official-to-API switch');
@@ -409,6 +410,34 @@ async function initializeHome(executable, home) {
   } catch (error) {
     report.passed = false;
     report.error = error.stack;
+    report.homeFiles = fs.existsSync(selected)
+      ? fs.readdirSync(selected, { withFileTypes: true })
+        .filter((entry) => entry.isFile()).map((entry) => {
+          const stat = fs.statSync(path.join(selected, entry.name));
+          return {
+            name: entry.name,
+            size: stat.size,
+            mtime: stat.mtime.toISOString(),
+            mode: '0' + (stat.mode & 0o777).toString(8),
+          };
+        })
+      : [];
+    const logs = (directory) => fs.existsSync(directory)
+      ? fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+          const file = path.join(directory, entry.name);
+          return entry.isDirectory() ? logs(file) : [file];
+        })
+      : [];
+    report.bridgeLogs = [
+      ...logs(path.join(bridge, 'logs')),
+      path.join(bridge, 'main-error.log'),
+      path.join(bridge, 'account-switch.json'),
+    ]
+      .filter((file) => fs.existsSync(file))
+      .map((file) => ({
+        file: path.relative(bridge, file),
+        text: fs.readFileSync(file, 'utf8').slice(-8000),
+      }));
     for (const file of fs.readdirSync(root).filter((file) => /^editor-\d\.log$/.test(file))) {
       report[file] = fs.readFileSync(path.join(root, file), 'utf8').slice(-8000);
     }

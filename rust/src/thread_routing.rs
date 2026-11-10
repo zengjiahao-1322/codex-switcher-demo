@@ -81,21 +81,45 @@ pub fn service_tier(path: &Path) -> io::Result<Option<Value>> {
     setting(&remainder)
 }
 fn pending(home: &Path) -> io::Result<Vec<Value>> {
-    let file = fs::read_dir(home)?
-        .filter_map(Result::ok)
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            name.strip_prefix("state_")
-                .and_then(|s| s.strip_suffix(".sqlite"))
-                .and_then(|s| s.parse::<u32>().ok())
-                .map(|n| (n, e.path()))
-        })
-        .max_by_key(|(n, _)| *n);
-    let Some((_, file)) = file else {
-        return Ok(vec![]);
-    };
-    let db = crate::sqlite::Database::open(&file)?;
-    db.query("SELECT id, model_provider, model, rollout_path FROM threads WHERE archived=0 AND source NOT LIKE '%\"subagent\"%' ORDER BY id",&[])
+    let result = (|| {
+        let file = fs::read_dir(home)?
+            .filter_map(Result::ok)
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.strip_prefix("state_")
+                    .and_then(|s| s.strip_suffix(".sqlite"))
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .map(|n| (n, e.path()))
+            })
+            .max_by_key(|(n, _)| *n);
+        let Some((_, file)) = file else {
+            return Ok(vec![]);
+        };
+        let db = crate::sqlite::Database::open(&file)?;
+        db.query("SELECT id, model_provider, model, rollout_path FROM threads WHERE archived=0 AND source NOT LIKE '%\"subagent\"%' ORDER BY id",&[])
+    })();
+    result.map_err(|error: io::Error| {
+        let files = fs::read_dir(home).map(|entries| {
+            let mut files = entries
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with("state_"))
+                .map(|entry| {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    match entry.metadata() {
+                        Ok(metadata) => json!({"name": name, "bytes": metadata.len()}),
+                        Err(error) => json!({"name": name, "error": error.to_string()}),
+                    }
+                })
+                .collect::<Vec<_>>();
+            files.sort_by(|left, right| left["name"].as_str().cmp(&right["name"].as_str()));
+            files
+        });
+        let details = match files {
+            Ok(files) => json!(files).to_string(),
+            Err(error) => format!("目录清单读取失败：{error}"),
+        };
+        io::Error::new(error.kind(), format!("{error}；CODEX_HOME state_ 文件：{details}"))
+    })
 }
 async fn initialize(session: &Session) -> io::Result<()> {
     session.rpc("initialize",json!({"clientInfo":{"name":"codex-switcher-routing","version":"1"},"capabilities":{"experimentalApi":true}})).await.map_err(|e|io::Error::other(e.message))?;
