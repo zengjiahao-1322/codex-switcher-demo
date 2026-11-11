@@ -1,8 +1,33 @@
 {
   "source": "openrouter",
-  "fetchedAt": "2026-11-09T08:11:39.104Z",
+  "fetchedAt": "2026-11-11T06:39:57.005Z",
   "version": 1,
   "models": [
+    {
+      "id": "google/gemini-4-carbon",
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.00001",
+        "image": "0.000002",
+        "audio": "0.000002",
+        "input_audio_cache": "0.0000001",
+        "web_search": "0.014",
+        "internal_reasoning": "0.00001",
+        "input_cache_read": "0.0000001",
+        "input_cache_write": "0.0000001875"
+      }
+    },
+    {
+      "id": "anthropic/claude-fable-5.2",
+      "pricing": {
+        "prompt": "0.000008",
+        "completion": "0.00004",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000002",
+        "input_cache_write": "0.00001",
+        "input_cache_write_1h": "0.000016"
+      }
+    },
     {
       "id": "google/gemini-omni-1.2-flash",
       "pricing": {
@@ -400,8 +425,8 @@
     {
       "id": "z-ai/glm-5.3-flash",
       "pricing": {
-        "prompt": "0.0000000335",
-        "completion": "0.000000083",
+        "prompt": "0.0000000399",
+        "completion": "0.0000000784",
         "input_cache_read": "0.00000003"
       }
     },
@@ -734,9 +759,9 @@
     {
       "id": "z-ai/glm-5.2",
       "pricing": {
-        "prompt": "0.000000006",
+        "prompt": "0.000000007",
         "completion": "0.0000068",
-        "input_cache_read": "0.000000005"
+        "input_cache_read": "0.000000006"
       }
     },
     {
@@ -957,9 +982,9 @@
     {
       "id": "deepseek/deepseek-v4-flash",
       "pricing": {
-        "prompt": "0.000000091",
-        "completion": "0.000000182",
-        "input_cache_read": "0.0000000182"
+        "prompt": "0.00000009",
+        "completion": "0.00000018",
+        "input_cache_read": "0.000000018"
       }
     },
     {
@@ -994,17 +1019,17 @@
     {
       "id": "z-ai/glm-5.1",
       "pricing": {
-        "prompt": "0.0000014",
-        "completion": "0.0000044",
-        "input_cache_read": "0.00000026"
+        "prompt": "0.00000133",
+        "completion": "0.00000418",
+        "input_cache_read": "0.000000247"
       }
     },
     {
       "id": "google/gemma-4-26b-a4b-it",
       "pricing": {
-        "prompt": "0.00000009",
-        "completion": "0.0000003",
-        "input_cache_read": "0.00000005"
+        "prompt": "0.00000008",
+        "completion": "0.0000001",
+        "input_cache_read": "0.000000046"
       }
     },
     {
@@ -1766,9 +1791,9 @@
     {
       "id": "z-ai/glm-4.5-air",
       "pricing": {
-        "prompt": "0.00000013",
-        "completion": "0.00000085",
-        "input_cache_read": "0.000000025"
+        "prompt": "0.0000002",
+        "completion": "0.0000011",
+        "input_cache_read": "0.00000003"
       }
     },
     {
@@ -1903,8 +1928,8 @@
     {
       "id": "qwen/qwen3-14b",
       "pricing": {
-        "prompt": "0.00000012",
-        "completion": "0.00000024"
+        "prompt": "0.0000001",
+        "completion": "0.00000022"
       }
     },
     {
@@ -2026,13 +2051,6 @@
       "pricing": {
         "prompt": "0.00000066",
         "completion": "0.000001"
-      }
-    },
-    {
-      "id": "qwen/qwen-2.5-7b-instruct",
-      "pricing": {
-        "prompt": "0.0000001",
-        "completion": "0.0000002"
       }
     },
     {
