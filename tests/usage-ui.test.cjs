@@ -161,23 +161,11 @@ test('还没有记录时显示空状态，不再读明细', async () => {
   assert.equal(calls.filter((c) => c.route === 'usageRequests').length, 0);
 });
 
-test('更新价格后重新读取；价格簿拉取失败时提示继续用旧价格簿', async () => {
+test('价格簿拉取失败时提示继续用旧价格簿', async () => {
   const calls = [];
-  let book = summary().priceBook;
-  const page = await runPage({
-    respond: backend(calls, () => summary({ priceBook: book }), {
-      usagePrices: () => {
-        book = { ...book, error: '连不上 openrouter.ai' };
-        return { body: { priceBook: book } };
-      },
-    }),
-  });
+  const book = { ...summary().priceBook, error: '连不上 openrouter.ai' };
+  const page = await runPage({ respond: backend(calls, () => summary({ priceBook: book })) });
   await openUsage(page);
-  const before = calls.filter((c) => c.route === 'usage').length;
-  await page.byId('usage-prices').onclick();
-  await page.settle();
-  assert.equal(calls.filter((c) => c.route === 'usagePrices').length, 1);
-  assert.equal(calls.filter((c) => c.route === 'usage').length, before + 1);
   assert.equal(page.byId('usage-pricebook').className, 'usage-book warn');
   assert.match(page.byId('usage-pricebook').textContent, /价格更新失败（连不上 openrouter.ai），继续用 .* 的价格簿/);
 });

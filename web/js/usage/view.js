@@ -1,6 +1,6 @@
 import { $ } from '../api.js';
 import { state as app } from '../store.js';
-import { busy, el } from '../ui.js';
+import { el } from '../ui.js';
 import * as actions from './actions.js';
 import { renderChart, renderLegend } from './chart.js';
 import {
@@ -190,12 +190,3 @@ const page = (delta) => () => {
 };
 $('req-prev').onclick = page(-PAGE);
 $('req-next').onclick = page(PAGE);
-$('usage-prices').onclick = () =>
-  busy(
-    $('usage-prices'),
-    async () => {
-      await actions.refreshPrices();
-      await openUsage();
-    },
-    report,
-  );

@@ -182,6 +182,24 @@ test('一键更新扩展先确认会重载窗口，再逐个列出结果', async
   );
 });
 
+test('“一键更新扩展”只在编辑器里还留着旧版扩展时出现', async () => {
+  const withCompanion = (version) => {
+    const base = backend(() => ({ current, latest: null, status: 'idle' }));
+    return async (route, body) => {
+      const r = await base(route, body);
+      if (route === 'clients')
+        r.body.companion = { editors: [{ editor: 'Code', extensions: [{ version, registered: true }] }] };
+      return r;
+    };
+  };
+  const outdated = await runPage({ respond: withCompanion('0.1.2') });
+  await outdated.settle();
+  assert.equal(outdated.byId('companions-update').hidden, false);
+  const fresh = await runPage({ respond: withCompanion('0.1.3') });
+  await fresh.settle();
+  assert.equal(fresh.byId('companions-update').hidden, true);
+});
+
 test('不确认时不更新扩展', async () => {
   const page = await runPage({
     confirm: () => false,

@@ -55,6 +55,10 @@ export async function refreshClients() {
     const disabledCompanion = (c.companion?.editors || []).some(
       (e) => e.disabled?.disabled === true,
     );
+    // 升级后扩展会自动跟着更新；只有还留着旧版时才需要手动更新。
+    $('companions-update').hidden = !(c.companion?.editors || []).some((e) =>
+      (e.extensions || []).some((x) => x.registered && x.version !== state?.build?.version),
+    );
     if (disabledCompanion) {
       const message = '伴随扩展已被禁用，请在 VS Code 扩展面板启用后重载窗口。';
       $('editor-reload-hint').textContent = message;
@@ -200,7 +204,6 @@ $('editor-connection').onclick = (e) => {
   showTab('editors');
   $('tab-editors').scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
-$('clients-refresh').onclick = refreshClients;
 $('environment-save').onclick = () =>
   busy($('environment-save'), async () => {
     const input = { home: $('config-home').value, codexExe: $('runtime-path').value };
