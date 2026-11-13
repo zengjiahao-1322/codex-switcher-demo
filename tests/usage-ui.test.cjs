@@ -109,6 +109,27 @@ test('打开用量分页：先读汇总再读明细，卡片、提示和来源�
   assert.ok(tags.includes('上游 HTTP 429：rate_limit_error'));
 });
 
+test('Codex 日志里的重试和后台调用：重试标出第几次，后台调用不显示 token 并提示', async () => {
+  const calls = [];
+  const base = backend(calls, () => summary({ totals: { ...summary().totals, unknownTokens: 4 } }));
+  const respond = async (route, body) =>
+    route === 'usageRequests'
+      ? { body: { total: 2, rows: [
+          row({ kind: 'retry', attempt: '2/5', ok: false, error: 'Selected model is at capacity.', input: 0, cachedInput: 0, output: 0, cost: null, currency: null, durationMs: null }),
+          row({ kind: 'background', model: 'gpt-6-luna', input: null, cachedInput: null, output: null, cost: null, currency: null, project: null, durationMs: null }),
+        ] } }
+      : base(route, body);
+  const page = await runPage({ respond });
+  await openUsage(page);
+  const tags = texts(page, 'span');
+  assert.ok(tags.includes('重试 2/5'), tags.join('|'));
+  assert.ok(tags.includes('后台'));
+  const hints = page.created.filter((e) => e.tag === 'p' && /hint/.test(e.node.className)).map((e) => e.node.textContent);
+  assert.ok(hints.some((t) => /另有 4 次 Codex 后台调用/.test(t)), hints.join('|'));
+  const cells = texts(page, 'td');
+  assert.ok(!cells.includes('null') && !cells.includes('NaN'), cells.join('|'));
+});
+
 test('切换客户端、时间范围、筛选和翻页时带上对应参数', async () => {
   const calls = [];
   const page = await runPage({ respond: backend(calls) });

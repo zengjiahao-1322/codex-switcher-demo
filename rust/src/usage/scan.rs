@@ -126,6 +126,19 @@ pub fn database(bridge: &Path) -> io::Result<Database> {
         "CREATE INDEX IF NOT EXISTS requests_time ON requests(t)",
         &[],
     )?;
+    // Version 2 adds the rows read from Codex's own log database (retries, HTTP failures, background calls).
+    if db.query("PRAGMA user_version", &[])?[0]["user_version"].as_i64() < Some(2) {
+        db.query(
+            "ALTER TABLE requests ADD COLUMN kind TEXT NOT NULL DEFAULT 'turn'",
+            &[],
+        )?;
+        db.query("ALTER TABLE requests ADD COLUMN attempt TEXT", &[])?;
+        db.query("PRAGMA user_version=2", &[])?;
+    }
+    db.query(
+        "CREATE TABLE IF NOT EXISTS logs(path TEXT PRIMARY KEY,last INTEGER)",
+        &[],
+    )?;
     Ok(db)
 }
 fn insert(
@@ -169,7 +182,7 @@ fn insert(
         0
     };
     db.query(
-        "INSERT OR IGNORE INTO requests VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR IGNORE INTO requests(client,t,source_key,model,effort,tier,input,cached_input,cache_write_5m,cache_write_1h,output,reasoning,ok,error,duration_ms,project,file,uid) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         &[
             json!(client),
             json!(t),
@@ -444,6 +457,9 @@ pub fn scan(app: &App, db: &Database, sources: &[Source], client: &str) -> io::R
                     json!(serde_json::to_string(&state).map_err(io::Error::other)?),
                 ],
             )?;
+        }
+        if client == "codex" {
+            super::logs::scan(&app.codex_home(), db, sources)?;
         }
         Ok::<_, io::Error>(())
     })();

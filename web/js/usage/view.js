@@ -97,6 +97,15 @@ function renderSummary(d) {
       ),
     );
   }
+  if (t.unknownTokens) {
+    hints.push(
+      el(
+        'p',
+        'hint info',
+        `另有 ${t.unknownTokens} 次 Codex 后台调用（比如记忆功能），日志里没有它们的 token，token 和费用里不含这部分。`,
+      ),
+    );
+  }
   $('usage-hints').replaceChildren(...hints);
 
   const top = d.models[0];
@@ -135,6 +144,9 @@ function renderSummary(d) {
   options($('req-result'), [['', '全部结果'], ['ok', '成功'], ['failed', '失败']], view.result);
   $('usage-foot').textContent =
     `数据来自本机 ${name} 的记录，只读用量、时间、模型和错误类型，不读对话内容。` +
+    (view.client === 'codex'
+      ? '自动重试和后台调用来自 Codex 自己的日志，日志只保留最近几天，打开本页时才读取，所以这两类可能比网关记录的少。'
+      : '') +
     '费用按当前价格簿估算，官方账号为订阅折算，不是实际扣费。首字延迟、TPS 和网关内部用的是哪个号，请在网关自己的面板里看。';
 }
 

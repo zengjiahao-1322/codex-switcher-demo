@@ -92,21 +92,29 @@ export function renderRequests(container, rows, client) {
     ['结果'],
   ];
   const body = rows.map((r) => {
-    const counts = (n) => cell(r.ok ? tokens(n) : '—', true);
+    // 后台调用（记忆等）在 Codex 日志里没有 token，显示为“—”。
+    const counts = (n) => cell(r.ok && n != null ? tokens(n) : '—', true);
     const result = el('td');
     if (r.ok) result.append(tag('成功', 'done'));
     else {
       const reason = el('span', 'usage-error', r.error || '');
       reason.title = r.error || '';
-      result.append(tag('失败', 'changed'), reason);
+      // 重试行：Codex 自动重试前的这次请求失败了，整轮不一定失败。
+      result.append(tag(r.kind === 'retry' ? `重试 ${r.attempt}` : '失败', 'changed'), reason);
     }
     const project = el('td', 'usage-muted', folder(r.project));
     project.title = r.project || '';
+    const model = cell(r.model || '—');
+    if (r.kind === 'background') {
+      const note = tag('后台');
+      note.title = 'Codex 在对话之外自己发的请求，比如记忆功能；日志里没有它的 token 用量。';
+      model.append(note);
+    }
     const row = el('tr');
     row.append(
       cell(time(r.t)),
       cell(r.source.name),
-      cell(r.model || '—'),
+      model,
       ...(codex ? [cell(r.effort || '—')] : []),
       counts(r.input),
       counts(r.cachedInput),

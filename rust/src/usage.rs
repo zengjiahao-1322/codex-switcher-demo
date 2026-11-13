@@ -1,5 +1,6 @@
 //! Usage is indexed on API calls; neither prompts nor responses are deserialized.
 mod calendar;
+mod logs;
 mod prices;
 mod scan;
 use crate::{config_store, server::App};
@@ -239,7 +240,9 @@ fn indexed(app: &App, input: &Value, requests: bool) -> io::Result<Value> {
             .flatten()
             .find(|p| p["id"] == source["id"])
             .unwrap_or(&Value::Null);
-        let (cost, currency) = if r["ok"] == 1 {
+        // Background calls have no token counts in Codex's log, so they carry no cost either.
+        let background = r["kind"] == "background";
+        let (cost, currency) = if r["ok"] == 1 && !background {
             let (cost, currency) = prices::bill(r, &source, provider, &book, &overrides);
             (cost, Some(currency))
         } else {
@@ -249,9 +252,19 @@ fn indexed(app: &App, input: &Value, requests: bool) -> io::Result<Value> {
             r["t"].as_i64().unwrap() as i128 * 1_000_000,
         )
         .map_err(io::Error::other)?;
+        let mut row = json!({"kind":r["kind"],"attempt":r["attempt"]});
         Ok(
             json!({"t":calendar::format(calendar::local(t)?),"client":client,"source":source,"model":r["model"],"effort":if text(&r["effort"]).is_empty(){Value::Null}else{r["effort"].clone()},"tier":if text(&r["tier"]).is_empty(){Value::Null}else{r["tier"].clone()},"input":if client=="codex"{json!((number(&r["input"])-number(&r["cached_input"])).max(0))}else{r["input"].clone()},"cachedInput":r["cached_input"],"cacheWrite":number(&r["cache_write_5m"])+number(&r["cache_write_1h"]),"output":r["output"],"reasoning":r["reasoning"],"cost":cost,"currency":currency,"ok":r["ok"]==1,"error":if text(&r["error"]).is_empty(){Value::Null}else{r["error"].clone()},"durationMs":if r["duration_ms"].as_i64()==Some(-1){Value::Null}else{r["duration_ms"].clone()},"project":r["project"]}),
         )
+        .map(|mut v: Value| {
+            v.as_object_mut().unwrap().append(row.as_object_mut().unwrap());
+            if background {
+                for key in ["input", "cachedInput", "cacheWrite", "output", "reasoning"] {
+                    v[key] = Value::Null;
+                }
+            }
+            v
+        })
     };
     if requests {
         let total = db.query(
@@ -341,7 +354,7 @@ fn indexed(app: &App, input: &Value, requests: bool) -> io::Result<Value> {
     )
 }
 fn aggregate() -> Value {
-    json!({"input":0,"cachedInput":0,"cacheWrite":0,"output":0,"reasoning":0,"requests":0,"failed":0,"cost":{},"priced":0,"unpriced":0})
+    json!({"input":0,"cachedInput":0,"cacheWrite":0,"output":0,"reasoning":0,"requests":0,"failed":0,"cost":{},"priced":0,"unpriced":0,"unknownTokens":0})
 }
 fn accumulate(v: &mut Value, row: &Value) {
     for key in ["input", "cachedInput", "cacheWrite", "output", "reasoning"] {
@@ -349,6 +362,10 @@ fn accumulate(v: &mut Value, row: &Value) {
     }
     v["requests"] = json!(number(&v["requests"]) + 1);
     v["failed"] = json!(number(&v["failed"]) + i64::from(row["ok"] != true));
+    if row["kind"] == "background" {
+        v["unknownTokens"] = json!(number(&v["unknownTokens"]) + 1);
+        return;
+    }
     if row["ok"] != true {
         return;
     }
