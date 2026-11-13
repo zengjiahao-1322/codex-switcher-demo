@@ -546,6 +546,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Companion silence diagnostic failed: {error}");
         }
     });
+    let follow_app = app.clone();
+    tokio::spawn(async move {
+        if let Err(error) = crate::editor_integration::follow_update(follow_app.clone()).await {
+            let _ = crate::diagnostics::log(&follow_app.bridge, "companion.follow", json!({"error":error.to_string()}));
+        }
+    });
     crate::migration::start(app.clone(), copied_local);
     tokio::spawn(crate::accounts::keep_alive(app.clone()));
     if let (Some(directory), Some(sequence)) =

@@ -204,11 +204,7 @@ pub async fn uninstall(app: Arc<App>, input: &Value) -> io::Result<Value> {
     if root.join(".git").exists() {
         return Err(io::Error::other("开发目录请保留源码，不能从这里卸载。"));
     }
-    if crate::desktop_sidebar::restore(&app).await?["pending"] == true {
-        return Err(io::Error::other(
-            "卸载前要还原 Codex 桌面端原有的侧边栏规则，但桌面端还在运行（关窗口只会藏到托盘）。请从托盘菜单退出桌面端后再卸载。",
-        ));
-    }
+    crate::desktop_sidebar::restore_closing(&app).await?;
     let text = config_ops::read(&app.codex_home().join("config.toml"))?.unwrap_or_default();
     let config: toml::Value = toml::from_str(&text).map_err(io::Error::other)?;
     let selected = config

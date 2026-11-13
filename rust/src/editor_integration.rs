@@ -166,6 +166,49 @@ pub async fn install(app: &App, input: &Value) -> io::Result<Value> {
     )
 }
 
+/// After the switcher updates itself, update the companion in editors that already use it,
+/// so nobody has to press "update extensions". Open windows pick it up at their next reload.
+pub async fn follow_update(app: std::sync::Arc<App>) -> io::Result<()> {
+    let build = crate::instance::runtime();
+    if build["sequence"].as_u64().is_none_or(|n| n == 0) {
+        return Ok(());
+    }
+    let version = text(&build["version"]).to_owned();
+    let marker = app.bridge.join("companion-follow.json");
+    if crate::config_store::read_json(&marker)?["version"] == version {
+        return Ok(());
+    }
+    let installed = crate::diagnostics::companion_installations();
+    let mut results = vec![];
+    for editor in editors()? {
+        let product = match text(&editor["name"]) {
+            "VS Code" => "Code",
+            "VS Code Insiders" => "Code - Insiders",
+            name => name,
+        };
+        let extensions = installed["editors"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|e| e["editor"] == product)
+            .flat_map(|e| e["extensions"].as_array().into_iter().flatten())
+            .filter(|e| e["registered"] == true)
+            .collect::<Vec<_>>();
+        if extensions.is_empty() || extensions.iter().any(|e| e["version"] == version.as_str()) {
+            continue;
+        }
+        results.push(match install(&app, &json!({"id":editor["id"]})).await {
+            Ok(_) => json!({"name":editor["name"],"status":"updated"}),
+            Err(error) => json!({"name":editor["name"],"error":error.to_string()}),
+        });
+    }
+    crate::instance::write_json(&marker, &json!({"version":version}))?;
+    if !results.is_empty() {
+        crate::diagnostics::log(&app.bridge, "companion.follow", json!({"version":version,"editors":results}))?;
+    }
+    Ok(())
+}
+
 pub async fn update_all(app: &std::sync::Arc<App>) -> io::Result<Value> {
     let mut results = vec![];
     for editor in editors()? {

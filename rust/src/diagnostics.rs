@@ -61,7 +61,7 @@ fn disabled_extensions(user: &Path) -> Value {
         }
     }
 }
-fn companion_installations() -> Value {
+pub fn companion_installations() -> Value {
     let home = crate::platform::user_home();
     let config = if cfg!(windows) {
         env::var_os("APPDATA")

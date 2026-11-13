@@ -371,7 +371,6 @@ pub struct Prepared {
     reason: &'static str,
     snapshot: bool,
     adapter_target: Option<Value>,
-    autostart: bool,
 }
 impl Prepared {
     pub fn apply(self, app: &App) -> io::Result<Value> {
@@ -425,13 +424,8 @@ impl Prepared {
             let mut settings = crate::adapter::settings(app)?;
             settings["target"] = target;
             write_json(&app.bridge.join("adapter.json"), &settings)?;
-            if self.autostart
-                && settings["autostartDecided"] != true
-                && !crate::integration::startup_file().exists()
-            {
-                crate::integration::autostart(true, &app.bridge)?;
-                note = "已开启开机自启转换服务（可在切换器中关闭）。";
-            } else if !crate::integration::startup_file().exists() {
+            // Autostart is the user's choice in settings; a switch only reminds.
+            if !crate::integration::startup_file().exists() {
                 note = "注意：未开启开机自启，重启电脑后需先打开切换器，Codex 才能使用该配置。";
             }
         }
@@ -518,7 +512,6 @@ pub async fn prepare_api(app: &App, input: &Value) -> io::Result<Prepared> {
         reason: "switch",
         snapshot,
         adapter_target: adapter.then(|| crate::adapter::target(&p, model)),
-        autostart: adapter && input["autostart"] != false,
     })
 }
 pub async fn prepare_backup(app: &App, id: &str) -> io::Result<Prepared> {
@@ -598,7 +591,6 @@ pub async fn prepare_backup(app: &App, id: &str) -> io::Result<Prepared> {
         reason: "restore",
         snapshot: false,
         adapter_target,
-        autostart: false,
     })
 }
 fn follow(input: &Value) -> io::Result<()> {

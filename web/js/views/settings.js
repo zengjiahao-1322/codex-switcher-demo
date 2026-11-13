@@ -51,7 +51,8 @@ $('app-uninstall').onclick = () => {
   panel.replaceChildren();
   const text = document.createElement('p');
   text.textContent =
-    '将删除程序文件、桌面图标、开机自启和“已安装的应用”登记；不会删除 Codex 登录和对话。';
+    '将删除程序文件、桌面图标、开机自启和“已安装的应用”登记；不会删除 Codex 登录和对话。' +
+    '如果切换器保留过桌面端侧边栏，会先关闭正在运行的 Codex 桌面端再还原，未完成的回复会中断。';
   const label = document.createElement('label');
   label['className'] = 'check';
   const keep = document.createElement('input');

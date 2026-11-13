@@ -36,10 +36,10 @@ fn merge(saved: &Value, current: &Value) -> Value {
     value
 }
 
-fn desktop_running(app: &App, snapshot: &Value) -> io::Result<bool> {
+fn desktop_pids(app: &App, snapshot: &Value) -> BTreeSet<u32> {
     let home = crate::platform::display_path(&app.codex_home());
     // A desktop whose home is unknown may be ours; count it, and check both its pids.
-    let pids = snapshot["clients"]
+    snapshot["clients"]
         .as_array()
         .into_iter()
         .flatten()
@@ -52,8 +52,11 @@ fn desktop_running(app: &App, snapshot: &Value) -> io::Result<bool> {
         .flat_map(|c| [c["pid"].as_u64(), c["desktopPid"].as_u64()])
         .flatten()
         .map(|pid| pid as u32)
-        .collect::<BTreeSet<_>>();
-    for pid in pids {
+        .collect()
+}
+
+fn desktop_running(app: &App, snapshot: &Value) -> io::Result<bool> {
+    for pid in desktop_pids(app, snapshot) {
         if crate::platform::running(pid)? {
             return Ok(true);
         }
@@ -215,6 +218,32 @@ fn restore_snapshot(app: &App, snapshot: &Value) -> io::Result<Value> {
         json!({"restored":true,"ownerNull":current[KEY]["owner"].is_null()}),
     )?;
     Ok(json!({"pending":false,"message":"已恢复桌面端原有的账号侧边栏规则"}))
+}
+
+/// Uninstall cannot wait for the next switch, so it quits the desktop first, as a switch does.
+pub async fn restore_closing(app: &App) -> io::Result<Value> {
+    if !app.bridge.join("desktop-sidebar.json").exists() {
+        return Ok(json!({}));
+    }
+    let snapshot = crate::editors::status(app).await?;
+    // Stop the same desktops a switch stops: confirmed to share this CODEX_HOME.
+    let ids = snapshot["clients"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| c["kind"] == "desktop" && c["confirmed"] == true && c["shared"] == true)
+        .flat_map(|c| [c["pid"].as_u64(), c["desktopPid"].as_u64()])
+        .flatten()
+        .map(|pid| pid as u32)
+        .collect::<BTreeSet<_>>();
+    crate::platform::stop_desktop(ids.into_iter().collect()).await?;
+    let result = restore_snapshot(app, &snapshot)?;
+    if result["pending"] == true {
+        return Err(io::Error::other(
+            "卸载前要还原 Codex 桌面端原有的侧边栏规则，但还有无法确认归属的桌面端在运行。请从托盘菜单退出桌面端后再卸载。",
+        ));
+    }
+    Ok(result)
 }
 
 pub async fn restore(app: &App) -> io::Result<Value> {
