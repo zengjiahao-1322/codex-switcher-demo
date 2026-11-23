@@ -39,6 +39,25 @@ pub fn settings(app: &App) -> io::Result<Value> {
     crate::instance::write_json(&path, &value)?;
     Ok(value)
 }
+/// The switcher could not listen on its usual port. Move the conversion service to the port it
+/// did get, unless a Codex or Claude Code config still points at the old one: moving then would
+/// strand that config, while the usual port is likely free again at the next start.
+pub fn follow_port(app: &App, port: u16) -> io::Result<bool> {
+    let mut settings = settings(app)?;
+    let old = format!("127.0.0.1:{}", settings["port"]);
+    let in_use = [
+        app.codex_home().join("config.toml"),
+        crate::claude::settings::settings_file(),
+    ]
+    .iter()
+    .any(|file| fs::read_to_string(file).is_ok_and(|text| text.contains(&old)));
+    if in_use {
+        return Ok(false);
+    }
+    settings["port"] = json!(port);
+    crate::instance::write_json(&app.bridge.join("adapter.json"), &settings)?;
+    Ok(true)
+}
 pub async fn local_provider(app: &App, provider: &Value) -> io::Result<Value> {
     let settings = settings(app)?;
     let port = settings["port"].as_u64().unwrap();
@@ -54,7 +73,7 @@ pub async fn local_provider(app: &App, provider: &Value) -> io::Result<Value> {
             .is_ok_and(|r| r.status().is_success());
         if !ready {
             return Err(io::Error::other(format!(
-                "本机转换服务未运行（端口 {port}），无法使用转换模式。请先打开切换器。"
+                "本机转换服务需要端口 {port}，但它被别的程序占着，切换器这次改用了其他端口。请退出切换器后重新打开；仍不行就重启电脑。"
             )));
         }
     }

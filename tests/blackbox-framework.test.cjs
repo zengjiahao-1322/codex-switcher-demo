@@ -306,5 +306,20 @@ test('双后台黑盒：固定端口交接只停止同安装隔离后台，外�
     .trim()
     .split('\n')
     .map((line) => JSON.parse(line));
-  assert.equal(events.find((row) => row.event === 'startup').portFallback.port, occupied);
+  const startup = events.find((row) => row.event === 'startup');
+  assert.equal(startup.portFallback.port, occupied);
+  // Nothing points at the old port yet, so the conversion service follows the port it got.
+  assert.equal(startup.portFallback.adapterFollowed, true);
+  const adapter = (bridge) => JSON.parse(fs.readFileSync(path.join(bridge, 'adapter.json'))).port;
+  assert.equal(adapter(fallback.bridge), Number(fallback.url.port));
+  // A Codex config already using the conversion service keeps the old port.
+  const pinned = await startBackend(t, {
+    port: occupied,
+    setup: ({ home }) =>
+      fs.writeFileSync(
+        path.join(home, 'config.toml'),
+        `model_provider="hermes_bridge"\n[model_providers.hermes_bridge]\nname="x"\nbase_url="http://127.0.0.1:${occupied}/v1"\n`,
+      ),
+  });
+  assert.equal(adapter(pinned.bridge), occupied);
 });

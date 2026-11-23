@@ -21,7 +21,7 @@ pub(super) fn config_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| crate::platform::user_home().join(".claude"))
 }
-pub(super) fn settings_file() -> PathBuf {
+pub(crate) fn settings_file() -> PathBuf {
     config_dir().join("settings.json")
 }
 pub(super) fn current_file(bridge: &Path) -> PathBuf {

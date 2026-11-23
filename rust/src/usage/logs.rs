@@ -20,13 +20,14 @@ fn field<'a>(body: &'a str, key: &str) -> Option<&'a str> {
 }
 
 // `status=500 Internal Server Error headers={...}` -> (500, "HTTP 500 Internal Server Error").
-fn status(body: &str) -> (u16, String) {
-    let rest = &body[body.find("status=").unwrap() + 7..];
+// None when the line carries no status, e.g. a background call whose HTTP line was pruned.
+fn status(body: &str) -> Option<(u16, String)> {
+    let rest = &body[body.find("status=")? + 7..];
     let rest = &rest[..rest.find(" headers=").unwrap_or(rest.len())];
-    (
-        rest.split(' ').next().unwrap().parse().unwrap_or(0),
+    Some((
+        rest.split(' ').next()?.parse().ok()?,
         format!("HTTP {}", rest.trim()),
-    )
+    ))
 }
 
 pub fn scan(codex_home: &Path, db: &Database, sources: &[Source]) -> io::Result<()> {
@@ -92,21 +93,25 @@ pub fn scan(codex_home: &Path, db: &Database, sources: &[Source]) -> io::Result<
                 }
             }
             "codex_http_client::client" => {
-                let (code, error) = status(body);
-                if !(200..300).contains(&code) {
+                if let Some((code, error)) = status(body)
+                    && !(200..300).contains(&code)
+                {
                     failed_at.insert(turn.to_owned(), t);
                     insert("http", false, Some(error), None)?;
                 }
             }
             _ => {
-                // The background request's result is the HTTP line written just before it.
+                // The background request's result is normally the HTTP line written just before it;
+                // when that line is gone the request still counts, with its result unknown (ok).
                 let http = log.query(
                     "SELECT feedback_log_body AS body FROM logs WHERE id=?",
                     &[json!(id - 1)],
                 )?;
-                let (code, error) = status(http[0]["body"].as_str().unwrap_or(""));
-                let ok = (200..300).contains(&code);
-                insert("background", ok, (!ok).then_some(error), None)?;
+                let failed = http
+                    .first()
+                    .and_then(|r| status(r["body"].as_str().unwrap_or("")))
+                    .filter(|(code, _)| !(200..300).contains(code));
+                insert("background", failed.is_none(), failed.map(|(_, e)| e), None)?;
             }
         }
     }

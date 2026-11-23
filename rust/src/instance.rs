@@ -423,7 +423,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map(|b| format!("{b:02x}"))
             .collect::<String>()
     });
+    // The conversion service's port is remembered in adapter.json; it is usually 47831.
+    let remembered = crate::accounts::read(&bridge.join("adapter.json"), Value::Null)?["port"]
+        .as_u64()
+        .map(|p| p.to_string());
     let desired_port = env::var("BRIDGE_PORT")
+        .ok()
+        .or(remembered)
         .unwrap_or("47831".into())
         .parse::<u16>()?;
     let protection_started = Instant::now();
@@ -501,6 +507,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Err(error) => return Err(error.into()),
     };
     app.port = listener.local_addr()?.port();
+    if handover.get("portFallback").is_some() {
+        handover["portFallback"]["adapterFollowed"] =
+            json!(crate::adapter::follow_port(&app, app.port)?);
+    }
     platform::clean_client_records(&app.bridge)?;
     let connection = json!({"pid":std::process::id(),"url":format!("http://127.0.0.1:{}/#{}",app.port,app.token),"build":runtime()});
     write_json(&running_path, &connection)?;

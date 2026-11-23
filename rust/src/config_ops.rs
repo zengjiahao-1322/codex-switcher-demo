@@ -269,7 +269,7 @@ async fn validate(app: &App, next: &str) -> io::Result<()> {
         std::process::id(),
         crate::diagnostics::now().replace([':', '.', '+'], "")
     ));
-    fs::create_dir_all(&root)?;
+    fs::create_dir_all(&root).map_err(|e| file_error(e, "创建", &root, None))?;
     // Validation receives a copy with placeholder credentials and a loopback URL.
     let mut copy = config.clone();
     if let Some(providers) = copy
@@ -290,7 +290,8 @@ async fn validate(app: &App, next: &str) -> io::Result<()> {
         }
     }
     let text = toml::to_string(&copy).map_err(io::Error::other)?;
-    fs::write(root.join("config.toml"), text)?;
+    fs::write(root.join("config.toml"), text)
+        .map_err(|e| file_error(e, "写入", &root.join("config.toml"), None))?;
     let mut command = tokio::process::Command::new(crate::platform::codex_path(&app.bridge)?);
     command
         .args(["--strict-config", "app-server"])
@@ -326,7 +327,23 @@ async fn validate(app: &App, next: &str) -> io::Result<()> {
         child.wait().await?;
         checked
     }.await;
-    fs::remove_dir_all(root)?;
+    // Codex writes databases into the temporary CODEX_HOME, and antivirus or indexing may still
+    // hold one of them for a moment (os error 32). A leftover temp folder must not block the switch.
+    let mut cleanup = fs::remove_dir_all(&root);
+    for _ in 0..20 {
+        if cleanup.is_ok() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        cleanup = fs::remove_dir_all(&root);
+    }
+    if let Err(error) = cleanup {
+        crate::diagnostics::log(
+            &app.bridge,
+            "config.validate.cleanup",
+            json!({"path":crate::platform::display_path(&root),"error":error.to_string()}),
+        )?;
+    }
     result
 }
 

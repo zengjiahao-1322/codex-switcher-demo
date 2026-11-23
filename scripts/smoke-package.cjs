@@ -78,6 +78,9 @@ const freePort = () =>
       BRIDGE_DISCOVERY_DIR: path.join(root, 'discovery'),
       BRIDGE_PORT: String(await freePort()),
       SWITCHER_TEST_SHELL_ROOT: path.join(root, 'shell'),
+      // The packaged build updates the companion in editors it finds; keep it away from real ones.
+      LOCALAPPDATA: path.join(root, 'local'),
+      ProgramFiles: path.join(root, 'programs'),
     };
     for (const directory of ['runtime', 'bin', 'node_modules'])
       assert.ok(fs.existsSync(path.join(app, directory, '.keep')), directory + '/.keep missing');

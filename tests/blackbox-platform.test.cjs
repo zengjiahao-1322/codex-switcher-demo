@@ -56,6 +56,9 @@ function installation(sequence, discovery) {
     const exe = path.join(install, process.platform === 'win32' ? 'switcher.exe' : 'switcher');
     fs.copyFileSync(rustBinary(), exe);
     fs.writeFileSync(path.join(install, 'release-info.json'), JSON.stringify({ sequence }));
+    // An installed build updates the companion in editors it finds; never let it find the real ones.
+    environment.LOCALAPPDATA = path.join(root, 'local');
+    environment.ProgramFiles = path.join(root, 'programs');
     environment.SWITCHER_BLACKBOX_PROJECT = install;
     environment.SWITCHER_BLACKBOX_EXE = exe;
     environment.SWITCHER_WEB_ROOT = path.join(install, 'web');
