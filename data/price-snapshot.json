@@ -1,8 +1,121 @@
 {
   "source": "openrouter",
-  "fetchedAt": "2026-11-11T06:39:57.005Z",
+  "fetchedAt": "2026-11-23T13:01:49.453Z",
   "version": 1,
   "models": [
+    {
+      "id": "google/gemini-4-neon",
+      "pricing": {
+        "prompt": "0.000003",
+        "completion": "0.000015",
+        "image": "0.000003",
+        "audio": "0.000003",
+        "input_audio_cache": "0.00000015",
+        "web_search": "0.014",
+        "internal_reasoning": "0.000015",
+        "input_cache_read": "0.00000015",
+        "input_cache_write": "0.0000000833333333333333"
+      }
+    },
+    {
+      "id": "openai/gpt-6.2-astra-pro",
+      "pricing": {
+        "prompt": "0.000008",
+        "completion": "0.00004",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000004",
+        "input_cache_write": "0.00001",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000016",
+            "completion": "0.00006",
+            "input_cache_read": "0.0000008",
+            "input_cache_write": "0.00002"
+          }
+        ]
+      }
+    },
+    {
+      "id": "openai/gpt-6.2-astra",
+      "pricing": {
+        "prompt": "0.000008",
+        "completion": "0.00004",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000004",
+        "input_cache_write": "0.00001",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000016",
+            "completion": "0.00006",
+            "input_cache_read": "0.0000008",
+            "input_cache_write": "0.00002"
+          }
+        ]
+      }
+    },
+    {
+      "id": "openai/gpt-6.2-sol-pro",
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000001",
+        "input_cache_write": "0.0000025",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000004",
+            "completion": "0.000015",
+            "input_cache_read": "0.0000002",
+            "input_cache_write": "0.000005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "openai/gpt-6.2-sol",
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000001",
+        "input_cache_write": "0.0000025",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000004",
+            "completion": "0.000015",
+            "input_cache_read": "0.0000002",
+            "input_cache_write": "0.000005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "qwen/qwen4-max",
+      "pricing": {
+        "prompt": "0.000001425",
+        "completion": "0.000004275",
+        "input_cache_read": "0.00000007125",
+        "input_cache_write": "0.00000178125"
+      }
+    },
+    {
+      "id": "google/gemini-4-hydrogen",
+      "pricing": {
+        "prompt": "0.0000015",
+        "completion": "0.0000075",
+        "image": "0.0000015",
+        "audio": "0.0000015",
+        "input_audio_cache": "0.000000075",
+        "web_search": "0.014",
+        "internal_reasoning": "0.0000075",
+        "input_cache_read": "0.000000075",
+        "input_cache_write": "0.0000000833333333333333"
+      }
+    },
     {
       "id": "google/gemini-4-carbon",
       "pricing": {
@@ -93,17 +206,98 @@
     {
       "id": "moonshotai/kimi-k3.1-pro",
       "pricing": {
-        "prompt": "0.000002",
-        "completion": "0.00001",
+        "prompt": "0.0000002403",
+        "completion": "0.0000084023",
         "input_cache_read": "0.0000002"
       }
     },
     {
       "id": "deepseek/deepseek-v4.1-flash-1017",
       "pricing": {
-        "prompt": "0.000000006",
-        "completion": "0.0000005",
-        "input_cache_read": "0.000000005"
+        "prompt": "0.00000015",
+        "completion": "0.0000006",
+        "input_cache_read": "0.000000003",
+        "overrides": [
+          {
+            "utc_days": [
+              "saturday",
+              "sunday"
+            ],
+            "prompt": "0.00000015",
+            "completion": "0.0000006",
+            "input_cache_read": "0.000000003"
+          },
+          {
+            "utc_days": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday"
+            ],
+            "utc_start": 0,
+            "utc_end": 100,
+            "prompt": "0.00000015",
+            "completion": "0.0000006",
+            "input_cache_read": "0.000000003"
+          },
+          {
+            "utc_days": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday"
+            ],
+            "utc_start": 100,
+            "utc_end": 400,
+            "prompt": "0.0000003",
+            "completion": "0.0000012",
+            "input_cache_read": "0.000000006"
+          },
+          {
+            "utc_days": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday"
+            ],
+            "utc_start": 400,
+            "utc_end": 600,
+            "prompt": "0.00000015",
+            "completion": "0.0000006",
+            "input_cache_read": "0.000000003"
+          },
+          {
+            "utc_days": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday"
+            ],
+            "utc_start": 600,
+            "utc_end": 1000,
+            "prompt": "0.0000003",
+            "completion": "0.0000012",
+            "input_cache_read": "0.000000006"
+          },
+          {
+            "utc_days": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday"
+            ],
+            "utc_start": 1000,
+            "utc_end": 0,
+            "prompt": "0.00000015",
+            "completion": "0.0000006",
+            "input_cache_read": "0.000000003"
+          }
+        ]
       }
     },
     {
@@ -202,9 +396,9 @@
     {
       "id": "z-ai/glm-5.3-prime",
       "pricing": {
-        "prompt": "0.0000028",
-        "completion": "0.0000088",
-        "input_cache_read": "0.00000056"
+        "prompt": "0.00000168",
+        "completion": "0.00000528",
+        "input_cache_read": "0.000000336"
       }
     },
     {
@@ -338,9 +532,9 @@
     {
       "id": "deepseek/deepseek-v4.1-flash",
       "pricing": {
-        "prompt": "0.000000051",
-        "completion": "0.000000567",
-        "input_cache_read": "0.000000018"
+        "prompt": "0.0000000498",
+        "completion": "0.0000001992",
+        "input_cache_read": "0.000000000996"
       }
     },
     {
@@ -426,16 +620,16 @@
       "id": "z-ai/glm-5.3-flash",
       "pricing": {
         "prompt": "0.0000000399",
-        "completion": "0.0000000784",
+        "completion": "0.000000074",
         "input_cache_read": "0.00000003"
       }
     },
     {
       "id": "deepseek/deepseek-v4-flash-vision-exp",
       "pricing": {
-        "prompt": "0.00000044",
-        "completion": "0.00000132",
-        "input_cache_read": "0.000000014"
+        "prompt": "0.0000002156",
+        "completion": "0.0000006468",
+        "input_cache_read": "0.00000000686"
       }
     },
     {
@@ -449,9 +643,9 @@
     {
       "id": "qwen/qwen3.8-27b",
       "pricing": {
-        "prompt": "0.00000015",
-        "completion": "0.000001875",
-        "input_cache_read": "0.0000000375"
+        "prompt": "0.000000035",
+        "completion": "0.0000015",
+        "input_cache_read": "0.0000000175"
       }
     },
     {
@@ -479,9 +673,9 @@
     {
       "id": "deepseek/deepseek-v4-pro-0813",
       "pricing": {
-        "prompt": "0.000000111",
-        "completion": "0.00000444",
-        "input_cache_read": "0.000000097"
+        "prompt": "0.00000132",
+        "completion": "0.00000396",
+        "input_cache_read": "0.000000044"
       }
     },
     {
@@ -759,17 +953,17 @@
     {
       "id": "z-ai/glm-5.2",
       "pricing": {
-        "prompt": "0.000000007",
-        "completion": "0.0000068",
-        "input_cache_read": "0.000000006"
+        "prompt": "0.00000062",
+        "completion": "0.00000242",
+        "input_cache_read": "0.00000014"
       }
     },
     {
       "id": "moonshotai/kimi-k2.7-code",
       "pricing": {
         "prompt": "0.0000006",
-        "completion": "0.0000035",
-        "input_cache_read": "0.00000016"
+        "completion": "0.000003",
+        "input_cache_read": "0.00000012"
       }
     },
     {
@@ -819,23 +1013,6 @@
         "completion": "0.000004425",
         "input_cache_read": "0.000000295",
         "input_cache_write": "0.00000184375"
-      }
-    },
-    {
-      "id": "x-ai/grok-build-0.1",
-      "pricing": {
-        "prompt": "0.000001",
-        "completion": "0.000002",
-        "web_search": "0.005",
-        "input_cache_read": "0.0000002",
-        "overrides": [
-          {
-            "min_prompt_tokens": 200000,
-            "prompt": "0.000002",
-            "completion": "0.000004",
-            "input_cache_read": "0.0000004"
-          }
-        ]
       }
     },
     {
@@ -927,8 +1104,8 @@
     {
       "id": "qwen/qwen3.6-35b-a3b",
       "pricing": {
-        "prompt": "0.0000001",
-        "completion": "0.0000009",
+        "prompt": "0.00000005",
+        "completion": "0.0000007",
         "input_cache_read": "0.000000025"
       }
     },
@@ -974,9 +1151,9 @@
     {
       "id": "deepseek/deepseek-v4-pro",
       "pricing": {
-        "prompt": "0.00000095526",
-        "completion": "0.00000191052",
-        "input_cache_read": "0.000000079605"
+        "prompt": "0.0000009",
+        "completion": "0.0000015",
+        "input_cache_read": "0.0000002"
       }
     },
     {
@@ -1019,17 +1196,17 @@
     {
       "id": "z-ai/glm-5.1",
       "pricing": {
-        "prompt": "0.00000133",
-        "completion": "0.00000418",
-        "input_cache_read": "0.000000247"
+        "prompt": "0.0000014",
+        "completion": "0.0000044",
+        "input_cache_read": "0.00000026"
       }
     },
     {
       "id": "google/gemma-4-26b-a4b-it",
       "pricing": {
-        "prompt": "0.00000008",
-        "completion": "0.0000001",
-        "input_cache_read": "0.000000046"
+        "prompt": "0.00000009",
+        "completion": "0.0000003",
+        "input_cache_read": "0.00000005"
       }
     },
     {
@@ -1313,9 +1490,9 @@
     {
       "id": "qwen/qwen3.5-397b-a17b",
       "pricing": {
-        "prompt": "0.0000006",
-        "completion": "0.0000036",
-        "input_cache_read": "0.00000012"
+        "prompt": "0.00000045",
+        "completion": "0.000003",
+        "input_cache_read": "0.00000022"
       }
     },
     {
@@ -1348,9 +1525,9 @@
     {
       "id": "moonshotai/kimi-k2.5",
       "pricing": {
-        "prompt": "0.000000532",
-        "completion": "0.000003325",
-        "input_cache_read": "0.000000209"
+        "prompt": "0.0000005",
+        "completion": "0.0000025",
+        "input_cache_read": "0.00000015"
       }
     },
     {
@@ -1584,13 +1761,6 @@
       }
     },
     {
-      "id": "qwen/qwen3-vl-30b-a3b-thinking",
-      "pricing": {
-        "prompt": "0.00000029",
-        "completion": "0.000001"
-      }
-    },
-    {
       "id": "qwen/qwen3-vl-30b-a3b-instruct",
       "pricing": {
         "prompt": "0.00000015",
@@ -1684,8 +1854,9 @@
     {
       "id": "qwen/qwen3-next-80b-a3b-instruct",
       "pricing": {
-        "prompt": "0.00000009",
-        "completion": "0.0000011"
+        "prompt": "0.0000001",
+        "completion": "0.0000011",
+        "input_cache_read": "0.00000007"
       }
     },
     {
@@ -1741,9 +1912,9 @@
     {
       "id": "openai/gpt-oss-120b",
       "pricing": {
-        "prompt": "0.00000015",
-        "completion": "0.0000006",
-        "input_cache_read": "0.000000075"
+        "prompt": "0.00000005",
+        "completion": "0.00000025",
+        "input_cache_read": "0.00000005"
       }
     },
     {
@@ -1768,8 +1939,8 @@
     {
       "id": "qwen/qwen3-coder-30b-a3b-instruct",
       "pricing": {
-        "prompt": "0.00000015",
-        "completion": "0.0000006"
+        "prompt": "0.00000007",
+        "completion": "0.00000028"
       }
     },
     {
@@ -1791,9 +1962,9 @@
     {
       "id": "z-ai/glm-4.5-air",
       "pricing": {
-        "prompt": "0.0000002",
-        "completion": "0.0000011",
-        "input_cache_read": "0.00000003"
+        "prompt": "0.00000013",
+        "completion": "0.00000085",
+        "input_cache_read": "0.000000025"
       }
     },
     {
@@ -1913,9 +2084,8 @@
     {
       "id": "deepseek/deepseek-r1-0528",
       "pricing": {
-        "prompt": "0.0000005",
-        "completion": "0.00000215",
-        "input_cache_read": "0.00000035"
+        "prompt": "0.000000571",
+        "completion": "0.000002286"
       }
     },
     {
@@ -1928,8 +2098,8 @@
     {
       "id": "qwen/qwen3-14b",
       "pricing": {
-        "prompt": "0.0000001",
-        "completion": "0.00000022"
+        "prompt": "0.00000012",
+        "completion": "0.00000024"
       }
     },
     {
@@ -1978,16 +2148,16 @@
     {
       "id": "deepseek/deepseek-chat-v3-0324",
       "pricing": {
-        "prompt": "0.00000029",
-        "completion": "0.00000114",
-        "input_cache_read": "0.00000011"
+        "prompt": "0.00000025",
+        "completion": "0.000001"
       }
     },
     {
       "id": "google/gemma-3-4b-it",
       "pricing": {
-        "prompt": "0.00000005",
-        "completion": "0.0000001"
+        "prompt": "0.00000004",
+        "completion": "0.00000005",
+        "input_cache_read": "0.00000002"
       }
     },
     {
@@ -2001,8 +2171,7 @@
       "id": "google/gemma-3-27b-it",
       "pricing": {
         "prompt": "0.00000008",
-        "completion": "0.00000045",
-        "input_cache_read": "0.00000004"
+        "completion": "0.00000016"
       }
     },
     {
@@ -2034,8 +2203,8 @@
     {
       "id": "deepseek/deepseek-chat",
       "pricing": {
-        "prompt": "0.00000032",
-        "completion": "0.00000089"
+        "prompt": "0.0000002574",
+        "completion": "0.0000010287"
       }
     },
     {
