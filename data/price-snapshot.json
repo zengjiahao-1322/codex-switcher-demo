@@ -1,6 +1,6 @@
 {
   "source": "openrouter",
-  "fetchedAt": "2026-11-23T13:01:49.453Z",
+  "fetchedAt": "2026-11-28T07:17:39.409Z",
   "version": 1,
   "models": [
     {
@@ -532,9 +532,9 @@
     {
       "id": "deepseek/deepseek-v4.1-flash",
       "pricing": {
-        "prompt": "0.0000000498",
-        "completion": "0.0000001992",
-        "input_cache_read": "0.000000000996"
+        "prompt": "0.000000051",
+        "completion": "0.000000567",
+        "input_cache_read": "0.000000018"
       }
     },
     {
@@ -619,8 +619,8 @@
     {
       "id": "z-ai/glm-5.3-flash",
       "pricing": {
-        "prompt": "0.0000000399",
-        "completion": "0.000000074",
+        "prompt": "0.00000015",
+        "completion": "0.0000005",
         "input_cache_read": "0.00000003"
       }
     },
@@ -643,9 +643,9 @@
     {
       "id": "qwen/qwen3.8-27b",
       "pricing": {
-        "prompt": "0.000000035",
-        "completion": "0.0000015",
-        "input_cache_read": "0.0000000175"
+        "prompt": "0.00000006",
+        "completion": "0.00000196",
+        "input_cache_read": "0.000000059"
       }
     },
     {
@@ -673,9 +673,9 @@
     {
       "id": "deepseek/deepseek-v4-pro-0813",
       "pricing": {
-        "prompt": "0.00000132",
-        "completion": "0.00000396",
-        "input_cache_read": "0.000000044"
+        "prompt": "0.0000000999",
+        "completion": "0.000005",
+        "input_cache_read": "0.0000000999"
       }
     },
     {
@@ -698,8 +698,8 @@
     {
       "id": "deepseek/deepseek-v4-flash-0731",
       "pricing": {
-        "prompt": "0.0000000434",
-        "completion": "0.0000003",
+        "prompt": "0.0000000456",
+        "completion": "0.00000027",
         "input_cache_read": "0.000000035"
       }
     },
@@ -1104,9 +1104,9 @@
     {
       "id": "qwen/qwen3.6-35b-a3b",
       "pricing": {
-        "prompt": "0.00000005",
-        "completion": "0.0000007",
-        "input_cache_read": "0.000000025"
+        "prompt": "0.0000001",
+        "completion": "0.00000089",
+        "input_cache_read": "0.000000035"
       }
     },
     {
@@ -1151,9 +1151,9 @@
     {
       "id": "deepseek/deepseek-v4-pro",
       "pricing": {
-        "prompt": "0.0000009",
-        "completion": "0.0000015",
-        "input_cache_read": "0.0000002"
+        "prompt": "0.00000027899",
+        "completion": "0.0000015579",
+        "input_cache_read": "0.00000024"
       }
     },
     {
@@ -1204,9 +1204,9 @@
     {
       "id": "google/gemma-4-26b-a4b-it",
       "pricing": {
-        "prompt": "0.00000009",
-        "completion": "0.0000003",
-        "input_cache_read": "0.00000005"
+        "prompt": "0.0000000675",
+        "completion": "0.000000225",
+        "input_cache_read": "0.0000000375"
       }
     },
     {
@@ -1317,8 +1317,9 @@
     {
       "id": "qwen/qwen3.5-9b",
       "pricing": {
-        "prompt": "0.00000017",
-        "completion": "0.00000025"
+        "prompt": "0.000000085",
+        "completion": "0.000000125",
+        "input_cache_read": "0.0000000765"
       }
     },
     {
@@ -1490,9 +1491,9 @@
     {
       "id": "qwen/qwen3.5-397b-a17b",
       "pricing": {
-        "prompt": "0.00000045",
-        "completion": "0.000003",
-        "input_cache_read": "0.00000022"
+        "prompt": "0.0000005",
+        "completion": "0.0000036",
+        "input_cache_read": "0.0000003"
       }
     },
     {
@@ -1525,9 +1526,8 @@
     {
       "id": "moonshotai/kimi-k2.5",
       "pricing": {
-        "prompt": "0.0000005",
-        "completion": "0.0000025",
-        "input_cache_read": "0.00000015"
+        "prompt": "0.0000006",
+        "completion": "0.000003"
       }
     },
     {
@@ -1617,7 +1617,7 @@
       "pricing": {
         "prompt": "0.0000003",
         "completion": "0.0000009",
-        "input_cache_read": "0.000000055"
+        "input_cache_read": "0.00000005"
       }
     },
     {
@@ -1688,14 +1688,6 @@
         "completion": "0.000002",
         "web_search": "0.01",
         "input_cache_read": "0.00000003"
-      }
-    },
-    {
-      "id": "moonshotai/kimi-k2-thinking",
-      "pricing": {
-        "prompt": "0.0000006",
-        "completion": "0.0000025",
-        "input_cache_read": "0.00000015"
       }
     },
     {
@@ -1962,16 +1954,9 @@
     {
       "id": "z-ai/glm-4.5-air",
       "pricing": {
-        "prompt": "0.00000013",
-        "completion": "0.00000085",
-        "input_cache_read": "0.000000025"
-      }
-    },
-    {
-      "id": "qwen/qwen3-235b-a22b-thinking-2507",
-      "pricing": {
-        "prompt": "0.00000045",
-        "completion": "0.0000035"
+        "prompt": "0.0000002",
+        "completion": "0.0000011",
+        "input_cache_read": "0.00000003"
       }
     },
     {
