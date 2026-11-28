@@ -98,6 +98,18 @@ export function renderQuotaNotice() {
   }
   box.append(document.createTextNode('不会自动切换；如有额外额度，以官方计费为准。'));
 }
+// 可用的重置按过期时间排序，最早过期的在前；不过期的排最后。
+const resetList = (q) =>
+  [...(q?.resetCreditList || [])].sort(
+    (a, b) => (a.expiresAt ?? Infinity) - (b.expiresAt ?? Infinity),
+  );
+const expiry = (seconds) =>
+  new Date(seconds * 1000).toLocaleString('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 // compact 用于账号管理列表：一行摘要；完整进度条在选中来源的详情里。
 export function quotaNode(q, compact = false) {
   const box = document.createElement('div');
@@ -139,6 +151,12 @@ export function quotaNode(q, compact = false) {
           ),
         )
         .join(' · ') +
+        (q.resetCredits > 0
+          ? ' · 可重置 ' +
+            q.resetCredits +
+            ' 次' +
+            (resetList(q)[0]?.expiresAt ? '（最早 ' + expiry(resetList(q)[0].expiresAt) + ' 到期）' : '')
+          : '') +
         ' · 更新于 ' +
         new Date(q.checkedAt).toLocaleString('zh-CN', {
           month: 'numeric',
@@ -190,6 +208,15 @@ export function quotaNode(q, compact = false) {
     }
     if (b.credits?.unlimited) note('额外额度：不限量');
     else if (b.credits?.balance != null) note('额外额度余额：' + b.credits.balance);
+  }
+  // 官方给的“用量上限重置”次数和每次的过期时间；Codex 版本太旧读不到时不显示。
+  if (q.resetCredits != null) {
+    note('可用的重置次数：' + q.resetCredits);
+    for (const c of resetList(q))
+      note(
+        (c.title ? c.title + ' · ' : '') + (c.expiresAt ? expiry(c.expiresAt) + ' 到期' : '不过期'),
+        'quota-time',
+      );
   }
   if (q.checkedAt)
     note(
@@ -353,7 +380,41 @@ export function renderSelectedQuota() {
     b.disabled = busy;
     box.append(b);
     if (canRenew(a)) box.append(renewButton(a));
+    if (a.quota?.resetCredits > 0) box.append(resetButton(a));
   }
+}
+// 用掉一次官方的“用量上限重置”：先用最早过期的那次；额度立即恢复，下次周限额重置时间往后挪。
+function resetButton(a) {
+  const button = rowButton(
+    '用掉 1 次重置',
+    async () => {
+      const first = resetList(a.quota)[0];
+      if (
+        !confirm(
+          '用掉「' +
+            a.label +
+            '」的 1 次重置' +
+            (first?.expiresAt ? '（' + expiry(first.expiresAt) + ' 到期的那次）' : '') +
+            '？\n使用限额会立即恢复；下次周限额重置时间会改为你下次在 Codex 里发消息后的 7 天。',
+        )
+      )
+        return;
+      quotaRefreshing.add(a.id);
+      renderAccounts();
+      try {
+        const r = await api('accountQuotaReset', first ? { id: a.id, creditId: first.id } : { id: a.id });
+        const row = accountData?.items.find((x) => x.id === a.id);
+        if (row) row.quota = r.items.find((q) => q.id === a.id);
+        accountStatus(r.message);
+      } finally {
+        quotaRefreshing.delete(a.id);
+        renderAccounts();
+      }
+    },
+    accountStatus,
+  );
+  button.disabled = quotaRefreshing.has(a.id);
+  return button;
 }
 // 读取额度时官方可能续期令牌，套餐和会员时间随之变化；只合并这些字段，
 // 不替换整份账号数据，避免覆盖其他账号正在进行的刷新结果。
@@ -443,6 +504,7 @@ export function renderAccounts() {
     );
     acts.append(quotaButton);
     if (canRenew(a)) acts.append(renewButton(a));
+    if (a.quota?.resetCredits > 0) acts.append(resetButton(a));
     acts.append(
       rowButton(
         '重新登录',

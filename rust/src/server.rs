@@ -152,6 +152,7 @@ const ACTIONS: &[&str] = &[
     "accounts",
     "accountQuota",
     "accountRenew",
+    "accountQuotaReset",
     "accountLogin",
     "accountLoginCancel",
     "accountRename",

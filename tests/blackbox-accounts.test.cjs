@@ -355,6 +355,54 @@ test('官方额度HTTP：错误分类保留上次缓存、诊断不含秘密', a
   );
 });
 
+test('用量上限重置HTTP：读出次数和过期时间，用掉指定那次并记日志，失败也记日志', async (t) => {
+  const f = await officialFixture(t, { live: auth('alice') });
+  await accounts(f);
+  const id = accountId('alice');
+  const credit = (cid, expiresAt, status = 'available') => ({
+    id: cid, status, resetType: 'codexRateLimits', grantedAt: 1, expiresAt, title: 'Full reset', description: null,
+  });
+  const read = (count, credits) => (s) => {
+    s.methods['account/rateLimits/read'].result.rateLimitResetCredits = { availableCount: count, credits };
+  };
+  f.update(read(2, [credit('late', 2000000000), credit('soon', 1900000000), credit('used', 1800000000, 'redeemed')]));
+  const before = (await api(f, 'accountQuota', { id })).items[0];
+  assert.equal(before.resetCredits, 2);
+  assert.deepEqual(before.resetCreditList.map((c) => [c.id, c.expiresAt]), [['late', 2000000000], ['soon', 1900000000]]);
+  f.update((s) => {
+    read(1, [credit('late', 2000000000)])(s);
+    s.methods['account/rateLimitResetCredit/consume'] = { result: { outcome: 'reset' } };
+  });
+  const done = await api(f, 'accountQuotaReset', { id, creditId: 'soon' });
+  assert.equal(done.outcome, 'reset');
+  assert.equal(done.items[0].resetCredits, 1);
+  const consume = f.rpc().filter((c) => c.method === 'account/rateLimitResetCredit/consume');
+  assert.equal(consume.length, 1);
+  assert.equal(consume[0].params.creditId, 'soon');
+  assert.match(consume[0].params.idempotencyKey, /^[0-9a-f-]{36}$/);
+  f.update((s) => {
+    s.methods['account/rateLimitResetCredit/consume'] = { error: { code: -32601, message: 'method not found' } };
+  });
+  const refused = await api(f, 'accountQuotaReset', { id }, 400);
+  assert.match(refused.error, /不支持重置额度/);
+  const events = fs
+    .readFileSync(path.join(f.bridge, 'logs/switcher.log'), 'utf8')
+    .trim()
+    .split('\n')
+    .map(JSON.parse)
+    .filter((e) => e.event === 'official.quotaReset');
+  assert.equal(events.length, 2);
+  assert.equal(events[0].status, 'ok');
+  assert.equal(events[0].account, 'al***@example.test');
+  assert.equal(events[0].outcome, 'reset');
+  assert.equal(events[0].creditExpiresAt, 1900000000);
+  assert.equal(events[0].availableBefore, 2);
+  assert.equal(events[0].availableAfter, 1);
+  assert.equal(events[1].status, 'error');
+  assert.equal(events[1].code, -32601);
+  assert.equal(events[1].availableBefore, 1);
+});
+
 test('官方额度HTTP：同账号合并、两个共享名额、快请求独立且失败释放名额', async (t) => {
   const f = await officialFixture(t, { live: auth('slow') });
   for (const user of ['slow', 'fast', 'failed', 'queued']) {

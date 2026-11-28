@@ -44,6 +44,7 @@ pub const ACTIONS: &[&str] = &[
     "accountLoginCancel",
     "accountQuota",
     "accountRenew",
+    "accountQuotaReset",
 ];
 pub fn read(file: &Path, fallback: Value) -> io::Result<Value> {
     match fs::read(file) {
@@ -551,6 +552,9 @@ pub async fn action(app: Arc<App>, action: &str, input: &Value) -> io::Result<Va
     if action == "accountRenew" {
         return renew_action(app, input).await;
     }
+    if action == "accountQuotaReset" {
+        return reset_action(app, input).await;
+    }
     let _operation = if action == "accounts" {
         None
     } else {
@@ -1042,6 +1046,16 @@ fn buckets(result: &Value) -> Vec<Value> {
     }
     output
 }
+// The login in use is about to be renewed by Codex itself. Opening another session on a copy
+// would refresh it first and sign the running Codex out, so official calls wait.
+fn refresh_pending(value: &Value) -> bool {
+    let exp = claims(text(&value["tokens"]["access_token"]))["exp"].as_i64();
+    let now_seconds = time::OffsetDateTime::now_utc().unix_timestamp();
+    exp.is_some_and(|v| v <= now_seconds + 300)
+        || (exp.is_none()
+            && timestamp(&value["last_refresh"])
+                <= i128::from(now_seconds - 8 * 86400) * 1_000_000_000)
+}
 async fn read_quota(app: &App, id: &str, renew: bool) -> io::Result<Value> {
     let (value, previous, selected, current_id) = {
         let _guard = app.accounts.mutation.lock().await;
@@ -1061,15 +1075,7 @@ async fn read_quota(app: &App, id: &str, renew: bool) -> io::Result<Value> {
         )
     };
     let file = app.bridge.join("accounts").join(id).join("quota.json");
-    let exp = claims(text(&value["tokens"]["access_token"]))["exp"].as_i64();
-    let now_seconds = time::OffsetDateTime::now_utc().unix_timestamp();
-    if !renew
-        && current_id == id
-        && (exp.is_some_and(|v| v <= now_seconds + 300)
-            || (exp.is_none()
-                && timestamp(&value["last_refresh"])
-                    <= i128::from(now_seconds - 8 * 86400) * 1_000_000_000))
-    {
+    if !renew && current_id == id && refresh_pending(&value) {
         let mut result = json!({"status":"deferred","reason":"token_refresh_pending","message":"当前账号的登录即将由 Codex 自己续期，为避免顶掉正在使用的登录暂不查询；Codex 刷新后会自动恢复。"});
         if previous["checkedAt"].is_string() {
             result["checkedAt"] = previous["checkedAt"].clone();
@@ -1108,7 +1114,8 @@ async fn read_quota(app: &App, id: &str, renew: bool) -> io::Result<Value> {
             opened.rpc("account/rateLimits/read", json!({})),
             subscription(app, &subscription_value)
         );
-        let buckets = buckets(&limits?);
+        let limits = limits?;
+        let buckets = buckets(&limits);
         if buckets.is_empty() {
             return Err(crate::official_session::Failure {
                 message: "官方服务未返回额度".into(),
@@ -1116,7 +1123,17 @@ async fn read_quota(app: &App, id: &str, renew: bool) -> io::Result<Value> {
                 code: Value::Null,
             });
         }
-        let mut result = json!({"status":"ok","checkedAt":now(),"buckets":buckets});
+        // Earned usage-limit resets (Codex 0.167+); null when this Codex does not report them.
+        // The list carries each available credit's expiry; it is null when only the count is known.
+        let reset = &limits["rateLimitResetCredits"];
+        let list = reset["credits"].as_array().map(|rows| {
+            rows.iter()
+                .filter(|c| c["status"] == "available")
+                .map(|c| json!({"id":c["id"],"expiresAt":c["expiresAt"],"title":c["title"]}))
+                .collect::<Vec<_>>()
+        });
+        let mut result = json!({"status":"ok","checkedAt":now(),"buckets":buckets,
+            "resetCredits":reset["availableCount"],"resetCreditList":list});
         if let Some(subscription) = subscription {
             result["subscriptionUntil"] = subscription["until"].clone();
             result["subscriptionCheckedAt"] = subscription["checkedAt"].clone();
@@ -1314,6 +1331,100 @@ async fn renew_action(app: Arc<App>, input: &Value) -> io::Result<Value> {
         return Err(io::Error::other("续期失败，稍后会自动重试。"));
     }
     Ok(json!({"items":[item]}))
+}
+
+// The reset's idempotency key, a version-4 UUID like the official app's crypto.randomUUID().
+fn uuid4() -> io::Result<String> {
+    let mut b = crate::platform::random_bytes()?;
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    let hex = b[..16].iter().map(|x| format!("{x:02x}")).collect::<String>();
+    Ok(format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..]))
+}
+/// Spend one earned usage-limit reset of a saved account, as the official app's "use reset" does.
+async fn reset_action(app: Arc<App>, input: &Value) -> io::Result<Value> {
+    let started = std::time::Instant::now();
+    let id = text(&input["id"]).to_owned();
+    let credit = input["creditId"].as_str().map(str::to_owned);
+    let (selected, dir, before) = {
+        let _guard = app.accounts.mutation.lock().await;
+        capture(&app)?;
+        let selected = rows(&app)?
+            .into_iter()
+            .find(|r| r["id"] == id.as_str())
+            .ok_or_else(|| io::Error::other("账号不存在，请重新选择"))?;
+        let dir = app.bridge.join("accounts").join(&id);
+        (selected, dir.clone(), read(&dir.join("quota.json"), json!({}))?)
+    };
+    // What the page showed before the attempt: the count and the chosen credit's expiry.
+    let mut event = json!({"account":selected["email"],"creditId":credit,
+        "creditExpiresAt":before["resetCreditList"].as_array().and_then(|rows| rows
+            .iter().find(|c| c["id"].as_str() == credit.as_deref())).map_or(Value::Null, |c| c["expiresAt"].clone()),
+        "availableBefore":before["resetCredits"]});
+    let finish = |mut event: Value, status: &str| -> io::Result<()> {
+        event["status"] = json!(status);
+        event["durationMs"] = json!(started.elapsed().as_millis());
+        crate::diagnostics::log(&app.bridge, "official.quotaReset", event)
+    };
+    if identity(&current(&app)?).unwrap_or(Value::Null)["id"] == id.as_str()
+        && refresh_pending(&auth(&app, &id)?)
+    {
+        event["reason"] = json!("token_refresh_pending");
+        finish(event, "refused")?;
+        return Err(io::Error::other(
+            "当前账号的登录即将由 Codex 自己续期，为避免顶掉正在使用的登录暂不重置，稍后再试。",
+        ));
+    }
+    let (result, refresh_error) = {
+        let _slot = app.accounts.slots.acquire().await.unwrap();
+        let mut opened = None;
+        let result = async {
+            let (session, _notifications) = Session::open(&app.bridge, &dir)?;
+            opened = Some(session.clone());
+            session.ready().await?;
+            let mut params = json!({"idempotencyKey":uuid4().map_err(|e| crate::official_session::Failure {
+                message: e.to_string(), kind: "service_error", code: Value::Null })?});
+            // The page asks for the credit that expires first; without one the backend picks.
+            if let Some(credit) = &credit {
+                params["creditId"] = json!(credit);
+            }
+            session
+                .rpc("account/rateLimitResetCredit/consume", params)
+                .await
+        }
+        .await;
+        if let Some(session) = &opened {
+            session.close().await;
+        }
+        (result, opened.and_then(|session| session.refresh_failure()))
+    };
+    event["refreshError"] = json!(refresh_error);
+    let outcome = match result {
+        Ok(value) => value["outcome"].clone(),
+        Err(error) => {
+            event["kind"] = json!(error.kind);
+            event["code"] = error.code.clone();
+            event["message"] = json!(error.message);
+            finish(event, "error")?;
+            return Err(io::Error::other(if error.code == -32601 {
+                "当前 Codex 版本不支持重置额度，请更新官方扩展或桌面版。".to_owned()
+            } else {
+                format!("重置失败：{}", error.message)
+            }));
+        }
+    };
+    let message = match outcome.as_str() {
+        Some("reset") | Some("alreadyRedeemed") => "已用掉 1 次重置，额度已恢复。",
+        Some("nothingToReset") => "当前额度不需要重置，没有用掉次数。",
+        Some("noCredit") => "这个账号没有可用的重置次数。",
+        _ => "官方返回了未知结果，请刷新额度确认。",
+    };
+    let item = quota(app.clone(), id, false).await?;
+    event["outcome"] = outcome.clone();
+    event["availableAfter"] = item["resetCredits"].clone();
+    event["quotaAfter"] = item["status"].clone();
+    finish(event, "ok")?;
+    Ok(json!({"outcome":outcome,"message":message,"items":[item]}))
 }
 
 async fn quota(app: Arc<App>, id: String, renew: bool) -> io::Result<Value> {

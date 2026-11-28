@@ -484,6 +484,40 @@ test('刷新额度后同步该账号的套餐、到期和登录刷新时间，�
   );
 });
 
+test('有重置次数时显示次数和最早过期时间，确认后用掉最早过期的那次', async () => {
+  const soon = Math.floor(Date.now() / 1000) + 86400;
+  const account = {
+    id: 'r1', label: 'r1@example.com', email: 'r1@example.com', plan: 'plus', current: false,
+    quota: {
+      ...quota(0),
+      resetCredits: 2,
+      resetCreditList: [
+        { id: 'later', expiresAt: null, title: null },
+        { id: 'first', expiresAt: soon, title: null },
+      ],
+    },
+  };
+  let asked = '';
+  const base = backend();
+  const page = await runPage({
+    confirm: (text) => ((asked = text), true),
+    respond: async (route, body) => {
+      if (route === 'accounts') return { body: { items: [account], switchJob: null } };
+      if (route === 'accountQuotaReset')
+        return { body: { outcome: 'reset', message: '已用掉 1 次重置，额度已恢复。', items: [{ id: body.id, ...quota(100), resetCredits: 1 }] } };
+      return base(route, body);
+    },
+  });
+  const texts = page.created.filter((c) => c.tag === 'small').map((c) => c.node.textContent);
+  assert.ok(texts.some((t) => / · 可重置 2 次（最早 .+ 到期） · /.test(t)), texts.join('\n'));
+  const button = page.created.filter((c) => c.tag === 'button' && c.node.textContent === '用掉 1 次重置').at(-1).node;
+  await button.onclick();
+  await page.settle();
+  assert.match(asked, /到期的那次）？[\s\S]*周限额重置时间/);
+  assert.deepEqual(page.calls('accountQuotaReset').at(-1).body, { id: 'r1', creditId: 'first' });
+  assert.equal(page.byId('account-status')?.textContent ?? page.byId('status').textContent, '已用掉 1 次重置，额度已恢复。');
+});
+
 test('“全部刷新额度”一次读取所有已保存账号', async () => {
   const page = await runPage({ respond: backend() });
   const button = page.created
