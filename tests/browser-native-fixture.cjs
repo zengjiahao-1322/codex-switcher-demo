@@ -98,6 +98,9 @@ async function prepare(root, home, bridge) {
       HTTPS_PROXY: 'http://127.0.0.1:9',
       NO_PROXY: '127.0.0.1,localhost',
       BRIDGE_STARTUP_DIR: path.join(root, 'startup'),
+      // The fixture build has a sequence, so it updates the companion in editors it finds.
+      LOCALAPPDATA: path.join(root, 'local'),
+      ProgramFiles: path.join(root, 'programs'),
     },
     save: () => write(scenario, data),
     rpc: () =>

@@ -167,6 +167,9 @@ async function packageFixture(t, options = {}) {
         'http://127.0.0.1:' + release.address().port;
       context.environment.NO_PROXY = 'localhost,127.0.0.1';
       context.environment.no_proxy = 'localhost,127.0.0.1';
+      // An installed build updates the companion in editors it finds; never let it find the real ones.
+      context.environment.LOCALAPPDATA = path.join(context.root, 'local');
+      context.environment.ProgramFiles = path.join(context.root, 'programs');
       options.setup?.(context, target);
     },
   });
